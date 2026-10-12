@@ -8,31 +8,45 @@
 <link rel="stylesheet" href="estilo.css">
 </head>
 <body>
-<header class="top">
+<header class="top" id="cabecera">
   <h1>SCA<b>NOVA</b></h1>
   <div class="sub"><span id="subtitulo">Fotos de trabajos</span><span class="quien" id="quien"></span></div>
 </header>
 <main>
 
-  <!-- ENTRAR: las mismas cuentas de Field Reports. Manager con correo; crew con su código personal. -->
-  <section class="pantalla" id="pEntrar" hidden>
-    <div class="card">
-      <h2>Entrar</h2>
-      <div class="pills" id="entrarModo">
-        <button type="button" class="pill on" data-modo="codigo">Código personal</button>
-        <button type="button" class="pill" data-modo="correo">Correo y contraseña</button>
+  <!-- ENTRAR: pantalla propia, centrada, como cualquier app profesional. Las mismas cuentas de
+       Field Reports: manager con correo; crew con su codigo personal (opcion secundaria). -->
+  <section class="pantalla entrar" id="pEntrar" hidden>
+    <div class="entrar-caja">
+      <div class="marca">
+        <svg class="logo" viewBox="0 0 64 64" aria-hidden="true">
+          <rect x="4" y="4" width="56" height="56" rx="16" fill="var(--accent)"/>
+          <circle cx="32" cy="32" r="15" fill="none" stroke="#fff" stroke-width="4.5"/>
+          <circle cx="32" cy="32" r="5.5" fill="#fff"/>
+          <path d="M14 20 a22 22 0 0 1 10 -10" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" opacity=".85"/>
+        </svg>
+        <div class="marca-nombre">Scanova</div>
+        <div class="marca-lema">Fotos de trabajos, en orden y a la mano</div>
       </div>
-      <div id="entrarCodigo">
-        <div class="field"><label>Su código personal <span class="hint">el mismo de Field Reports (8 letras)</span></label>
-          <input type="text" id="inCodigo" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="AEMF1234" maxlength="12"></div>
-      </div>
-      <div id="entrarCorreo" hidden>
-        <div class="field"><label>Correo</label><input type="email" id="inCorreo" autocomplete="username" placeholder="nombre@correo.com"></div>
-        <div class="field"><label>Contraseña</label><input type="password" id="inClave" autocomplete="current-password"></div>
-      </div>
-      <button type="button" class="btn btn-accent" id="btnEntrar">Entrar</button>
+
+      <div class="field"><label for="inCorreo">Correo</label><input type="email" id="inCorreo" autocomplete="username" inputmode="email" placeholder="nombre@correo.com"></div>
+      <div class="field"><label for="inClave">Contraseña</label>
+        <div class="clave"><input type="password" id="inClave" autocomplete="current-password" placeholder="••••••••"><button type="button" class="ojo" id="btnOjo" aria-label="Ver contraseña">Ver</button></div></div>
+      <button type="button" class="btn btn-accent btn-grande" id="btnEntrar">Entrar</button>
       <p class="aviso" id="entrarAviso"></p>
-      <p class="parche" style="margin-top:12px;">Scanova usa las mismas cuentas que Field Reports. Si todavía no tiene código personal, pídaselo al manager.</p>
+      <a class="enlace-suave" href="#" id="lnkOlvide">¿Olvidó su contraseña?</a>
+
+      <div class="o"><span>o</span></div>
+
+      <button type="button" class="btn btn-outline btn-grande" id="btnModoCodigo">Entrar con código personal</button>
+      <div id="entrarCodigo" hidden>
+        <div class="field" style="margin-top:12px;"><label for="inCodigo">Código personal <span class="hint">el de Field Reports, 8 letras</span></label>
+          <input type="text" id="inCodigo" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="AEMF1234" maxlength="12"></div>
+        <button type="button" class="btn btn-accent btn-grande" id="btnEntrarCodigo">Entrar con el código</button>
+        <p class="aviso" id="codigoAviso"></p>
+      </div>
+
+      <p class="entrar-pie">Restoration Doctor &middot; AMG &nbsp;&middot;&nbsp; <span id="entrarVersion"></span></p>
     </div>
   </section>
 

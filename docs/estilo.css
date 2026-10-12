@@ -1,10 +1,18 @@
 /* Scanova · estilo. Mismo lenguaje visual que Field Reports: oscuro, pastillas, botones de 44px. */
 :root{
-  --bg:#0b0f14; --card:#151b22; --card2:#1c232c; --line:#262e38; --ink:#f2f4f7; --ink-soft:#9aa3ad;
-  --accent:#0a66ff; --accent-dark:#0850c4; --danger:#ff5a5a; --ok:#34c77b; --warn:#f0b429;
+  --bg:#eef2f7; --bg2:#dfe7f2; --card:#ffffff; --card2:#f4f7fb; --line:#dde3ec; --ink:#0f172a; --ink-soft:#5b6676;
+  --accent:#1d4ed8; --accent-dark:#1e40af; --accent-soft:#e8efff; --danger:#d93025; --ok:#1a8f4f; --warn:#b7791f;
+  --sombra:0 10px 30px rgba(15,23,42,.10), 0 2px 6px rgba(15,23,42,.06);
+}
+:root[data-tema="oscuro"]{
+  --bg:#0b1220; --bg2:#111a2b; --card:#141c2b; --card2:#1b2537; --line:#263146; --ink:#eef2f7; --ink-soft:#9aa6b8;
+  --accent:#3b82f6; --accent-dark:#2563eb; --accent-soft:#1a2a4a; --danger:#ff6b6b; --ok:#3ddc84; --warn:#f0b429;
+  --sombra:0 10px 30px rgba(0,0,0,.45);
 }
 *{ box-sizing:border-box; }
 html,body{ margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,"SF Pro Text","Segoe UI",Roboto,sans-serif; -webkit-text-size-adjust:100%; }
+body.modo-entrar{ padding-bottom:0; background:linear-gradient(160deg, var(--bg) 0%, var(--bg2) 100%); min-height:100vh; }
+body.modo-entrar header.top, body.modo-entrar .pie{ display:none; }
 body{ padding-bottom:84px; }
 header.top{ position:sticky; top:0; z-index:5; background:var(--bg); padding:14px 16px 10px; border-bottom:1px solid var(--line); }
 header.top h1{ margin:0; font-size:22px; letter-spacing:.06em; }
@@ -12,7 +20,7 @@ header.top h1 b{ color:#ff4d4d; }
 header.top .sub{ color:var(--ink-soft); font-size:13px; margin-top:2px; display:flex; justify-content:space-between; gap:10px; }
 main{ max-width:720px; margin:0 auto; padding:14px 16px; }
 .pantalla[hidden]{ display:none !important; }
-.card{ background:var(--card); border-radius:14px; padding:16px; margin-bottom:14px; }
+.card{ background:var(--card); border-radius:14px; padding:16px; margin-bottom:14px; box-shadow:var(--sombra); }
 .card h2{ margin:0 0 10px; font-size:15px; letter-spacing:.04em; text-transform:uppercase; color:var(--ink-soft); }
 .field{ margin-bottom:12px; }
 .field label{ display:block; font-size:14px; font-weight:600; margin-bottom:6px; }
@@ -23,7 +31,7 @@ main{ max-width:720px; margin:0 auto; padding:14px 16px; }
 .btn{ font:inherit; font-size:16px; font-weight:600; min-height:44px; padding:10px 16px; border-radius:12px; border:none; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; gap:8px; width:100%; color:var(--ink); background:var(--card2); }
 .btn-accent{ background:var(--accent); color:#fff; }
 .btn-accent:active{ background:var(--accent-dark); }
-.btn-outline{ background:var(--card2); color:#7fb0ff; }
+.btn-outline{ background:var(--card2); color:var(--accent); border:1px solid var(--line); }
 .btn-danger{ background:var(--card2); color:var(--danger); }
 .btn[disabled]{ opacity:.55; cursor:default; }
 .btn[hidden]{ display:none !important; }
@@ -31,11 +39,11 @@ a.btn{ text-decoration:none; }   /* .btn pone display:inline-flex y le gana al h
 .fila2{ display:flex; gap:10px; }
 .fila2 .btn{ flex:1 1 0; width:auto; }
 .pills{ display:flex; gap:8px; overflow-x:auto; padding:2px 0 8px; -webkit-overflow-scrolling:touch; }
-.pill{ flex:0 0 auto; font:inherit; font-size:14px; font-weight:600; min-height:36px; padding:6px 14px; border-radius:999px; border:none; cursor:pointer; color:#7fb0ff; background:var(--card2); white-space:nowrap; }
+.pill{ flex:0 0 auto; font:inherit; font-size:14px; font-weight:600; min-height:36px; padding:6px 14px; border-radius:999px; border:1px solid var(--line); cursor:pointer; color:var(--accent); background:var(--card); white-space:nowrap; }
 .pill.on{ background:var(--accent); color:#fff; }
 .buscar{ margin-bottom:10px; }
 .lista{ display:flex; flex-direction:column; gap:10px; }
-.trabajo{ background:var(--card); border-radius:14px; padding:14px; cursor:pointer; display:flex; justify-content:space-between; gap:10px; align-items:center; }
+.trabajo{ background:var(--card); border-radius:14px; padding:14px; cursor:pointer; display:flex; justify-content:space-between; gap:10px; align-items:center; box-shadow:var(--sombra); }
 .trabajo .nom{ font-weight:700; font-size:16px; }
 .trabajo .dir{ color:var(--ink-soft); font-size:14px; margin-top:2px; }
 .trabajo .meta{ color:var(--ink-soft); font-size:12px; margin-top:4px; display:flex; gap:8px; flex-wrap:wrap; }
@@ -47,7 +55,7 @@ a.btn{ text-decoration:none; }   /* .btn pone display:inline-flex y le gana al h
 .aviso.ok{ color:var(--ok); }
 .linea{ display:flex; justify-content:space-between; gap:12px; padding:8px 0; border-bottom:1px solid var(--line); font-size:15px; }
 .linea span:first-child{ color:var(--ink-soft); }
-.linea a{ color:#7fb0ff; text-decoration:none; font-weight:600; }
+.linea a{ color:var(--accent); text-decoration:none; font-weight:600; }
 .acciones{ display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
 .acciones .btn{ width:auto; flex:1 1 120px; }
 .pie{ position:fixed; left:0; right:0; bottom:0; z-index:5; background:var(--bg); border-top:1px solid var(--line); padding:10px 16px calc(10px + env(safe-area-inset-bottom)); display:flex; gap:10px; max-width:720px; margin:0 auto; }
@@ -56,3 +64,23 @@ a.btn{ text-decoration:none; }   /* .btn pone display:inline-flex y le gana al h
 .pie[hidden]{ display:none !important; }
 .quien{ font-size:13px; color:var(--ink-soft); }
 .parche{ background:var(--card2); border-radius:12px; padding:12px; color:var(--ink-soft); font-size:14px; line-height:1.45; }
+
+/* ---------- ENTRADA ---------- */
+main:has(> .entrar:not([hidden])){ max-width:none; padding:0; }
+.entrar{ min-height:100vh; display:flex; align-items:center; justify-content:center; padding:28px 16px calc(28px + env(safe-area-inset-bottom)); }
+.entrar-caja{ width:100%; max-width:420px; background:var(--card); border-radius:22px; padding:30px 24px 22px; box-shadow:var(--sombra); }
+.marca{ text-align:center; margin-bottom:22px; }
+.marca .logo{ width:68px; height:68px; display:block; margin:0 auto 10px; }
+.marca-nombre{ font-size:30px; font-weight:800; letter-spacing:-.02em; }
+.marca-lema{ color:var(--ink-soft); font-size:14px; margin-top:4px; }
+.btn-grande{ min-height:50px; font-size:17px; border-radius:14px; }
+.clave{ position:relative; }
+.clave input{ padding-right:64px; }
+.ojo{ position:absolute; right:6px; top:50%; transform:translateY(-50%); font:inherit; font-size:13px; font-weight:600; color:var(--accent); background:var(--accent-soft); border:none; border-radius:8px; padding:6px 10px; cursor:pointer; }
+.enlace-suave{ display:block; text-align:center; color:var(--ink-soft); font-size:14px; text-decoration:none; margin-top:12px; }
+.enlace-suave:hover{ color:var(--accent); }
+.o{ display:flex; align-items:center; gap:12px; color:var(--ink-soft); font-size:13px; margin:18px 0 14px; }
+.o::before, .o::after{ content:""; flex:1; height:1px; background:var(--line); }
+.entrar-pie{ text-align:center; color:var(--ink-soft); font-size:12px; margin:22px 0 0; }
+#entrarCodigo[hidden]{ display:none !important; }
+@media (min-width:720px){ .entrar-caja{ padding:38px 36px 28px; } .marca .logo{ width:76px; height:76px; } }

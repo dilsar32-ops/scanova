@@ -60,6 +60,7 @@ const pila = [];
 export function irA(id, desde){
   if(desde) pila.push(desde);
   $$('.pantalla').forEach(p => { p.hidden = p.id !== id; });
+  document.body.classList.toggle('modo-entrar', id === 'pEntrar');
   $('#pie').hidden = (id === 'pEntrar');
   $('#btnAtras').hidden = !pila.length;
   $('#subtitulo').textContent = { pEntrar:'Fotos de trabajos', pTrabajos:'Trabajos', pForma:'Trabajo', pTrabajo:'Trabajo' }[id] || 'Fotos de trabajos';
@@ -70,21 +71,17 @@ export function atras(){ const a = pila.pop(); if(a) irA(a); else irA('pTrabajos
 // ---------- arranque ----------
 function pintarQuien(){ $('#quien').textContent = PERFIL ? (PERFIL.full_name || '') + (esManager() ? ' · manager' : '') : ''; }
 async function arrancar(){
-  $('#entrarModo').addEventListener('click', (e) => {
-    const b = e.target.closest('[data-modo]'); if(!b) return;
-    $$('#entrarModo .pill').forEach(x => x.classList.toggle('on', x === b));
-    $('#entrarCodigo').hidden = b.dataset.modo !== 'codigo';
-    $('#entrarCorreo').hidden = b.dataset.modo !== 'correo';
-    $('#entrarAviso').textContent = '';
-  });
-  $('#btnEntrar').addEventListener('click', async () => {
-    const aviso = $('#entrarAviso'); aviso.textContent = '';
-    const porCodigo = !$('#entrarCodigo').hidden;
+  $('#entrarVersion').textContent = 'v ' + APP_BUILD;
+  $('#btnOjo').addEventListener('click', () => { const i = $('#inClave'); const ver = i.type === 'password'; i.type = ver ? 'text' : 'password'; $('#btnOjo').textContent = ver ? 'Ocultar' : 'Ver'; });
+  $('#btnModoCodigo').addEventListener('click', () => { const c = $('#entrarCodigo'); c.hidden = !c.hidden; if(!c.hidden) $('#inCodigo').focus(); });
+  $('#lnkOlvide').addEventListener('click', (e) => { e.preventDefault(); $('#entrarAviso').textContent = 'Pídale al manager que le cambie la contraseña desde Field Reports.'; });
+  async function entrar(porCodigo){
+    const aviso = porCodigo ? $('#codigoAviso') : $('#entrarAviso'); aviso.textContent = ''; $('#entrarAviso').textContent = ''; $('#codigoAviso').textContent = '';
     const codigo = ($('#inCodigo').value || '').trim().toUpperCase();
     const correo = ($('#inCorreo').value || '').trim(), clave = $('#inClave').value || '';
     if(porCodigo && codigo.length < 6) return aviso.textContent = 'Escriba su código personal (8 letras).';
-    if(!porCodigo && (!correo || !clave)) return aviso.textContent = 'Escriba correo y contraseña.';
-    const b = $('#btnEntrar'); b.disabled = true; b.textContent = 'Entrando…';
+    if(!porCodigo && (!correo || !clave)) return aviso.textContent = 'Escriba su correo y su contraseña.';
+    const b = porCodigo ? $('#btnEntrarCodigo') : $('#btnEntrar'); const txt = b.textContent; b.disabled = true; b.textContent = 'Entrando…';
     try{
       await entrarCon(porCodigo ? codeEmail(codigo) : correo, porCodigo ? codigo : clave);
       pintarQuien();
@@ -95,10 +92,12 @@ async function arrancar(){
       aviso.textContent = /Invalid login/i.test(m) ? (porCodigo ? 'Ese código no es de nadie. Revíselo letra por letra.' : 'Correo o contraseña incorrectos.')
         : /rate limit|too many/i.test(m) ? 'Demasiados intentos. Espere un minuto.' : (m || 'No se pudo entrar. Revise su internet.');
     }
-    b.disabled = false; b.textContent = 'Entrar';
-  });
-  $('#inCodigo').addEventListener('keydown', (e) => { if(e.key === 'Enter') $('#btnEntrar').click(); });
-  $('#inClave').addEventListener('keydown', (e) => { if(e.key === 'Enter') $('#btnEntrar').click(); });
+    b.disabled = false; b.textContent = txt;
+  }
+  $('#btnEntrar').addEventListener('click', () => entrar(false));
+  $('#btnEntrarCodigo').addEventListener('click', () => entrar(true));
+  $('#inCodigo').addEventListener('keydown', (e) => { if(e.key === 'Enter') entrar(true); });
+  $('#inClave').addEventListener('keydown', (e) => { if(e.key === 'Enter') entrar(false); });
   $('#btnAtras').addEventListener('click', atras);
   $('#btnSalir').addEventListener('click', () => { if(confirm('¿Salir de Scanova en este aparato?')) salir(); });
   trabajos.conectar();
