@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 428" width="760" height="428">
+  <defs>
+    <linearGradient id="pared" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f8fafc"/><stop offset="1" stop-color="#e9eef5"/></linearGradient>
+    <linearGradient id="mesa" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f3f5f9"/><stop offset="1" stop-color="#dfe5ee"/></linearGradient>
+    <linearGradient id="vidrio" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f3f8ff"/><stop offset="1" stop-color="#cfe2fb"/></linearGradient>
+    <linearGradient id="bisel" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3a414c"/><stop offset=".5" stop-color="#1b1f27"/><stop offset="1" stop-color="#0a0c10"/></linearGradient>
+    <linearGradient id="pantalla" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#f1f4f9"/></linearGradient>
+    <linearGradient id="lapiz" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#d9dfe8"/></linearGradient>
+    <filter id="borroso" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="4"/></filter>
+    <filter id="sombra" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="10"/></filter>
+    <filter id="resplandor" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="18"/></filter>
+    <clipPath id="marco"><rect width="760" height="428" rx="14"/></clipPath>
+  </defs>
+  <g clip-path="url(#marco)">
+    <rect width="760" height="428" fill="url(#pared)"/>
+    <g filter="url(#borroso)">
+      <rect x="60" y="30" width="200" height="140" rx="6" fill="#fff" filter="url(#resplandor)" opacity=".9"/>
+      <rect x="68" y="38" width="184" height="124" rx="4" fill="url(#vidrio)"/>
+      <rect x="158" y="38" width="4" height="124" fill="#fff"/><rect x="68" y="98" width="184" height="4" fill="#fff"/>
+      <rect x="60" y="30" width="200" height="140" rx="6" fill="none" stroke="#fff" stroke-width="10"/>
+      <rect x="560" y="60" width="150" height="110" rx="6" fill="#fff" opacity=".8"/>
+      <rect x="568" y="68" width="134" height="94" rx="4" fill="url(#vidrio)"/>
+    </g>
+    <rect x="0" y="222" width="760" height="206" fill="url(#mesa)"/>
+    <rect x="0" y="220" width="760" height="4" fill="#e3e8f0"/>
+    <!-- sombra de la tableta -->
+    <path d="M150 380 L560 406 L650 150 L240 124 Z" fill="#8f9bad" opacity=".45" filter="url(#sombra)"/>
+    <!-- tableta en perspectiva -->
+    <g transform="matrix(1 0.06 -0.35 1 0 0)">
+      <rect x="260" y="96" width="420" height="264" rx="20" fill="url(#bisel)"/>
+      <rect x="260" y="96" width="420" height="264" rx="20" fill="none" stroke="#4a515c" stroke-width="2" opacity=".6"/>
+      <rect x="278" y="112" width="384" height="232" rx="8" fill="url(#pantalla)"/>
+      <circle cx="269" cy="228" r="3.5" fill="#3a414c"/>
+      <!-- barra de la app -->
+      <rect x="278" y="112" width="384" height="20" rx="8" fill="#eef2f8"/>
+      <rect x="290" y="118" width="34" height="8" rx="4" fill="#0b64de"/>
+      <rect x="334" y="118" width="54" height="8" rx="4" fill="#c9d2df"/><rect x="398" y="118" width="38" height="8" rx="4" fill="#c9d2df"/>
+      <rect x="612" y="117" width="40" height="10" rx="5" fill="#0b64de"/>
+      <!-- plano -->
+      <g fill="none" stroke="#1a2130" stroke-width="6" stroke-linejoin="round">
+        <rect x="300" y="150" width="340" height="170"/>
+        <path d="M300 235 H400 M400 150 V196 M400 214 V320 M470 150 V176 M470 194 V252 M470 270 V320 M470 240 H520 M538 240 H640 M555 240 V320"/>
+      </g>
+      <!-- puertas (arcos) -->
+      <g fill="none" stroke="#1a2130" stroke-width="2.5">
+        <path d="M400 196 A18 18 0 0 1 418 214"/><path d="M470 176 A18 18 0 0 0 452 194"/><path d="M470 252 A18 18 0 0 1 488 270"/><path d="M520 240 A18 18 0 0 0 538 222"/>
+      </g>
+      <!-- muebles -->
+      <g fill="#dde4ee" stroke="#9aa6b8" stroke-width="1.8">
+        <rect x="306" y="156" width="88" height="16" rx="2"/><rect x="308" y="158" width="14" height="12" rx="1"/><rect x="340" y="158" width="18" height="12" rx="1"/>
+        <rect x="306" y="176" width="16" height="30" rx="2"/>
+        <rect x="306" y="241" width="40" height="18" rx="4"/><circle cx="384" cy="300" r="8"/><rect x="360" y="246" width="30" height="20" rx="2"/>
+        <rect x="486" y="156" width="52" height="20" rx="3"/><circle cx="600" cy="186" r="12"/><rect x="580" y="156" width="52" height="16" rx="2"/>
+        <rect x="480" y="262" width="44" height="52" rx="3"/><rect x="484" y="266" width="36" height="10" rx="2"/>
+        <rect x="566" y="262" width="52" height="52" rx="3"/><rect x="570" y="266" width="44" height="10" rx="2"/>
+      </g>
+      <!-- nombres -->
+      <g font-family="Plus Jakarta Sans, Arial, sans-serif" font-size="11" font-weight="700" fill="#1a2130">
+        <text x="306" y="226">KITCHEN</text><text x="306" y="312">BATH</text><text x="418" y="204" font-size="9">HALL</text><text x="486" y="226">LIVING ROOM</text><text x="480" y="252" font-size="9">BED 1</text><text x="566" y="252" font-size="9">BED 2</text>
+      </g>
+      <!-- cotas -->
+      <g stroke="#0b64de" stroke-width="1.8" fill="#0b64de" font-family="Arial, sans-serif" font-size="10">
+        <path d="M300 332 H640 M300 328 V336 M640 328 V336"/><text x="470" y="342" text-anchor="middle" stroke="none">32'-6"</text>
+        <path d="M650 150 V320 M646 150 H654 M646 320 H654"/><text x="664" y="238" stroke="none" text-anchor="middle" transform="rotate(90 664 238)">18'-0"</text>
+      </g>
+    </g>
+    <!-- lapiz sobre la mesa -->
+    <g transform="rotate(-4 660 398)">
+      <rect x="570" y="391" width="180" height="13" rx="6.5" fill="url(#lapiz)" stroke="#c9d1dc" stroke-width="1"/>
+      <path d="M750 391 L770 397.5 L750 404 Z" fill="#d9dfe8"/><rect x="570" y="391" width="28" height="13" rx="6.5" fill="#e3e8f0"/>
+    </g>
+  </g>
+</svg>

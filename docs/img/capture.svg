@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 428" width="760" height="428">
+  <defs>
+    <linearGradient id="pared" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f8fafc"/><stop offset="1" stop-color="#e9eef5"/></linearGradient>
+    <linearGradient id="piso" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e3e8f0"/><stop offset="1" stop-color="#d7dde7"/></linearGradient>
+    <linearGradient id="vidrio" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f3f8ff"/><stop offset="1" stop-color="#cfe2fb"/></linearGradient>
+    <linearGradient id="mesa" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#eef2f7"/></linearGradient>
+    <linearGradient id="cuerpo" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a414c"/><stop offset=".45" stop-color="#1f242c"/><stop offset="1" stop-color="#0c0e12"/></linearGradient>
+    <linearGradient id="agarre" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#14171c"/><stop offset="1" stop-color="#262b33"/></linearGradient>
+    <radialGradient id="barril" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#2b3039"/><stop offset=".7" stop-color="#171a20"/><stop offset="1" stop-color="#05060a"/></radialGradient>
+    <radialGradient id="anillo" cx=".35" cy=".3" r=".8"><stop offset="0" stop-color="#4a515c"/><stop offset=".6" stop-color="#1b1f26"/><stop offset="1" stop-color="#0a0c10"/></radialGradient>
+    <radialGradient id="lente" cx=".4" cy=".35" r=".7"><stop offset="0" stop-color="#5b7fb8"/><stop offset=".35" stop-color="#1c2f57"/><stop offset=".75" stop-color="#0a1226"/><stop offset="1" stop-color="#020409"/></radialGradient>
+    <radialGradient id="brillo" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#ffffff" stop-opacity=".9"/><stop offset="1" stop-color="#ffffff" stop-opacity="0"/></radialGradient>
+    <linearGradient id="azul" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4a8df8"/><stop offset="1" stop-color="#0b5ed7"/></linearGradient>
+    <filter id="borroso" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="4"/></filter>
+    <filter id="borroso2" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="2.2"/></filter>
+    <filter id="sombra" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="9"/></filter>
+    <filter id="resplandor" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="18"/></filter>
+    <clipPath id="marco"><rect width="760" height="428" rx="14"/></clipPath>
+  </defs>
+  <g clip-path="url(#marco)">
+    <rect width="760" height="428" fill="url(#pared)"/>
+    <!-- ventana al fondo, fuera de foco -->
+    <g filter="url(#borroso)">
+      <rect x="470" y="70" width="180" height="150" rx="6" fill="#fff" filter="url(#resplandor)" opacity=".9"/>
+      <rect x="478" y="78" width="164" height="134" rx="4" fill="url(#vidrio)"/>
+      <rect x="558" y="78" width="4" height="134" fill="#fff"/><rect x="478" y="143" width="164" height="4" fill="#fff"/>
+      <rect x="470" y="70" width="180" height="150" rx="6" fill="none" stroke="#fff" stroke-width="10"/>
+      <rect x="110" y="88" width="46" height="38" rx="3" fill="#d6dfeb"/><rect x="118" y="95" width="30" height="24" fill="#b9c9de"/>
+    </g>
+    <!-- zocalo y piso -->
+    <rect x="0" y="262" width="760" height="14" fill="#f3f5f9"/>
+    <rect x="0" y="276" width="760" height="152" fill="url(#piso)"/>
+    <g opacity=".35" stroke="#c5cdd9" stroke-width="2" filter="url(#borroso2)">
+      <path d="M0 330 H760 M0 380 H760 M120 276 L60 428 M300 276 L270 428 M480 276 L500 428 M660 276 L720 428"/>
+    </g>
+    <!-- secador azul al fondo, fuera de foco -->
+    <g filter="url(#borroso)">
+      <ellipse cx="640" cy="372" rx="70" ry="10" fill="#9aa7b9" opacity=".45"/>
+      <rect x="580" y="250" width="118" height="110" rx="12" fill="url(#azul)"/>
+      <circle cx="616" cy="300" r="30" fill="#141821"/><circle cx="616" cy="300" r="10" fill="#2b3240"/>
+      <rect x="600" y="238" width="60" height="14" rx="7" fill="#0b5ed7"/>
+      <circle cx="600" cy="364" r="9" fill="#141821"/><circle cx="676" cy="364" r="9" fill="#141821"/>
+    </g>
+    <!-- mesa -->
+    <path d="M0 352 L760 352 L760 428 L0 428 Z" fill="url(#mesa)"/>
+    <rect x="0" y="350" width="760" height="4" fill="#dfe5ee"/>
+    <ellipse cx="330" cy="362" rx="230" ry="18" fill="#9aa5b6" opacity=".55" filter="url(#sombra)"/>
+    <!-- camara: cuerpo -->
+    <g>
+      <rect x="236" y="148" width="104" height="48" rx="12" fill="url(#cuerpo)"/>
+      <rect x="262" y="140" width="52" height="12" rx="4" fill="#2a2f38"/>
+      <rect x="130" y="176" width="268" height="186" rx="22" fill="url(#cuerpo)"/>
+      <rect x="130" y="188" width="78" height="174" rx="20" fill="url(#agarre)"/>
+      <g stroke="#0a0c10" stroke-width="2" opacity=".8"><path d="M150 230 Q165 236 180 230 M150 250 Q165 256 180 250 M150 270 Q165 276 180 270 M150 290 Q165 296 180 290 M150 310 Q165 316 180 310"/></g>
+      <rect x="160" y="166" width="60" height="22" rx="6" fill="#1b1f26"/><circle cx="190" cy="162" r="22" fill="#2a2f38"/><circle cx="190" cy="162" r="16" fill="#161a20"/>
+      <g stroke="#4a515c" stroke-width="2"><path d="M190 142 V148 M206 146 L202 151 M174 146 L178 151 M210 162 H204 M170 162 H176"/></g>
+      <circle cx="232" cy="172" r="8" fill="#4b525d"/><circle cx="232" cy="172" r="4" fill="#9aa1ab"/>
+      <rect x="342" y="166" width="46" height="26" rx="6" fill="#2a2f38"/>
+      <rect x="150" y="206" width="110" height="16" rx="8" fill="#0d1014" opacity=".6"/>
+      <rect x="236" y="206" width="44" height="12" rx="3" fill="#0d1014" opacity=".7"/><rect x="286" y="206" width="26" height="12" rx="3" fill="#0d1014" opacity=".5"/>
+    </g>
+    <!-- lente -->
+    <g>
+      <circle cx="420" cy="280" r="104" fill="url(#barril)"/>
+      <circle cx="420" cy="280" r="98" fill="none" stroke="#2f3540" stroke-width="2"/>
+      <circle cx="420" cy="280" r="90" fill="url(#anillo)"/>
+      <circle cx="420" cy="280" r="84" fill="none" stroke="#0b64de" stroke-width="3"/>
+      <circle cx="420" cy="280" r="78" fill="url(#barril)"/>
+      <g stroke="#3a404a" stroke-width="1.5" opacity=".9"><circle cx="420" cy="280" r="72" fill="none"/><circle cx="420" cy="280" r="66" fill="none"/></g>
+      <circle cx="420" cy="280" r="60" fill="#0d1016"/>
+      <circle cx="420" cy="280" r="52" fill="url(#lente)"/>
+      <ellipse cx="402" cy="258" rx="16" ry="9" fill="url(#brillo)" transform="rotate(-25 402 258)"/>
+      <circle cx="438" cy="296" r="8" fill="#7fa6e6" opacity=".35"/>
+      <circle cx="420" cy="280" r="16" fill="#060810"/><circle cx="420" cy="280" r="7" fill="#1d2a4a"/>
+      <g fill="#aab2bd" font-family="Arial, sans-serif" font-size="7" opacity=".8"><text x="366" y="222">24</text><text x="470" y="222">70</text><text x="384" y="346">mm</text></g>
+    </g>
+  </g>
+</svg>
