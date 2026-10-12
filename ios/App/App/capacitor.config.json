@@ -4,7 +4,7 @@
   "webDir": "public",
   "bundledWebRuntime": false,
   "server": {
-    "url": "https://scanova360.com/app/",
+    "url": "https://scanova360.com/",
     "cleartext": false
   },
   "ios": {

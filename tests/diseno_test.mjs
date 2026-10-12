@@ -1,12 +1,12 @@
 // Scanova · diseño "como CompanyCam": lo puro de las filas, la ficha y las personas, y que la página tenga el armazón.
 import fs from 'node:fs';
-import * as T from '../docs/app/trabajos.js';
-import { personaHtml, solicitudHtml } from '../docs/app/personas.js';
+import * as T from '../docs/trabajos.js';
+import { personaHtml, solicitudHtml } from '../docs/personas.js';
 let pass = 0, fail = 0;
 const ok = (l, c) => { if(c){ pass++; console.log('  ok  ' + l); } else { fail++; console.log('  FAIL ' + l); } };
-const idx = fs.readFileSync(new URL('../docs/app/index.html', import.meta.url), 'utf8');
-const css = fs.readFileSync(new URL('../docs/app/estilo.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');   // sin comentarios
-const app = fs.readFileSync(new URL('../docs/app/app.js', import.meta.url), 'utf8');
+const idx = fs.readFileSync(new URL('../docs/index.html', import.meta.url), 'utf8');
+const css = fs.readFileSync(new URL('../docs/estilo.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');   // sin comentarios
+const app = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
 const AHORA = Date.parse('2026-10-12T12:00:00Z');
 const hace = (seg) => new Date(AHORA - seg * 1000).toISOString();
 

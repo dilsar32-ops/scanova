@@ -1,152 +1,346 @@
 <!doctype html>
-<html lang="en">
+<html lang="es">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Scanova360</title>
-<meta name="description" content="Scanova360: the smarter way to capture, organize, and manage restoration projects. Private workspace for the Restoration Doctor team.">
-<meta name="theme-color" content="#f3f6fa">
-<meta name="robots" content="noindex">
+<meta name="theme-color" content="#192d43">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Scanova360">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="estilo.css">
+<meta name="description" content="Scanova360: the smarter way to capture, organize, and manage restoration projects. Private workspace for the Restoration Doctor team.">
 <style>
+/* ===== BIENVENIDA (la imagen aprobada hecha pagina; se ve solo sin sesion) ===== */
 /* Scanova · pantalla de bienvenida. Es la imagen aprobada (1536x1024) hecha pagina: el FONDO es el fondo real de esa
    imagen (img/fondo.jpg, con el contenido quitado) y cada pieza va en las coordenadas medidas en la imagen. El lienzo se
    escala para caber entero en la pantalla, sin desplazarse. En vertical (telefono) las mismas piezas se reacomodan. */
-:root{ --ink:#0e121a; --ink2:#5b6b85; --azul:#0b64de; --pill:#e4eaf3; --s:1; }
-*{ box-sizing:border-box; }
-html, body{ margin:0; height:100%; overflow:hidden; overscroll-behavior:none; }
-body{ color:var(--ink); font-family:"Plus Jakarta Sans",system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif; -webkit-text-size-adjust:100%; touch-action:manipulation; position:fixed; inset:0;
+.inicio{ --ink:#0e121a; --ink2:#5b6b85; --azul:#0b64de; --pill:#e4eaf3; --s:1; }
+.inicio{ position:absolute; inset:0; z-index:60; overflow:hidden; color:var(--ink); font-family:\"Plus Jakarta Sans\",system-ui,-apple-system,\"Segoe UI\",Roboto,\"Helvetica Neue\",Arial,sans-serif; touch-action:manipulation;
   background:#eef3f9 radial-gradient(60% 50% at 50% 40%, #f8fafd 0%, #eef3f9 70%); }
-a{ color:inherit; text-decoration:none; }
+.inicio[hidden]{ display:none !important; }
+body.en-inicio{ overflow:hidden; }
+.inicio a{ color:inherit; text-decoration:none; }
 /* ---------- el lienzo ---------- */
-.lienzo{ position:absolute; left:0; top:0; width:1536px; height:1024px; transform:scale(var(--s)); transform-origin:0 0; }
-.lienzo::before{ content:""; position:absolute; inset:-256px; background:url(img/fondo.jpg) center / 2048px 1536px no-repeat; z-index:0; }
-.lienzo > *{ position:absolute; z-index:1; }
-.top, .cards{ left:0; top:0; width:100%; height:0; }
-.logo, .nav, .card{ position:absolute; }
+.in-lienzo{ position:absolute; left:0; top:0; width:1536px; height:1024px; transform:scale(var(--s)); transform-origin:0 0; }
+.in-lienzo::before{ content:""; position:absolute; inset:-256px; background:url(img/fondo.jpg) center / 2048px 1536px no-repeat; z-index:0; }
+.in-lienzo > *{ position:absolute; z-index:1; }
+.in-top, .in-cards{ left:0; top:0; width:100%; height:0; }
+.in-logo, .in-nav, .in-card{ position:absolute; }
 /* ---------- cabecera (posiciones de la imagen) ---------- */
-.logo{ left:136px; top:28px; font-size:44px; font-weight:800; letter-spacing:-.035em; line-height:1; color:#0a1130; }
-.logo span{ color:var(--azul); }
-.nav{ right:113px; top:36px; height:42px; display:flex; align-items:center; gap:38px; }
-.nav a{ font-size:15px; font-weight:500; color:#1f2a3a; }
-.nav a:hover{ color:var(--azul); }
-.sep{ width:1px; height:28px; background:#2a3446; opacity:.7; margin:0 -4px; }
-.signin{ height:42px; display:inline-flex; align-items:center; background:var(--pill); border-radius:999px; padding:0 34px; font-size:16px !important; font-weight:600 !important; color:var(--ink) !important; }
-.signin:hover{ background:#d9e1ee; color:var(--ink) !important; }
+.in-logo{ left:136px; top:28px; font-size:44px; font-weight:800; letter-spacing:-.035em; line-height:1; color:#0a1130; }
+.in-logo span{ color:var(--azul); }
+.in-nav{ right:113px; top:36px; height:42px; display:flex; align-items:center; gap:38px; }
+.in-nav a{ font-size:15px; font-weight:500; color:#1f2a3a; }
+.in-nav a:hover{ color:var(--azul); }
+.in-sep{ width:1px; height:28px; background:#2a3446; opacity:.7; margin:0 -4px; }
+.in-signin{ height:42px; display:inline-flex; align-items:center; background:var(--pill); border-radius:999px; padding:0 34px; font-size:16px !important; font-weight:600 !important; color:var(--ink) !important; }
+.in-signin:hover{ background:#d9e1ee; color:var(--ink) !important; }
 /* ---------- portada ---------- */
-.hero{ left:0; right:0; top:182px; text-align:center; }
-.hero h1{ margin:0 auto; font-size:70px; line-height:64px; font-weight:800; letter-spacing:-.04em; }
-.hero h1 span{ color:var(--azul); }
-.hero p{ margin:24px auto 0; max-width:540px; font-size:22px; line-height:28px; color:var(--ink2); font-weight:500; }
-.cta{ display:inline-flex; align-items:center; justify-content:center; gap:16px; margin-top:18px; width:366px; height:64px; border-radius:999px; color:#fff; font-size:24px; font-weight:600; letter-spacing:-.01em;
+.in-hero{ left:0; right:0; top:182px; text-align:center; }
+.in-hero h1{ margin:0 auto; font-size:70px; line-height:64px; font-weight:800; letter-spacing:-.04em; }
+.in-hero h1 span{ color:var(--azul); }
+.in-hero p{ margin:24px auto 0; max-width:540px; font-size:22px; line-height:28px; color:var(--ink2); font-weight:500; }
+.in-cta{ display:inline-flex; align-items:center; justify-content:center; gap:16px; margin-top:18px; width:366px; height:64px; border-radius:999px; color:#fff; font-size:24px; font-weight:600; letter-spacing:-.01em;
   background:linear-gradient(90deg, #2b7cf7 0%, #0b5ed7 100%); box-shadow:0 14px 34px rgba(11,100,222,.35), inset 0 1px 0 rgba(255,255,255,.28); }
-.cta svg{ width:26px; height:26px; fill:none; stroke:#fff; stroke-width:2.2; stroke-linecap:round; stroke-linejoin:round; }
+.in-cta svg{ width:26px; height:26px; fill:none; stroke:#fff; stroke-width:2.2; stroke-linecap:round; stroke-linejoin:round; }
 /* ---------- tarjetas: cada una en su sitio ---------- */
-.card{ top:517px; width:380px; }
-.card.c1{ left:167px; } .card.c2{ left:589px; width:361px; } .card.c3{ left:992px; }
-.foto{ position:relative; }
-.foto img{ display:block; width:100%; height:212px; object-fit:cover; border-radius:10px; box-shadow:0 10px 30px rgba(14,18,26,.10); background:#e6ecf4; }
-.icono{ position:absolute; left:15px; bottom:-16px; width:66px; height:66px; border-radius:50%; background:#fff; box-shadow:0 8px 22px rgba(14,18,26,.16); display:grid; place-items:center; }
-.icono svg{ width:28px; height:28px; fill:none; stroke:var(--azul); stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round; }
-.icono.oscuro svg{ stroke:#1a2232; }
-.card h2{ margin:29px 0 5px; padding-left:14px; font-size:24px; line-height:30px; font-weight:700; letter-spacing:-.02em; }
-.card p{ margin:0; padding-left:14px; font-size:20px; line-height:27px; color:var(--ink2); font-weight:500; }
+.in-card{ top:517px; width:380px; }
+.in-card.in-c1{ left:167px; } .in-card.in-c2{ left:589px; width:361px; } .in-card.in-c3{ left:992px; }
+.in-foto{ position:relative; }
+.in-foto img{ display:block; width:100%; height:212px; object-fit:cover; border-radius:10px; box-shadow:0 10px 30px rgba(14,18,26,.10); background:#e6ecf4; }
+.in-icono{ position:absolute; left:15px; bottom:-16px; width:66px; height:66px; border-radius:50%; background:#fff; box-shadow:0 8px 22px rgba(14,18,26,.16); display:grid; place-items:center; }
+.in-icono svg{ width:28px; height:28px; fill:none; stroke:var(--azul); stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round; }
+.in-icono.oscuro svg{ stroke:#1a2232; }
+.in-card h2{ margin:29px 0 5px; padding-left:14px; font-size:24px; line-height:30px; font-weight:700; letter-spacing:-.02em; }
+.in-card p{ margin:0; padding-left:14px; font-size:20px; line-height:27px; color:var(--ink2); font-weight:500; }
 /* ---------- pie ---------- */
-.tagline{ left:0; right:0; top:912px; margin:0; display:flex; align-items:center; justify-content:center; gap:36px; font-size:13px; font-weight:600; letter-spacing:.34em; text-transform:uppercase; color:#6b7a90; }
-.tagline i{ display:block; width:52px; height:1px; background:#9aa6b8; }
-.tagline span{ white-space:nowrap; }
+.in-tagline{ left:0; right:0; top:912px; margin:0; display:flex; align-items:center; justify-content:center; gap:36px; font-size:13px; font-weight:600; letter-spacing:.34em; text-transform:uppercase; color:#6b7a90; }
+.in-tagline i{ display:block; width:52px; height:1px; background:#9aa6b8; }
+.in-tagline span{ white-space:nowrap; }
 /* ---------- vertical (telefono / tableta en vertical): lienzo de 390x844, mismas piezas reacomodadas ---------- */
 @media (orientation:portrait){
-  .lienzo{ width:390px; height:844px; display:flex; flex-direction:column; align-items:center; }
-  .lienzo::before{ background:url(img/fondo.jpg) center / cover no-repeat; }
-  .lienzo > *{ position:static; }
-  .logo, .nav, .card{ position:static; }
-  .top, .cards{ height:auto; }
-  .top{ width:100%; display:flex; align-items:center; justify-content:space-between; padding:24px 24px 0; }
-  .logo{ font-size:30px; }
-  .nav{ height:auto; gap:12px; } .nav a:not(.signin), .sep{ display:none; }
-  .signin{ height:38px; padding:0 22px; font-size:14px !important; }
-  .hero{ margin-top:46px; padding:0 20px; }
-  .hero h1{ font-size:33px; line-height:36px; }
-  .hero p{ margin-top:14px; max-width:300px; font-size:15px; line-height:21px; }
-  .cta{ margin-top:22px; width:auto; min-width:240px; height:52px; padding:0 30px; font-size:17px; gap:10px; }
-  .cta svg{ width:20px; height:20px; }
-  .cards{ width:342px; margin-top:34px; display:flex; flex-direction:column; gap:22px; }
-  .card, .card.c1, .card.c2, .card.c3{ width:100%; display:flex; align-items:center; gap:16px; }
-  .foto{ flex:0 0 auto; }
-  .foto img{ width:150px; height:84px; border-radius:8px; box-shadow:0 6px 18px rgba(14,18,26,.12); }
-  .icono{ left:8px; bottom:-12px; width:38px; height:38px; box-shadow:0 5px 14px rgba(14,18,26,.18); }
-  .icono svg{ width:18px; height:18px; }
-  .card h2{ margin:0 0 3px; padding-left:0; font-size:18px; line-height:22px; }
-  .card p{ padding-left:0; font-size:13px; line-height:18px; }
-  .tagline{ margin-top:30px; gap:14px; font-size:10px; letter-spacing:.24em; }
-  .tagline i{ width:28px; }
+  .in-lienzo{ width:390px; height:844px; display:flex; flex-direction:column; align-items:center; }
+  .in-lienzo::before{ background:url(img/fondo.jpg) center / cover no-repeat; }
+  .in-lienzo > *{ position:static; }
+  .in-logo, .in-nav, .in-card{ position:static; }
+  .in-top, .in-cards{ height:auto; }
+  .in-top{ width:100%; display:flex; align-items:center; justify-content:space-between; padding:24px 24px 0; }
+  .in-logo{ font-size:30px; }
+  .in-nav{ height:auto; gap:12px; } .in-nav a:not(.in-signin), .in-sep{ display:none; }
+  .in-signin{ height:38px; padding:0 22px; font-size:14px !important; }
+  .in-hero{ margin-top:46px; padding:0 20px; }
+  .in-hero h1{ font-size:33px; line-height:36px; }
+  .in-hero p{ margin-top:14px; max-width:300px; font-size:15px; line-height:21px; }
+  .in-cta{ margin-top:22px; width:auto; min-width:240px; height:52px; padding:0 30px; font-size:17px; gap:10px; }
+  .in-cta svg{ width:20px; height:20px; }
+  .in-cards{ width:342px; margin-top:34px; display:flex; flex-direction:column; gap:22px; }
+  .in-card, .in-card.in-c1, .in-card.in-c2, .in-card.in-c3{ width:100%; display:flex; align-items:center; gap:16px; }
+  .in-foto{ flex:0 0 auto; }
+  .in-foto img{ width:150px; height:84px; border-radius:8px; box-shadow:0 6px 18px rgba(14,18,26,.12); }
+  .in-icono{ left:8px; bottom:-12px; width:38px; height:38px; box-shadow:0 5px 14px rgba(14,18,26,.18); }
+  .in-icono svg{ width:18px; height:18px; }
+  .in-card h2{ margin:0 0 3px; padding-left:0; font-size:18px; line-height:22px; }
+  .in-card p{ padding-left:0; font-size:13px; line-height:18px; }
+  .in-tagline{ margin-top:30px; gap:14px; font-size:10px; letter-spacing:.24em; }
+  .in-tagline i{ width:28px; }
 }
 </style>
 </head>
 <body>
-<div class="lienzo" id="lienzo">
-  <header class="top">
-    <a class="logo" href="./" aria-label="Scanova360">Scanova<span>360</span></a>
-    <nav class="nav" aria-label="Main">
+<div class="inicio" id="inicio" hidden>
+<div class="in-lienzo" id="inLienzo">
+  <header class="in-top">
+    <a class="in-logo" href="#" data-inicio="arriba" aria-label="Scanova360">Scanova<span>360</span></a>
+    <nav class="in-nav" aria-label="Main">
       <a href="#features">Features</a>
       <a href="#features">Solutions</a>
       <a href="#features">Resources</a>
-      <span class="sep" aria-hidden="true"></span>
-      <a class="signin" href="app/">Sign In</a>
+      <span class="in-sep" aria-hidden="true"></span>
+      <a class="in-signin" href="#" data-inicio="entrar">Sign In</a>
     </nav>
   </header>
 
-  <section class="hero">
+  <section class="in-hero">
     <h1>Document Today.<br>Restore <span>Tomorrow.</span></h1>
     <p>The smarter way to capture, organize, and manage restoration projects &mdash; all in one place.</p>
-    <a class="cta" href="app/">Access Workspace <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15"/><path d="M13 6l6 6-6 6"/></svg></a>
+    <a class="in-cta" href="#" data-inicio="entrar">Access Workspace <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15"/><path d="M13 6l6 6-6 6"/></svg></a>
   </section>
 
-  <div class="cards" id="features">
-    <article class="card c1">
-      <div class="foto"><img src="img/capture.jpg" alt="Camera on a table in a bright room being documented" width="748" height="418">
-        <span class="icono oscuro"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3.2l1.6-2.4h6.4L16.8 8H20v11H4z"/><circle cx="12" cy="13.2" r="3.4"/></svg></span></div>
-      <div class="texto"><h2>Capture</h2><p>Document the damage with photos, videos and detailed notes.</p></div>
+  <div class="in-cards" id="features">
+    <article class="in-card in-c1">
+      <div class="in-foto"><img src="img/capture.jpg" alt="Camera on a table in a bright room being documented" width="748" height="418">
+        <span class="in-icono oscuro"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3.2l1.6-2.4h6.4L16.8 8H20v11H4z"/><circle cx="12" cy="13.2" r="3.4"/></svg></span></div>
+      <div class="in-texto"><h2>Capture</h2><p>Document the damage with photos, videos and detailed notes.</p></div>
     </article>
-    <article class="card c2">
-      <div class="foto"><img src="img/plan.jpg" alt="Tablet showing a floor plan" width="706" height="418">
-        <span class="icono"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12L4 7.5M12 12v9"/></svg></span></div>
-      <div class="texto"><h2>Plan</h2><p>Create accurate floor plans, assign tasks and track progress.</p></div>
+    <article class="in-card in-c2">
+      <div class="in-foto"><img src="img/plan.jpg" alt="Tablet showing a floor plan" width="706" height="418">
+        <span class="in-icono"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12L4 7.5M12 12v9"/></svg></span></div>
+      <div class="in-texto"><h2>Plan</h2><p>Create accurate floor plans, assign tasks and track progress.</p></div>
     </article>
-    <article class="card c3">
-      <div class="foto"><img src="img/restore.jpg" alt="Blue air mover drying a bright room" width="742" height="418">
-        <span class="icono"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5c3.2 4 6 7.2 6 10.4a6 6 0 0 1-12 0c0-3.2 2.8-6.4 6-10.4z"/></svg></span></div>
-      <div class="texto"><h2>Restore</h2><p>Monitor drying, manage equipment and deliver lasting results.</p></div>
+    <article class="in-card in-c3">
+      <div class="in-foto"><img src="img/restore.jpg" alt="Blue air mover drying a bright room" width="742" height="418">
+        <span class="in-icono"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5c3.2 4 6 7.2 6 10.4a6 6 0 0 1-12 0c0-3.2 2.8-6.4 6-10.4z"/></svg></span></div>
+      <div class="in-texto"><h2>Restore</h2><p>Monitor drying, manage equipment and deliver lasting results.</p></div>
     </article>
   </div>
 
-  <p class="tagline"><i></i><span>Building clearer tomorrows</span><i></i></p>
+  <p class="in-tagline"><i></i><span>Building clearer tomorrows</span><i></i></p>
+</div>
 </div>
 <script>
-// El lienzo se escala para caber entero (ancho Y alto) en la pantalla: nunca hay que desplazarse.
+// La bienvenida es un lienzo de proporcion fija que se escala para caber entero en la pantalla.
 (function(){
-  var l = document.getElementById('lienzo');
+  var l = document.getElementById('inLienzo');
   function ajustar(){
+    if(document.getElementById('inicio').hidden) return;
     var vertical = window.matchMedia('(orientation: portrait)').matches;
-    var W = vertical ? 390 : 1536, HU = vertical ? 800 : 990;   // HU = alto con contenido; el margen de abajo puede quedar fuera
+    var W = vertical ? 390 : 1536, HU = vertical ? 800 : 990, H = vertical ? 844 : 1024;
     var vw = window.innerWidth, vh = window.innerHeight;
     if(window.visualViewport){ vw = window.visualViewport.width; vh = window.visualViewport.height; }
-    var H = vertical ? 844 : 1024;
     var s = Math.min(vw / W, vh / HU);
     l.style.left = Math.round((vw - W * s) / 2) + 'px';
-    // si el lienzo entero cabe, se centra entero (posiciones exactas de la imagen); si no, se centra la parte con contenido
     l.style.top = Math.max(0, Math.round((H * s <= vh ? (vh - H * s) : (vh - HU * s)) / 2)) + 'px';
-    document.documentElement.style.setProperty('--s', s.toFixed(4));
+    document.getElementById('inicio').style.setProperty('--s', s.toFixed(4));
   }
-  ajustar();
+  window.inicioAjustar = ajustar;
   window.addEventListener('resize', ajustar);
   window.addEventListener('orientationchange', function(){ setTimeout(ajustar, 60); });
   if(window.visualViewport) window.visualViewport.addEventListener('resize', ajustar);
-  document.querySelectorAll('a[href="#features"]').forEach(function(a){ a.addEventListener('click', function(e){ e.preventDefault(); }); });
+  document.querySelectorAll('.inicio a[href="#features"]').forEach(function(a){ a.addEventListener('click', function(e){ e.preventDefault(); }); });
 })();
 </script>
+<!-- Iconos de linea (se usan con <use href="#i-...">). Mismo trazo en toda la app. -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><circle cx="17" cy="9" r="2.5"/><path d="M15.5 14.5a5 5 0 0 1 6 5"/></symbol>
+  <symbol id="i-salir" viewBox="0 0 24 24"><path d="M10 4H5a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h5"/><path d="M15 8l5 4-5 4"/><path d="M20 12H9"/></symbol>
+  <symbol id="i-atras" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+  <symbol id="i-mas" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-buscar" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></symbol>
+  <symbol id="i-camara" viewBox="0 0 24 24"><path d="M4 8h3l2-2.5h6L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></symbol>
+  <symbol id="i-tel" viewBox="0 0 24 24"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></symbol>
+  <symbol id="i-msj" viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 4z"/></symbol>
+  <symbol id="i-lapiz" viewBox="0 0 24 24"><path d="M4 20l4-1 10-10-3-3L5 16z"/><path d="M13 7l3 3"/></symbol>
+  <symbol id="i-archivo" viewBox="0 0 24 24"><path d="M3 5h18v4H3z"/><path d="M5 9v10h14V9"/><path d="M10 13h4"/></symbol>
+  <symbol id="i-logo" viewBox="0 0 64 64"><rect x="4" y="4" width="56" height="56" rx="16" fill="var(--accent)" stroke="none"/><circle cx="32" cy="32" r="15" fill="none" stroke="#fff" stroke-width="4.5"/><circle cx="32" cy="32" r="5.5" fill="#fff" stroke="none"/><path d="M14 20a22 22 0 0 1 10-10" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" opacity=".85"/></symbol>
+</svg>
+
+<div class="app">
+
+  <!-- BARRA LATERAL (computadora). En el telefono se esconde y mandan la barra de arriba y las pestanas de abajo. -->
+  <nav class="lateral" id="lateral" aria-label="Menú">
+    <div class="lateral-top">
+      <svg class="logo logo-chico" aria-hidden="true"><use href="#i-logo"/></svg>
+      <span class="lateral-marca">Scanova360</span>
+    </div>
+    <div class="lateral-empresa" id="empresaLateral">Restoration Doctor</div>
+    <button type="button" class="navitem" data-nav="trabajos"><svg class="ic"><use href="#i-pin"/></svg>Trabajos</button>
+    <button type="button" class="navitem" data-nav="personas" id="btnPersonas" hidden><svg class="ic"><use href="#i-users"/></svg>Personas <span class="conteo" id="personasConteo" hidden></span></button>
+    <div class="lateral-espacio"></div>
+    <div class="lateral-quien">
+      <span class="avatar" id="avatarLateral">·</span>
+      <div class="quien-texto"><div class="quien-nom" id="quien"></div><div class="quien-rol" id="quienRol"></div></div>
+    </div>
+    <button type="button" class="navitem" data-nav="salir"><svg class="ic"><use href="#i-salir"/></svg>Salir</button>
+  </nav>
+
+  <div class="contenido">
+    <!-- BARRA DE ARRIBA (telefono) -->
+    <header class="barra" id="cabecera">
+      <svg class="logo logo-chico" aria-hidden="true"><use href="#i-logo"/></svg>
+      <div class="barra-titulo" id="subtitulo">Trabajos</div>
+      <span class="avatar" id="avatarBarra">·</span>
+    </header>
+
+    <main id="main">
+
+      <!-- ENTRAR: pantalla propia, centrada. Correo + contrasena; Crear cuenta con el codigo del equipo. -->
+      <section class="pantalla entrar" id="pEntrar" hidden>
+        <div class="entrar-caja">
+          <div class="marca">
+            <svg class="logo" aria-hidden="true"><use href="#i-logo"/></svg>
+            <div class="marca-nombre">Scanova360</div>
+            <div class="marca-lema">Fotos de trabajos, en orden y a la mano</div>
+          </div>
+          <div class="field"><label for="inCorreo">Correo</label><input type="email" id="inCorreo" autocomplete="username" inputmode="email" placeholder="nombre@correo.com"></div>
+          <div class="field"><label for="inClave">Contraseña</label>
+            <div class="clave"><input type="password" id="inClave" autocomplete="current-password" placeholder="••••••••"><button type="button" class="ojo" id="btnOjo" aria-label="Ver contraseña">Ver</button></div></div>
+          <button type="button" class="btn btn-accent btn-block btn-grande" id="btnEntrar">Entrar</button>
+          <p class="aviso" id="entrarAviso"></p>
+          <a class="enlace-suave" href="#" id="lnkOlvide">¿Olvidó su contraseña?</a>
+          <p class="entrar-crear">¿No tiene cuenta? <a href="#" id="lnkCrear">Crear cuenta</a></p>
+          <p class="entrar-pie">Restoration Doctor &middot; AMG &nbsp;&middot;&nbsp; <span id="entrarVersion"></span></p>
+        </div>
+      </section>
+
+      <!-- CREAR CUENTA -->
+      <section class="pantalla entrar" id="pCrear" hidden>
+        <div class="entrar-caja">
+          <div class="marca">
+            <svg class="logo" aria-hidden="true"><use href="#i-logo"/></svg>
+            <div class="marca-nombre">Crear cuenta</div>
+            <div class="marca-lema">Con su correo entra desde cualquier aparato</div>
+          </div>
+          <div class="field"><label for="crNombre">Su nombre</label><input type="text" id="crNombre" autocomplete="name" placeholder="Como lo conocen en el equipo"></div>
+          <div class="field"><label for="crCorreo">Correo</label><input type="email" id="crCorreo" autocomplete="email" inputmode="email" placeholder="nombre@correo.com"></div>
+          <div class="field"><label for="crClave">Contraseña <span class="hint">6 letras o más</span></label>
+            <div class="clave"><input type="password" id="crClave" autocomplete="new-password" placeholder="••••••••"><button type="button" class="ojo" id="btnOjo2" aria-label="Ver contraseña">Ver</button></div></div>
+          <div class="field"><label for="crCodigo">Código del equipo <span class="hint">se lo da el manager</span></label><input type="text" id="crCodigo" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="ABC123"></div>
+          <button type="button" class="btn btn-accent btn-block btn-grande" id="btnCrear">Crear cuenta</button>
+          <p class="aviso" id="crearAviso"></p>
+          <p class="entrar-crear">¿Ya tiene cuenta? <a href="#" id="lnkVolverEntrar">Entrar</a></p>
+          <p class="entrar-pie">Restoration Doctor &middot; AMG</p>
+        </div>
+      </section>
+
+      <!-- EN ESPERA: la cuenta existe pero el manager todavia no la aprueba. -->
+      <section class="pantalla entrar" id="pEspera" hidden>
+        <div class="entrar-caja centrado">
+          <div class="marca">
+            <svg class="logo" aria-hidden="true"><use href="#i-logo"/></svg>
+            <div class="marca-nombre">Cuenta en espera</div>
+            <div class="marca-lema" id="esperaTexto">Su cuenta ya existe. Falta que el manager la apruebe.</div>
+          </div>
+          <p class="parche izq">Avísele al manager que ya pidió entrar. En cuanto la apruebe, toque <b>Revisar</b> o vuelva a entrar.</p>
+          <button type="button" class="btn btn-accent btn-block btn-grande" id="btnEsperaRevisar">Revisar</button>
+          <p class="aviso" id="esperaAviso"></p>
+          <p class="entrar-crear"><a href="#" id="lnkEsperaSalir">Salir</a></p>
+        </div>
+      </section>
+
+      <!-- TRABAJOS: la lista, como la de proyectos de CompanyCam. -->
+      <section class="pantalla" id="pTrabajos" hidden>
+        <div class="titulo-fila">
+          <h1 class="titulo">Trabajos</h1>
+          <button type="button" class="btn btn-accent" id="btnNuevo"><svg class="ic"><use href="#i-mas"/></svg>Crear<span class="solo-escritorio">&nbsp;trabajo</span></button>
+        </div>
+        <div class="herramientas">
+          <div class="buscar"><svg class="ic"><use href="#i-buscar"/></svg><input type="search" id="inBuscar" placeholder="Buscar un trabajo…" autocomplete="off"></div>
+          <div class="segmento" id="filtroEstado">
+            <button type="button" class="seg on" data-estado="activo">Activos</button>
+            <button type="button" class="seg" data-estado="archivado">Archivados</button>
+          </div>
+        </div>
+        <div class="tabla-cab"><span>Trabajo</span><span>Última actividad</span><span>Resumen</span><span>Fotos recientes</span></div>
+        <div class="lista" id="listaTrabajos"></div>
+        <p class="aviso" id="trabajosAviso"></p>
+      </section>
+
+      <!-- PERSONAS (manager): quien pide entrar, y el equipo. -->
+      <section class="pantalla" id="pPersonas" hidden>
+        <button type="button" class="volver" data-nav="atras"><svg class="ic"><use href="#i-atras"/></svg>Trabajos</button>
+        <h1 class="titulo">Personas</h1>
+        <div class="bloque">
+          <h2 class="bloque-t">Por aprobar</h2>
+          <div class="lista" id="listaSolicitudes"></div>
+        </div>
+        <div class="bloque">
+          <h2 class="bloque-t">Equipo</h2>
+          <div class="lista" id="listaEquipo"></div>
+        </div>
+        <p class="aviso" id="personasAviso"></p>
+      </section>
+
+      <!-- NUEVO / EDITAR -->
+      <section class="pantalla" id="pForma" hidden>
+        <button type="button" class="volver" data-nav="atras"><svg class="ic"><use href="#i-atras"/></svg>Volver</button>
+        <div class="card forma">
+          <h1 class="titulo chico" id="formaTitulo">Trabajo nuevo</h1>
+          <div class="forma-grid">
+            <div class="field"><label for="fCliente">Cliente</label><input type="text" id="fCliente" autocomplete="off" placeholder="Nombre del cliente"></div>
+            <div class="field"><label for="fTelefono">Teléfono</label><input type="tel" id="fTelefono" autocomplete="off" placeholder="(703) 555-0100"></div>
+            <div class="field ancho"><label for="fDireccion">Dirección</label><input type="text" id="fDireccion" autocomplete="off" placeholder="Calle, ciudad"></div>
+            <div class="field"><label for="fCorreo">Correo <span class="hint">opcional</span></label><input type="email" id="fCorreo" autocomplete="off"></div>
+            <div class="field"><label for="fTipo">Tipo de trabajo</label>
+              <select id="fTipo">
+                <option value="">&mdash; escoja &mdash;</option>
+                <option value="agua">Agua</option>
+                <option value="moho">Moho</option>
+                <option value="fuego">Fuego</option>
+                <option value="contenidos">Contenidos</option>
+                <option value="mudanza">Mudanza</option>
+                <option value="otro">Otro</option>
+              </select></div>
+            <div class="field ancho"><label for="fNotas">Notas <span class="hint">opcional</span></label><textarea id="fNotas"></textarea></div>
+          </div>
+          <div class="fila-botones">
+            <button type="button" class="btn btn-outline" id="btnFormaCancelar">Cancelar</button>
+            <button type="button" class="btn btn-accent" id="btnFormaGuardar">Guardar</button>
+          </div>
+          <p class="aviso" id="formaAviso"></p>
+        </div>
+      </section>
+
+      <!-- UN TRABAJO: portada, titulo, direccion, etiquetas, acciones y pestanas (Fotos / Datos). -->
+      <section class="pantalla" id="pTrabajo" hidden>
+        <button type="button" class="volver" data-nav="atras"><svg class="ic"><use href="#i-atras"/></svg>Trabajos</button>
+        <div id="trabajoFicha"></div>
+      </section>
+
+    </main>
+
+    <!-- PESTANAS DE ABAJO (telefono): la salida de cada pantalla vive al pie. -->
+    <nav class="pie" id="pie" hidden aria-label="Navegación">
+      <button type="button" class="tab" id="btnAtras" data-nav="atras"><svg class="ic"><use href="#i-atras"/></svg><span>Atrás</span></button>
+      <button type="button" class="tab" data-nav="trabajos"><svg class="ic"><use href="#i-pin"/></svg><span>Trabajos</span></button>
+      <button type="button" class="tab" data-nav="personas" hidden><svg class="ic"><use href="#i-users"/></svg><span>Personas</span><span class="conteo" hidden></span></button>
+      <button type="button" class="tab" id="btnSalir" data-nav="salir"><svg class="ic"><use href="#i-salir"/></svg><span>Salir</span></button>
+    </nav>
+  </div>
+
+  <!-- VISOR: una foto en grande, con anterior / siguiente y papelera. -->
+  <div class="visor" id="visor" hidden>
+    <div class="visor-cab"><span class="visor-quien" id="visorQuien"></span><span class="visor-n" id="visorN"></span><button type="button" class="visor-btn" id="visorCerrar" aria-label="Cerrar">✕</button></div>
+    <div class="visor-cuerpo"><button type="button" class="visor-btn visor-ant" id="visorAnt" aria-label="Anterior"><svg class="ic"><use href="#i-atras"/></svg></button><img id="visorImg" alt=""><button type="button" class="visor-btn visor-sig" id="visorSig" aria-label="Siguiente"><svg class="ic"><use href="#i-atras"/></svg></button></div>
+    <div class="visor-pie"><span id="visorPie"></span><button type="button" class="btn btn-outline btn-rojo" id="visorBorrar" hidden><svg class="ic"><use href="#i-archivo"/></svg>Papelera</button></div>
+  </div>
+</div>
+<script type="module" src="app.js"></script>
 </body>
 </html>

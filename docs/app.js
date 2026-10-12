@@ -72,9 +72,22 @@ export async function pedirEntrada(codigo, nombre){
 export function puedeEntrar(p){ return !!(p && p.company_id && (p.role === 'manager' || (p.status || 'active') === 'active')); }
 export function salir(){ guardarSes(null); PERFIL = null; pila.length = 0; irA('pEntrar'); }
 
+// ---------- la bienvenida (la imagen aprobada): se ve solo sin sesión y solo en el navegador ----------
+// En el aparato nativo o en la app guardada en la pantalla de inicio se va derecho a Entrar.
+export const esAparato = () => !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) || navigator.standalone === true;
+export function mostrarInicio(){
+  const i = $('#inicio'); if(!i) return;
+  $$('.pantalla').forEach(p => { p.hidden = true; });
+  document.body.classList.add('modo-entrar'); $('#pie').hidden = true;
+  i.hidden = false; document.body.classList.add('en-inicio');
+  if(window.inicioAjustar) window.inicioAjustar();
+}
+export function ocultarInicio(){ const i = $('#inicio'); if(i){ i.hidden = true; } document.body.classList.remove('en-inicio'); }
+
 // ---------- navegación: una pantalla a la vez, con su salida al pie ----------
 const pila = [];
 export function irA(id, desde){
+  ocultarInicio();
   if(desde) pila.push(desde);
   $$('.pantalla').forEach(p => { p.hidden = p.id !== id; });
   const solo = (id === 'pEntrar' || id === 'pCrear' || id === 'pEspera');
@@ -174,6 +187,8 @@ async function arrancar(){
   $('#empresaLateral').textContent = EMPRESA;
   // Navegación: barra lateral (computadora) y pestañas de abajo (teléfono) comparten data-nav.
   document.addEventListener('click', (e) => {
+    const bi = e.target.closest('[data-inicio]');
+    if(bi){ e.preventDefault(); if(bi.dataset.inicio === 'entrar'){ ocultarInicio(); irA('pEntrar'); } return; }
     const b = e.target.closest('[data-nav]'); if(!b) return;
     const n = b.dataset.nav;
     if(n === 'atras') atras();
@@ -191,6 +206,6 @@ async function arrancar(){
     if(p && p.company_id){ pintarQuien(); await llegar(p); return; }
     guardarSes(null);
   }
-  irA('pEntrar');
+  if(esAparato()) irA('pEntrar'); else mostrarInicio();
 }
 if(typeof document !== 'undefined'){ document.addEventListener('DOMContentLoaded', arrancar); console.info('Scanova360', APP_BUILD); }

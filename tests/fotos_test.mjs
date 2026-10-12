@@ -1,5 +1,5 @@
 // Scanova · fotos: lo puro (agrupar por día, avance de la tanda, la foto en la rejilla, huellas).
-import * as F from '../docs/app/fotos.js';
+import * as F from '../docs/fotos.js';
 let pass = 0, fail = 0;
 const ok = (l, c) => { if(c){ pass++; console.log('  ok  ' + l); } else { fail++; console.log('  FAIL ' + l); } };
 // Los días se agrupan en la hora LOCAL del aparato (el día de la cuadrilla), así que las fechas
