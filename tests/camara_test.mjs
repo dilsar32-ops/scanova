@@ -22,4 +22,10 @@ ok('botón del centro DENTRO de un proyecto: va directo a ese proyecto (no vuelv
 ok('afuera de un proyecto: se escoge el proyecto y abre la cámara de muchas fotos', /data-camara-para/.test(panel) && /camara\.abrir\(t\)/.test(panel) && /Take photos for/.test(panel));
 ok('Upload Photos: en el teléfono ofrece la cámara de Scanova (nivel y cuarto) o el carrete; en la compu el selector', /data-subir-menu/.test(fotos) && /Upload Photos<input type="file" accept="image\/\*" multiple hidden data-subir>/.test(fotos) && /foto-camara'\) camara\.abrir\(T\)/.test(fs.readFileSync(new URL('../docs/proyecto.js', import.meta.url), 'utf8')) && !/capture="environment" hidden data-subir/.test(fotos));
 ok('la portada de la ficha pasa a ser la foto más nueva', /La portada de la ficha = la foto más nueva/.test(fotos));
+const CM = await import('../docs/camara.js');
+ok('zoom: botones dentro del rango de la cámara (.5 solo si la cámara baja de 1)', CM.botonesZoom(1, 5).join() === '1,2,3,5' && CM.botonesZoom(0.5, 3).join() === '0.5,1,2,3' && CM.botonesZoom(1, 2).join() === '1,2');
+ok('zoomTxt: 1×, 2×, 1.4×, .5×', CM.zoomTxt(1) === '1×' && CM.zoomTxt(2) === '2×' && CM.zoomTxt(1.43) === '1.4×' && CM.zoomTxt(0.5) === '.5×');
+const rc = CM.recorteZoom(4000, 3000, 2);
+ok('recorteZoom: a 2× guarda el centro (la mitad del ancho y del alto); a 1× todo', rc.w === 2000 && rc.h === 1500 && rc.sx === 1000 && rc.sy === 750 && CM.recorteZoom(4000, 3000, 1).w === 4000);
+ok('viewport sin agrandar con doble toque (maximum-scale=1), como en Field Reports', /maximum-scale=1/.test(idx) && /id="camZoom"/.test(idx));
 console.log(`\n${pass} ok, ${fail} fail`); process.exit(fail ? 1 : 0);

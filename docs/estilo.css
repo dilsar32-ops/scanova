@@ -784,3 +784,18 @@ button.cap-fila.on{ background:var(--accent-soft); }
 /* Hoja de nivel/cuarto: cada "Add room" en su renglón bajo su nivel, y "Add level" siempre abajo, aparte. */
 .cuarto-agregar{ display:flex; width:calc(100% - 16px); }
 .cuarto-nivel-nuevo{ border-top:1px solid var(--line); padding-top:12px; margin-top:8px; }
+
+/* ---------- LO APRENDIDO EN FIELD REPORTS (12 oct 2026) ----------
+   1) Doble toque NO agranda la página (maximum-scale=1 en el viewport + manipulation).
+   2) Un riel que se arrastra de lado: overflow-y:hidden (si no, el navegador lo vuelve "auto" y se arrastra para todos
+      lados) y touch-action:pan-x pan-y, NUNCA pan-x a secas (si no, la página se ve congelada al subir con el dedo ahí). */
+html, body{ touch-action:manipulation; }
+.ptabs, .chips{ overflow-y:hidden; touch-action:pan-x pan-y; -webkit-overflow-scrolling:touch; overscroll-behavior-x:contain; }
+.chips.envolver{ overflow:visible; }
+/* Zoom de la cámara (como el del iPhone): .5 · 1× · 2× · 3×, y pellizcar. */
+.camara{ touch-action:none; }
+.cam-zoom{ grid-column:1 / -1; justify-self:center; display:flex; gap:6px; padding:4px; margin-bottom:14px; border-radius:999px; background:rgba(0,0,0,.35); }
+.cam-zoom[hidden]{ display:none !important; }
+.cam-z{ min-width:36px; height:36px; padding:0 6px; border-radius:999px; border:0; background:rgba(255,255,255,.12); color:#fff; font:inherit; font-size:12.5px; font-weight:700; cursor:pointer; }
+.cam-z.on{ background:rgba(0,0,0,.55); color:#ffd60a; font-size:13.5px; }
+.camara video{ transform-origin:center center; transition:transform .08s linear; }
