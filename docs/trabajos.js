@@ -1,4 +1,4 @@
-// Scanova · trabajos: la lista, crear, abrir, editar, archivar. Nada de fotos todavía (paso 2).
+// Scanova · trabajos: la lista, crear, abrir, editar, archivar. De las fotos solo el conteo por ahora (paso 2).
 import { $, $$, authFetch, irA, atras, esManager } from './app.js';
 
 export const TIPOS = { agua:'Agua', moho:'Moho', fuego:'Fuego', contenidos:'Contenidos', mudanza:'Mudanza', otro:'Otro' };
@@ -6,6 +6,9 @@ export const tipoTxt = (t) => TIPOS[t] || 'Otro';
 export const telDigitos = (v) => String(v || '').replace(/[^\d+]/g, '').slice(0, 20);
 export const esc = (s) => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 export const quitarAcentos = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+// Pura: "Amilcar Gonzalez" -> "AG"; "Vero" -> "V"; vacío -> "·" (el circulito del avatar).
+export const iniciales = (nombre) => { const p = String(nombre || '').trim().split(/\s+/).filter(Boolean); if(!p.length) return '·'; return (p[0][0] + (p.length > 1 ? p[p.length - 1][0] : '')).toUpperCase(); };
+export const mapsUrl = (dir) => 'https://maps.google.com/?q=' + encodeURIComponent(String(dir || ''));
 
 // Pura: filtra por estado y por lo escrito (cliente o dirección, sin acentos ni mayúsculas).
 export function filtrar(lista, estado, texto){
@@ -21,8 +24,68 @@ export function validar(f){
   return '';
 }
 export const fechaCorta = (iso) => { if(!iso) return ''; const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleDateString('es-US', { month:'short', day:'numeric', year:'numeric' }); };
+// Pura: "ahora mismo", "hace 5 min", "hace 3 h", "ayer", "hace 4 días", o la fecha corta. `ahora` se pasa en las pruebas.
+export function fechaRelativa(iso, ahora = Date.now()){
+  if(!iso) return '';
+  const d = new Date(iso); if(isNaN(d)) return '';
+  const s = Math.round((ahora - d.getTime()) / 1000);
+  if(s < 45) return 'ahora mismo';
+  if(s < 3600) return 'hace ' + Math.max(1, Math.round(s / 60)) + ' min';
+  if(s < 86400) return 'hace ' + Math.max(1, Math.round(s / 3600)) + ' h';
+  if(s < 172800) return 'ayer';
+  if(s < 7 * 86400) return 'hace ' + Math.round(s / 86400) + ' días';
+  return fechaCorta(iso);
+}
+const ICONO = (n) => '<svg class="ic"><use href="#i-' + n + '"/></svg>';
+// Pura: las etiquetas de color de un trabajo (tipo + estado), como las "labels" de CompanyCam.
+export function etiquetas(t){
+  const arch = t.estado === 'archivado';
+  return '<span class="etq tipo-' + esc(TIPOS[t.tipo] ? t.tipo : 'otro') + '">' + esc(tipoTxt(t.tipo)) + '</span>' +
+         '<span class="etq ' + (arch ? 'archivado' : 'activo') + '">' + (arch ? 'Archivado' : 'Activo') + '</span>';
+}
+// Pura: una fila de la lista. En el teléfono se ven miniatura + texto; en la computadora, las 4 columnas.
+export function filaHtml(t, nFotos, ahora){
+  const n = nFotos || 0; const cuando = esc(fechaRelativa(t.updated_at, ahora));
+  return `<div class="fila-trabajo" data-id="${esc(t.id)}">
+    <div class="col-nom"><div class="miniatura">${ICONO('camara')}</div><div class="col-texto">
+      <div class="nom">${esc(t.cliente)}</div><div class="dir">${esc(t.direccion || 'Sin dirección')}</div>
+      <div class="etqs">${etiquetas(t)}</div><div class="meta-movil">${cuando}</div></div></div>
+    <div class="col-act">${cuando}</div>
+    <div class="col-res"><b>${n}</b> ${n === 1 ? 'foto' : 'fotos'}</div>
+    <div class="col-fotos">${'<span class="foto-vacia"></span>'.repeat(4)}</div>
+  </div>`;
+}
+// Pura: la ficha de un trabajo (portada, título, dirección, etiquetas, acciones y pestañas Fotos / Datos).
+export function fichaHtml(t, nFotos, manager){
+  const dig = telDigitos(t.telefono); const arch = t.estado === 'archivado';
+  return `<div class="ficha-cab">
+    <div class="portada">${ICONO('camara')}</div>
+    <div class="ficha-datos">
+      <h1 class="titulo">${esc(t.cliente)}</h1>
+      <a class="direccion" href="${esc(mapsUrl(t.direccion))}" target="_blank" rel="noopener">${esc(t.direccion || 'Sin dirección')}</a>
+      <div class="etqs">${etiquetas(t)}<button type="button" class="enlace-editar" id="btnEditar">${ICONO('lapiz')}Editar</button></div>
+    </div></div>
+    <div class="acciones">
+      ${dig ? '<a class="btn btn-outline" href="tel:' + esc(dig) + '">' + ICONO('tel') + 'Llamar</a><a class="btn btn-outline" href="sms:' + esc(dig) + '">' + ICONO('msj') + 'Mensaje</a>' : ''}
+      ${manager ? '<button type="button" class="btn btn-outline' + (arch ? '' : ' btn-rojo') + '" id="btnArchivar">' + ICONO('archivo') + (arch ? 'Reactivar' : 'Archivar') + '</button>' : ''}
+    </div>
+    <div class="tabs" id="fichaTabs"><button type="button" class="tab-f on" data-tab="fotos">Fotos <span class="n">(${nFotos || 0})</span></button><button type="button" class="tab-f" data-tab="datos">Datos</button></div>
+    <div class="tab-panel" data-panel="fotos">
+      <div class="vacio-fotos">${ICONO('camara')}<div><b>Todavía no hay fotos en este trabajo.</b><br>Aquí van a salir por día, con quién las tomó.</div></div>
+    </div>
+    <div class="tab-panel" data-panel="datos" hidden>
+      <div class="linea"><span>Teléfono</span><span>${t.telefono ? '<a href="tel:' + esc(dig) + '">' + esc(t.telefono) + '</a>' : '—'}</span></div>
+      <div class="linea"><span>Correo</span><span>${t.correo ? '<a href="mailto:' + esc(t.correo) + '">' + esc(t.correo) + '</a>' : '—'}</span></div>
+      <div class="linea"><span>Tipo</span><span>${esc(tipoTxt(t.tipo))}</span></div>
+      <div class="linea"><span>Creado</span><span>${esc(fechaCorta(t.created_at))}</span></div>
+      <div class="linea"><span>Última actividad</span><span>${esc(fechaCorta(t.updated_at))}</span></div>
+      ${t.notas ? '<div class="linea"><span>Notas</span><span>' + esc(t.notas) + '</span></div>' : ''}
+    </div>
+    <p class="aviso" id="fichaAviso"></p>`;
+}
 
 let LISTA = [];
+let FOTOS = {};          // trabajo_id -> cuántas fotos
 let estadoVista = 'activo';
 let abierto = null;      // el trabajo en pantalla
 let editando = null;     // el trabajo que se edita en la forma (null = nuevo)
@@ -32,10 +95,15 @@ const SELECT = 'id,cliente,direccion,telefono,correo,tipo,estado,notas,created_a
 export async function cargar(){
   const aviso = $('#trabajosAviso'); aviso.textContent = '';
   $('#listaTrabajos').innerHTML = '<p class="vacio">Cargando…</p>';
-  const r = await authFetch('/rest/v1/fotos_trabajos?select=' + SELECT + '&order=updated_at.desc&limit=500');
+  const [r, rf] = await Promise.all([
+    authFetch('/rest/v1/fotos_trabajos?select=' + SELECT + '&order=updated_at.desc&limit=500'),
+    authFetch('/rest/v1/fotos_fotos?select=trabajo_id&limit=5000'),
+  ]);
   if(r.status === 404){ LISTA = []; pintar(); aviso.textContent = 'Esta parte todavía no está instalada en el servidor: falta correr sql/fotos-01-base.sql.'; return; }
   if(!r.ok){ LISTA = []; pintar(); aviso.textContent = 'No se pudo leer la lista (' + r.status + '). Revise su internet.'; return; }
   LISTA = await r.json();
+  FOTOS = {};
+  if(rf && rf.ok){ try{ const f = await rf.json(); if(Array.isArray(f)) f.forEach(x => { FOTOS[x.trabajo_id] = (FOTOS[x.trabajo_id] || 0) + 1; }); }catch{} }
   pintar();
 }
 
@@ -43,13 +111,11 @@ export function pintar(){
   const caja = $('#listaTrabajos'); if(!caja) return;
   const lista = filtrar(LISTA, estadoVista, $('#inBuscar').value);
   if(!lista.length){
-    caja.innerHTML = '<p class="vacio">' + (LISTA.length ? 'Nada que coincida.' : (estadoVista === 'activo' ? 'Todavía no hay trabajos. Toque <b>+ Trabajo nuevo</b> para crear el primero.' : 'No hay trabajos archivados.')) + '</p>';
+    caja.innerHTML = '<p class="vacio">' + (LISTA.length ? 'Nada que coincida.' : (estadoVista === 'activo' ? 'Todavía no hay trabajos. Toque <b>Crear trabajo</b> para abrir el primero.' : 'No hay trabajos archivados.')) + '</p>';
     return;
   }
-  caja.innerHTML = lista.map(t => `<div class="trabajo" data-id="${esc(t.id)}">
-    <div><div class="nom">${esc(t.cliente)}</div><div class="dir">${esc(t.direccion || 'Sin dirección')}</div>
-      <div class="meta"><span class="chip tipo-${esc(t.tipo)}">${esc(tipoTxt(t.tipo))}</span><span>${esc(fechaCorta(t.updated_at))}</span></div></div>
-    <span class="flecha">&#8250;</span></div>`).join('');
+  const ahora = Date.now();
+  caja.innerHTML = lista.map(t => filaHtml(t, FOTOS[t.id], ahora)).join('');
 }
 
 function leerForma(){
@@ -88,23 +154,16 @@ async function guardarForma(){
 
 export function abrir(t, reemplazar){
   abierto = t;
-  const dig = telDigitos(t.telefono);
-  $('#trabajoFicha').innerHTML = `<h2>${esc(tipoTxt(t.tipo))} · ${t.estado === 'archivado' ? 'archivado' : 'activo'}</h2>
-    <div style="font-size:20px; font-weight:800; margin-bottom:6px;">${esc(t.cliente)}</div>
-    <div class="linea"><span>Dirección</span><span>${esc(t.direccion || '—')}</span></div>
-    <div class="linea"><span>Teléfono</span><span>${t.telefono ? '<a href="tel:' + esc(dig) + '">' + esc(t.telefono) + '</a>' : '—'}</span></div>
-    <div class="linea"><span>Correo</span><span>${t.correo ? '<a href="mailto:' + esc(t.correo) + '">' + esc(t.correo) + '</a>' : '—'}</span></div>
-    <div class="linea"><span>Creado</span><span>${esc(fechaCorta(t.created_at))}</span></div>
-    ${t.notas ? '<div class="linea"><span>Notas</span><span>' + esc(t.notas) + '</span></div>' : ''}
-    <div class="acciones">
-      ${dig ? '<a class="btn btn-outline" href="tel:' + esc(dig) + '">Llamar</a><a class="btn btn-outline" href="sms:' + esc(dig) + '">Mensaje</a>' : ''}
-      <button type="button" class="btn btn-outline" id="btnEditar">Editar</button>
-      ${esManager() ? '<button type="button" class="btn ' + (t.estado === 'archivado' ? 'btn-outline' : 'btn-danger') + '" id="btnArchivar">' + (t.estado === 'archivado' ? 'Reactivar' : 'Archivar') + '</button>' : ''}
-    </div>
-    <p class="aviso" id="fichaAviso"></p>`;
+  $('#trabajoFicha').innerHTML = fichaHtml(t, FOTOS[t.id], esManager());
   $('#btnEditar').addEventListener('click', () => { editando = abierto; llenarForma(abierto); irA('pForma', 'pTrabajo'); });
   const ba = $('#btnArchivar'); if(ba) ba.addEventListener('click', archivar);
+  $('#fichaTabs').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-tab]'); if(!b) return;
+    $$('#fichaTabs .tab-f').forEach(x => x.classList.toggle('on', x === b));
+    $$('#trabajoFicha .tab-panel').forEach(p => { p.hidden = p.dataset.panel !== b.dataset.tab; });
+  });
   if(reemplazar){ irA('pTrabajo'); } else irA('pTrabajo', 'pTrabajos');
+  $('#subtitulo').textContent = t.cliente || 'Trabajo';
 }
 
 async function archivar(){
@@ -124,7 +183,7 @@ export function conectar(){
   $('#filtroEstado').addEventListener('click', (e) => {
     const b = e.target.closest('[data-estado]'); if(!b) return;
     estadoVista = b.dataset.estado;
-    $$('#filtroEstado .pill').forEach(x => x.classList.toggle('on', x === b));
+    $$('#filtroEstado .seg').forEach(x => x.classList.toggle('on', x === b));
     pintar();
   });
   $('#inBuscar').addEventListener('input', pintar);

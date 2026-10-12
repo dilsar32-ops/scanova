@@ -1,5 +1,5 @@
 // Scanova · arranque, sesión y navegación. Las pantallas viven en index.html; lo de trabajos en trabajos.js.
-import { SUPABASE_URL, ANON_KEY, APP_BUILD } from './config.js';
+import { SUPABASE_URL, ANON_KEY, APP_BUILD, EMPRESA } from './config.js';
 import * as trabajos from './trabajos.js';
 import * as personas from './personas.js';
 
@@ -80,8 +80,11 @@ export function irA(id, desde){
   document.body.classList.toggle('modo-entrar', solo);
   $('#pie').hidden = solo;
   $('#btnAtras').hidden = !pila.length;
-  $('#subtitulo').textContent = { pEntrar:'Fotos de trabajos', pCrear:'Crear cuenta', pEspera:'Cuenta en espera', pTrabajos:'Trabajos', pPersonas:'Personas', pForma:'Trabajo', pTrabajo:'Trabajo' }[id] || 'Fotos de trabajos';
-  window.scrollTo(0, 0);
+  // La barra lateral y las pestañas de abajo marcan en qué parte está (Trabajos abarca forma y ficha).
+  const seccion = { pTrabajos:'trabajos', pForma:'trabajos', pTrabajo:'trabajos', pPersonas:'personas' }[id] || '';
+  $$('[data-nav]').forEach(b => b.classList.toggle('on', !!seccion && b.dataset.nav === seccion));
+  $('#subtitulo').textContent = { pEntrar:'Scanova', pCrear:'Crear cuenta', pEspera:'Cuenta en espera', pTrabajos:'Trabajos', pPersonas:'Personas', pForma:'Trabajo', pTrabajo:'Trabajo' }[id] || 'Scanova';
+  const m = $('#main'); if(m) m.scrollTo(0, 0); window.scrollTo(0, 0);
 }
 export function atras(){ const a = pila.pop(); if(a) irA(a); else irA('pTrabajos'); if(a === 'pTrabajos' || !a) trabajos.pintar(); }
 
@@ -91,7 +94,13 @@ async function llegar(p){
   if(puedeEntrar(p)){ irA('pTrabajos'); await Promise.all([trabajos.cargar(), personas.pintarConteo()]); }
   else { document.body.classList.add('modo-entrar'); irA('pEspera'); }
 }
-function pintarQuien(){ $('#quien').textContent = PERFIL ? (PERFIL.full_name || '') + (esManager() ? ' · manager' : '') : ''; }
+function pintarQuien(){
+  const nom = PERFIL ? (PERFIL.full_name || '') : '';
+  $('#quien').textContent = nom;
+  $('#quienRol').textContent = PERFIL ? (esManager() ? 'manager' : 'equipo') : '';
+  const ini = trabajos.iniciales(nom);
+  $('#avatarLateral').textContent = ini; $('#avatarBarra').textContent = ini;
+}
 async function arrancar(){
   $('#entrarVersion').textContent = 'v ' + APP_BUILD;
   const ojo = (btnSel, inpSel) => $(btnSel).addEventListener('click', () => { const i = $(inpSel); const ver = i.type === 'password'; i.type = ver ? 'text' : 'password'; $(btnSel).textContent = ver ? 'Ocultar' : 'Ver'; });
@@ -161,8 +170,16 @@ async function arrancar(){
     b.disabled = false; b.textContent = 'Revisar';
   });
   $('#lnkEsperaSalir').addEventListener('click', (e) => { e.preventDefault(); salir(); });
-  $('#btnAtras').addEventListener('click', atras);
-  $('#btnSalir').addEventListener('click', () => { if(confirm('¿Salir de Scanova en este aparato?')) salir(); });
+  $('#empresaLateral').textContent = EMPRESA;
+  // Navegación: barra lateral (computadora) y pestañas de abajo (teléfono) comparten data-nav.
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-nav]'); if(!b) return;
+    const n = b.dataset.nav;
+    if(n === 'atras') atras();
+    else if(n === 'trabajos'){ pila.length = 0; irA('pTrabajos'); trabajos.pintar(); }
+    else if(n === 'personas'){ if(!esManager()) return; pila.length = 0; irA('pPersonas', 'pTrabajos'); personas.cargar(); }
+    else if(n === 'salir'){ if(confirm('¿Salir de Scanova en este aparato?')) salir(); }
+  });
   trabajos.conectar();
   personas.conectar();
 
