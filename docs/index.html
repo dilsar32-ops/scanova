@@ -5,25 +5,91 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Scanova</title>
 <meta name="theme-color" content="#0b0f14">
-<style>
-  :root{ --bg:#0b0f14; --card:#151b22; --ink:#f2f4f7; --ink-soft:#9aa3ad; --accent:#0a66ff; }
-  html,body{ margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system, "Segoe UI", Roboto, sans-serif; }
-  main{ max-width:480px; margin:0 auto; padding:48px 16px; }
-  h1{ font-size:28px; letter-spacing:.02em; margin:0 0 6px; }
-  h1 b{ color:#ff4d4d; }
-  p{ color:var(--ink-soft); line-height:1.5; }
-  .card{ background:var(--card); border-radius:14px; padding:18px; margin-top:18px; }
-  .v{ font-size:12px; color:var(--ink-soft); margin-top:24px; }
-</style>
+<link rel="stylesheet" href="estilo.css">
 </head>
 <body>
-<main>
+<header class="top">
   <h1>SCA<b>NOVA</b></h1>
-  <p>Plataforma propia de fotos de trabajos.</p>
-  <div class="card">
-    <p style="margin:0;">En construcci&oacute;n. El paso 1 (entrar y trabajos) est&aacute; en camino.</p>
-  </div>
-  <p class="v">versi&oacute;n <span id="v">2026-10-12-1</span></p>
+  <div class="sub"><span id="subtitulo">Fotos de trabajos</span><span class="quien" id="quien"></span></div>
+</header>
+<main>
+
+  <!-- ENTRAR: las mismas cuentas de Field Reports. Manager con correo; crew con su código personal. -->
+  <section class="pantalla" id="pEntrar" hidden>
+    <div class="card">
+      <h2>Entrar</h2>
+      <div class="pills" id="entrarModo">
+        <button type="button" class="pill on" data-modo="codigo">Código personal</button>
+        <button type="button" class="pill" data-modo="correo">Correo y contraseña</button>
+      </div>
+      <div id="entrarCodigo">
+        <div class="field"><label>Su código personal <span class="hint">el mismo de Field Reports (8 letras)</span></label>
+          <input type="text" id="inCodigo" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="AEMF1234" maxlength="12"></div>
+      </div>
+      <div id="entrarCorreo" hidden>
+        <div class="field"><label>Correo</label><input type="email" id="inCorreo" autocomplete="username" placeholder="nombre@correo.com"></div>
+        <div class="field"><label>Contraseña</label><input type="password" id="inClave" autocomplete="current-password"></div>
+      </div>
+      <button type="button" class="btn btn-accent" id="btnEntrar">Entrar</button>
+      <p class="aviso" id="entrarAviso"></p>
+      <p class="parche" style="margin-top:12px;">Scanova usa las mismas cuentas que Field Reports. Si todavía no tiene código personal, pídaselo al manager.</p>
+    </div>
+  </section>
+
+  <!-- TRABAJOS: la lista. Un trabajo = un perfil, como en CompanyCam. -->
+  <section class="pantalla" id="pTrabajos" hidden>
+    <div class="pills" id="filtroEstado">
+      <button type="button" class="pill on" data-estado="activo">Activos</button>
+      <button type="button" class="pill" data-estado="archivado">Archivados</button>
+    </div>
+    <div class="field buscar"><input type="search" id="inBuscar" placeholder="Buscar cliente o dirección" autocomplete="off"></div>
+    <button type="button" class="btn btn-accent" id="btnNuevo" style="margin-bottom:12px;">+ Trabajo nuevo</button>
+    <div class="lista" id="listaTrabajos"></div>
+    <p class="aviso" id="trabajosAviso"></p>
+  </section>
+
+  <!-- NUEVO / EDITAR -->
+  <section class="pantalla" id="pForma" hidden>
+    <div class="card">
+      <h2 id="formaTitulo">Trabajo nuevo</h2>
+      <div class="field"><label>Cliente</label><input type="text" id="fCliente" autocomplete="off" placeholder="Nombre del cliente"></div>
+      <div class="field"><label>Dirección</label><input type="text" id="fDireccion" autocomplete="off" placeholder="Calle, ciudad"></div>
+      <div class="field"><label>Teléfono</label><input type="tel" id="fTelefono" autocomplete="off" placeholder="(703) 555-0100"></div>
+      <div class="field"><label>Correo <span class="hint">opcional</span></label><input type="email" id="fCorreo" autocomplete="off"></div>
+      <div class="field"><label>Tipo de trabajo</label>
+        <select id="fTipo">
+          <option value="">&mdash; escoja &mdash;</option>
+          <option value="agua">Agua</option>
+          <option value="moho">Moho</option>
+          <option value="fuego">Fuego</option>
+          <option value="contenidos">Contenidos</option>
+          <option value="mudanza">Mudanza</option>
+          <option value="otro">Otro</option>
+        </select></div>
+      <div class="field"><label>Notas <span class="hint">opcional</span></label><textarea id="fNotas"></textarea></div>
+      <div class="fila2">
+        <button type="button" class="btn btn-outline" id="btnFormaCancelar">Cancelar</button>
+        <button type="button" class="btn btn-accent" id="btnFormaGuardar">Guardar</button>
+      </div>
+      <p class="aviso" id="formaAviso"></p>
+    </div>
+  </section>
+
+  <!-- UN TRABAJO -->
+  <section class="pantalla" id="pTrabajo" hidden>
+    <div class="card" id="trabajoFicha"></div>
+    <div class="card">
+      <h2>Fotos</h2>
+      <p class="parche">Las fotos llegan en el paso 2: cámara en el teléfono, archivos en la computadora, y la línea de tiempo por día.</p>
+    </div>
+  </section>
+
 </main>
+<nav class="pie" id="pie" hidden>
+  <button type="button" class="btn btn-outline" id="btnAtras">&#9664; Atrás</button>
+  <span class="espacio"></span>
+  <button type="button" class="btn btn-outline" id="btnSalir">Salir</button>
+</nav>
+<script type="module" src="app.js"></script>
 </body>
 </html>
