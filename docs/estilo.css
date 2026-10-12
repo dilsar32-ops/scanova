@@ -26,7 +26,8 @@ main{ max-width:720px; margin:0 auto; padding:14px 16px; }
 .btn-outline{ background:var(--card2); color:#7fb0ff; }
 .btn-danger{ background:var(--card2); color:var(--danger); }
 .btn[disabled]{ opacity:.55; cursor:default; }
-.btn[hidden]{ display:none !important; }   /* .btn pone display:inline-flex y le gana al hidden del navegador */
+.btn[hidden]{ display:none !important; }
+a.btn{ text-decoration:none; }   /* .btn pone display:inline-flex y le gana al hidden del navegador */
 .fila2{ display:flex; gap:10px; }
 .fila2 .btn{ flex:1 1 0; width:auto; }
 .pills{ display:flex; gap:8px; overflow-x:auto; padding:2px 0 8px; -webkit-overflow-scrolling:touch; }
