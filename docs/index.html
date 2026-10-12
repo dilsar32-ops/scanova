@@ -63,6 +63,9 @@ body.en-inicio{ overflow:hidden; }
 .in-tagline{ left:0; right:0; top:912px; margin:0; display:flex; align-items:center; justify-content:center; gap:36px; font-size:13px; font-weight:600; letter-spacing:.34em; text-transform:uppercase; color:#6b7a90; }
 .in-tagline i{ display:block; width:52px; height:1px; background:#9aa6b8; }
 .in-tagline span{ white-space:nowrap; }
+.in-legal{ left:0; right:0; top:950px; margin:0; display:flex; justify-content:center; gap:12px; font-size:13px; color:#7d8a9c; }
+.inicio .in-legal a{ color:#7d8a9c; text-decoration:none; }
+.inicio .in-legal a:hover{ color:var(--azul); text-decoration:underline; }
 /* ---------- vertical (telefono / tableta en vertical): lienzo de 390x844, mismas piezas reacomodadas ---------- */
 @media (orientation:portrait){
   .in-lienzo{ width:390px; height:844px; display:flex; flex-direction:column; align-items:center; }
@@ -89,6 +92,7 @@ body.en-inicio{ overflow:hidden; }
   .in-card p{ padding-left:0; font-size:13px; line-height:18px; }
   .in-tagline{ margin-top:30px; gap:14px; font-size:10px; letter-spacing:.24em; }
   .in-tagline i{ width:28px; }
+  .in-legal{ margin-top:12px; font-size:11px; gap:8px; }
 }
 </style>
 </head>
@@ -131,6 +135,7 @@ body.en-inicio{ overflow:hidden; }
   </div>
 
   <p class="in-tagline"><i></i><span>Building clearer tomorrows</span><i></i></p>
+  <p class="in-legal"><a href="/privacy/">Privacy Policy</a><span>·</span><a href="/terms/">Terms of Service</a></p>
 </div>
 </div>
 <script>
