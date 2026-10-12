@@ -457,6 +457,8 @@ export function conectar(){
       else if(a === 'cuarto-fotos'){ const c = CUARTOS.find(x => x.id === id); if(c){ FILTRO = { nivel:c.nivel_id, cuarto:c.id }; irTab('fotos'); } }
       else if(a === 'cuarto-editar') abrirFormaCuarto(CUARTOS.find(x => x.id === id));
       else if(a === 'cuarto-borrar') borrarCuarto(CUARTOS.find(x => x.id === id));
+      else if(a === 'foto-camara') camara.abrir(T);
+      else if(a === 'foto-carrete'){ const inp = $('#fotosPanel input[data-subir]'); if(inp) inp.click(); }
       else if(a === 'foto-mover') mover([id]);
       else if(a === 'foto-bajar') bajarFoto(id);
       else if(a === 'foto-papelera') papelera([id]);
@@ -469,6 +471,8 @@ export function conectar(){
       else if(a === 'archivar') trabajos.archivarTrabajo(T, true);
       return;
     }
+    if((el = q('[data-subir-menu]'))){ e.stopPropagation();
+      panel.abrirMenuEn(el, `<button type="button" data-p-accion="foto-camara">${IC('camara')}<span>Take Photos<small class="menu-sub">Choose level & room · many in a row</small></span></button><button type="button" data-p-accion="foto-carrete">${IC('galeria')}From Library</button>`); return; }
     if(q('#btnEditar')){ trabajos.editar(T, 'pTrabajo'); return; }
     if(q('[data-editar-etq]')){ abrirEtiquetas(); return; }
     if((el = q('[data-etq-quitar]'))){ ETQ_EDIT.splice(Number(el.dataset.etqQuitar), 1); pintarEtiquetas(); return; }

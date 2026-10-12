@@ -171,10 +171,12 @@ export const usarOrdenVisor = (fn) => { ORDEN_FN = fn; };
 export const usarEtiqueta = (fn) => { ETIQUETA_FN = fn; };
 export const lista = () => FOTOS;
 export const urlsMini = () => { const u = {}; FOTOS.forEach(f => { const c = URLS.mini[f.id]; if(c && c.vence > Date.now()) u[f.id] = c.url; }); return u; };
-// "Upload Photos": en el iPhone el selector deja escoger del carrete o tomar con la cámara; la cámara de muchas
-// fotos seguidas es el botón azul del centro.
+// "Upload Photos". En el teléfono abre dos opciones: la cámara de Scanova (muchas fotos seguidas, con el
+// nivel y el cuarto escogidos arriba) o el carrete. En la computadora abre el selector de archivos.
 export function botonesSubir(){
   if(TRABAJO && TRABAJO.estado === 'archivado') return '';
+  const tactil = (navigator.maxTouchPoints || 0) > 0 || /iPhone|iPad|Android/i.test(navigator.userAgent);
+  if(tactil) return '<button type="button" class="btn btn-accent btn-chico subir-btn" data-subir-menu><svg class="ic"><use href="#i-camara"/></svg>Upload Photos</button><input type="file" accept="image/*" multiple hidden data-subir>';
   return '<label class="btn btn-accent btn-chico subir-btn"><svg class="ic"><use href="#i-camara"/></svg>Upload Photos<input type="file" accept="image/*" multiple hidden data-subir></label>';
 }
 export function tandaHtml(){

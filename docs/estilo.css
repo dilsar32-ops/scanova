@@ -758,3 +758,4 @@ body.menu-abierto .menu-velo{ display:block; position:absolute; inset:0; z-index
 .c-listo{ margin-top:10px; }
 .c-aviso{ margin:0 0 10px; }
 .c-aviso.ok{ color:var(--accent); font-weight:600; }
+.menu-pop .menu-sub{ display:block; font-size:12px; font-weight:500; color:var(--ink-soft); margin-top:1px; }
