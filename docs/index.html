@@ -67,16 +67,50 @@
     </div>
   </section>
 
+  <!-- EN ESPERA: la cuenta existe pero el manager todavia no la aprueba. -->
+  <section class="pantalla entrar" id="pEspera" hidden>
+    <div class="entrar-caja" style="text-align:center;">
+      <div class="marca">
+        <svg class="logo" viewBox="0 0 64 64" aria-hidden="true">
+          <rect x="4" y="4" width="56" height="56" rx="16" fill="var(--accent)"/>
+          <circle cx="32" cy="32" r="15" fill="none" stroke="#fff" stroke-width="4.5"/>
+          <circle cx="32" cy="32" r="5.5" fill="#fff"/>
+          <path d="M14 20 a22 22 0 0 1 10 -10" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" opacity=".85"/>
+        </svg>
+        <div class="marca-nombre">Cuenta en espera</div>
+        <div class="marca-lema" id="esperaTexto">Su cuenta ya existe. Falta que el manager la apruebe.</div>
+      </div>
+      <p class="parche" style="text-align:left;">Avísele al manager que ya pidió entrar. En cuanto la apruebe, toque <b>Revisar</b> o vuelva a entrar.</p>
+      <button type="button" class="btn btn-accent btn-grande" id="btnEsperaRevisar" style="margin-top:14px;">Revisar</button>
+      <p class="aviso" id="esperaAviso"></p>
+      <p class="entrar-crear"><a href="#" id="lnkEsperaSalir">Salir</a></p>
+    </div>
+  </section>
+
   <!-- TRABAJOS: la lista. Un trabajo = un perfil, como en CompanyCam. -->
   <section class="pantalla" id="pTrabajos" hidden>
     <div class="pills" id="filtroEstado">
       <button type="button" class="pill on" data-estado="activo">Activos</button>
       <button type="button" class="pill" data-estado="archivado">Archivados</button>
+      <button type="button" class="pill solo-manager" id="btnPersonas" hidden>Personas <span class="conteo" id="personasConteo" hidden></span></button>
     </div>
     <div class="field buscar"><input type="search" id="inBuscar" placeholder="Buscar cliente o dirección" autocomplete="off"></div>
     <button type="button" class="btn btn-accent" id="btnNuevo" style="margin-bottom:12px;">+ Trabajo nuevo</button>
     <div class="lista" id="listaTrabajos"></div>
     <p class="aviso" id="trabajosAviso"></p>
+  </section>
+
+  <!-- PERSONAS (manager): quien pide entrar, y el equipo. -->
+  <section class="pantalla" id="pPersonas" hidden>
+    <div class="card">
+      <h2>Por aprobar</h2>
+      <div class="lista" id="listaSolicitudes"></div>
+    </div>
+    <div class="card">
+      <h2>Equipo</h2>
+      <div class="lista" id="listaEquipo"></div>
+    </div>
+    <p class="aviso" id="personasAviso"></p>
   </section>
 
   <!-- NUEVO / EDITAR -->

@@ -85,3 +85,16 @@ main:has(> .entrar:not([hidden])){ max-width:none; padding:0; }
 .entrar-crear{ text-align:center; color:var(--ink-soft); font-size:15px; margin:18px 0 0; }
 .entrar-crear a{ color:var(--accent); font-weight:700; text-decoration:none; }
 @media (min-width:720px){ .entrar-caja{ padding:38px 36px 28px; } .marca .logo{ width:76px; height:76px; } }
+
+/* ---------- PERSONAS ---------- */
+.pill .conteo{ display:inline-block; min-width:20px; padding:0 6px; border-radius:999px; background:var(--danger); color:#fff; font-size:12px; line-height:20px; text-align:center; margin-left:6px; }
+.pill .conteo[hidden]{ display:none !important; }
+.pill[hidden]{ display:none !important; }
+.persona{ background:var(--card2); border-radius:12px; padding:12px; }
+.persona .nom{ font-weight:700; font-size:16px; }
+.persona .sub{ color:var(--ink-soft); font-size:13px; margin-top:2px; }
+.persona .acciones{ margin-top:10px; }
+.estado-chip{ display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; background:var(--accent-soft); color:var(--accent); margin-left:6px; }
+.estado-chip.pausado{ background:#fff4d6; color:var(--warn); }
+.estado-chip.sacado{ background:#ffe3e3; color:var(--danger); }
+:root[data-tema="oscuro"] .estado-chip.pausado{ background:#3a2f12; } :root[data-tema="oscuro"] .estado-chip.sacado{ background:#3a1a1a; }

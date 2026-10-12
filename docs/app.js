@@ -1,6 +1,7 @@
 // Scanova · arranque, sesión y navegación. Las pantallas viven en index.html; lo de trabajos en trabajos.js.
 import { SUPABASE_URL, ANON_KEY, APP_BUILD } from './config.js';
 import * as trabajos from './trabajos.js';
+import * as personas from './personas.js';
 
 export const $ = (s, r = document) => r.querySelector(s);
 export const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -51,22 +52,23 @@ async function entrarCon(email, password){
   if(!p || !p.company_id){
     // Cuenta recien confirmada por correo: el codigo del equipo quedo guardado al crearla.
     let pend = null; try{ pend = JSON.parse(localStorage.getItem('scanova.codigoPendiente') || 'null'); }catch{}
-    if(pend && pend.codigo){ try{ p = await unirseAlEquipo(pend.codigo, pend.nombre); }catch{} }
+    if(pend && pend.codigo){ try{ p = await pedirEntrada(pend.codigo, pend.nombre); }catch{} }
   }
   if(!p || !p.company_id){ guardarSes(null); throw new Error('Esa cuenta no está en ningún equipo todavía. Pídale al manager el código del equipo y cree la cuenta con él.'); }
-  if(p.role !== 'manager' && p.status && p.status !== 'active'){ guardarSes(null); throw new Error('Esa cuenta está pausada o fuera del equipo.'); }
+  if(p.role !== 'manager' && p.status === 'removed'){ guardarSes(null); throw new Error('Esa cuenta no está autorizada en este equipo. Hable con el manager.'); }
   return p;
 }
-// Mismo RPC que usa Field Reports para meter a alguien a la empresa con el codigo del equipo.
-export async function unirseAlEquipo(codigo, nombre){
-  const r = await authFetch('/rest/v1/rpc/join_company', { method:'POST', body: JSON.stringify({ p_code: codigo, p_name: nombre || null }) });
+// Pedir entrada con el codigo del equipo: la cuenta queda EN ESPERA hasta que el manager la apruebe.
+export async function pedirEntrada(codigo, nombre){
+  const r = await authFetch('/rest/v1/rpc/fotos_pedir_entrada', { method:'POST', body: JSON.stringify({ p_code: codigo, p_name: nombre || null }) });
   const t = await r.text();
-  if(!r.ok) throw new Error(/codigo_invalido/.test(t) ? 'codigo_invalido' : ('No se pudo entrar al equipo (' + r.status + ')'));
-  const p = await cargarPerfil();
-  if(!p || !p.company_id) throw new Error('La cuenta quedó creada pero sin equipo. Pídale al manager el código y vuelva a intentarlo.');
+  if(r.status === 404) throw new Error('Esta parte todavía no está instalada en el servidor: falta correr sql/fotos-02-aprobacion.sql.');
+  if(!r.ok) throw new Error(/codigo_invalido/.test(t) ? 'codigo_invalido' : ('No se pudo pedir la entrada (' + r.status + ')'));
   try{ localStorage.removeItem('scanova.codigoPendiente'); }catch{}
-  return p;
+  return await cargarPerfil();
 }
+// Que pantalla le toca a esta cuenta: trabajos si esta activa (o es manager), espera si esta pausada.
+export function puedeEntrar(p){ return !!(p && p.company_id && (p.role === 'manager' || (p.status || 'active') === 'active')); }
 export function salir(){ guardarSes(null); PERFIL = null; pila.length = 0; irA('pEntrar'); }
 
 // ---------- navegación: una pantalla a la vez, con su salida al pie ----------
@@ -74,15 +76,21 @@ const pila = [];
 export function irA(id, desde){
   if(desde) pila.push(desde);
   $$('.pantalla').forEach(p => { p.hidden = p.id !== id; });
-  document.body.classList.toggle('modo-entrar', id === 'pEntrar' || id === 'pCrear');
-  $('#pie').hidden = (id === 'pEntrar' || id === 'pCrear');
+  const solo = (id === 'pEntrar' || id === 'pCrear' || id === 'pEspera');
+  document.body.classList.toggle('modo-entrar', solo);
+  $('#pie').hidden = solo;
   $('#btnAtras').hidden = !pila.length;
-  $('#subtitulo').textContent = { pEntrar:'Fotos de trabajos', pCrear:'Crear cuenta', pTrabajos:'Trabajos', pForma:'Trabajo', pTrabajo:'Trabajo' }[id] || 'Fotos de trabajos';
+  $('#subtitulo').textContent = { pEntrar:'Fotos de trabajos', pCrear:'Crear cuenta', pEspera:'Cuenta en espera', pTrabajos:'Trabajos', pPersonas:'Personas', pForma:'Trabajo', pTrabajo:'Trabajo' }[id] || 'Fotos de trabajos';
   window.scrollTo(0, 0);
 }
 export function atras(){ const a = pila.pop(); if(a) irA(a); else irA('pTrabajos'); if(a === 'pTrabajos' || !a) trabajos.pintar(); }
 
 // ---------- arranque ----------
+// A donde llega una cuenta ya identificada: trabajos (activa o manager) o la sala de espera.
+async function llegar(p){
+  if(puedeEntrar(p)){ irA('pTrabajos'); await Promise.all([trabajos.cargar(), personas.pintarConteo()]); }
+  else { document.body.classList.add('modo-entrar'); irA('pEspera'); }
+}
 function pintarQuien(){ $('#quien').textContent = PERFIL ? (PERFIL.full_name || '') + (esManager() ? ' · manager' : '') : ''; }
 async function arrancar(){
   $('#entrarVersion').textContent = 'v ' + APP_BUILD;
@@ -104,9 +112,9 @@ async function arrancar(){
     if(!correo || !clave) return aviso.textContent = 'Escriba su correo y su contraseña.';
     const b = $('#btnEntrar'); b.disabled = true; b.textContent = 'Entrando…';
     try{
-      await entrarCon(correo, clave);
+      const p = await entrarCon(correo, clave);
       pintarQuien(); $('#inClave').value = '';
-      irA('pTrabajos'); await trabajos.cargar();
+      await llegar(p);
     }catch(e){
       const m = String(e && e.message || '');
       aviso.textContent = /Invalid login/i.test(m) ? 'Correo o contraseña incorrectos.'
@@ -133,8 +141,8 @@ async function arrancar(){
         try{ localStorage.setItem('scanova.codigoPendiente', JSON.stringify({ codigo, nombre, correo })); }catch{}
       }else{
         guardarSes({ access_token: d.access_token, refresh_token: d.refresh_token, user_id: d.user && d.user.id });
-        await unirseAlEquipo(codigo, nombre);
-        pintarQuien(); irA('pTrabajos'); await trabajos.cargar();
+        const p = await pedirEntrada(codigo, nombre);
+        pintarQuien(); await llegar(p);
       }
     }catch(e){
       const m = String(e && e.message || '');
@@ -146,14 +154,22 @@ async function arrancar(){
     b.disabled = false; b.textContent = 'Crear cuenta';
   }
   $('#btnCrear').addEventListener('click', crearCuenta);
+  $('#btnEsperaRevisar').addEventListener('click', async () => {
+    const b = $('#btnEsperaRevisar'); b.disabled = true; b.textContent = 'Revisando…'; $('#esperaAviso').textContent = '';
+    const p = await cargarPerfil();
+    if(puedeEntrar(p)){ pintarQuien(); await llegar(p); } else $('#esperaAviso').textContent = 'Todavía no está aprobada. Avísele al manager.';
+    b.disabled = false; b.textContent = 'Revisar';
+  });
+  $('#lnkEsperaSalir').addEventListener('click', (e) => { e.preventDefault(); salir(); });
   $('#btnAtras').addEventListener('click', atras);
   $('#btnSalir').addEventListener('click', () => { if(confirm('¿Salir de Scanova en este aparato?')) salir(); });
   trabajos.conectar();
+  personas.conectar();
 
   SES = leerSes();
   if(SES && SES.access_token){
     const p = await cargarPerfil();
-    if(p && p.company_id){ pintarQuien(); irA('pTrabajos'); await trabajos.cargar(); return; }
+    if(p && p.company_id){ pintarQuien(); await llegar(p); return; }
     guardarSes(null);
   }
   irA('pEntrar');
