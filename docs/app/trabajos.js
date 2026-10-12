@@ -60,10 +60,10 @@ export function filaHtml(t, nFotos, ahora){
   </div>`;
 }
 // Pura: la ficha de un trabajo (portada, título, dirección, etiquetas, acciones y pestañas Fotos / Datos).
-export function fichaHtml(t, nFotos, manager){
+export function fichaHtml(t, nFotos, manager, portadaUrl){
   const dig = telDigitos(t.telefono); const arch = t.estado === 'archivado';
   return `<div class="ficha-cab">
-    <div class="portada">${ICONO('camara')}</div>
+    <div class="portada">${portadaUrl ? '<img src="' + esc(portadaUrl) + '" alt="">' : ICONO('camara')}</div>
     <div class="ficha-datos">
       <h1 class="titulo">${esc(t.cliente)}</h1>
       <a class="direccion" href="${esc(mapsUrl(t.direccion))}" target="_blank" rel="noopener">${esc(t.direccion || 'Sin dirección')}</a>
@@ -164,7 +164,8 @@ async function guardarForma(){
 
 export function abrir(t, reemplazar){
   abierto = t;
-  $('#trabajoFicha').innerHTML = fichaHtml(t, FOTOS[t.id], esManager());
+  const portada = (RECIENTES[t.id] || []).map(id => MINIS[id]).find(Boolean) || '';
+  $('#trabajoFicha').innerHTML = fichaHtml(t, FOTOS[t.id], esManager(), portada);
   $('#btnEditar').addEventListener('click', () => { editando = abierto; llenarForma(abierto); irA('pForma', 'pTrabajo'); });
   const ba = $('#btnArchivar'); if(ba) ba.addEventListener('click', archivar);
   $('#fichaTabs').addEventListener('click', (e) => {
