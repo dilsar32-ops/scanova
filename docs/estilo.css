@@ -82,5 +82,6 @@ main:has(> .entrar:not([hidden])){ max-width:none; padding:0; }
 .o{ display:flex; align-items:center; gap:12px; color:var(--ink-soft); font-size:13px; margin:18px 0 14px; }
 .o::before, .o::after{ content:""; flex:1; height:1px; background:var(--line); }
 .entrar-pie{ text-align:center; color:var(--ink-soft); font-size:12px; margin:22px 0 0; }
-#entrarCodigo[hidden]{ display:none !important; }
+.entrar-crear{ text-align:center; color:var(--ink-soft); font-size:15px; margin:18px 0 0; }
+.entrar-crear a{ color:var(--accent); font-weight:700; text-decoration:none; }
 @media (min-width:720px){ .entrar-caja{ padding:38px 36px 28px; } .marca .logo{ width:76px; height:76px; } }

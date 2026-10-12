@@ -36,17 +36,34 @@
       <p class="aviso" id="entrarAviso"></p>
       <a class="enlace-suave" href="#" id="lnkOlvide">¿Olvidó su contraseña?</a>
 
-      <div class="o"><span>o</span></div>
-
-      <button type="button" class="btn btn-outline btn-grande" id="btnModoCodigo">Entrar con código personal</button>
-      <div id="entrarCodigo" hidden>
-        <div class="field" style="margin-top:12px;"><label for="inCodigo">Código personal <span class="hint">el de Field Reports, 8 letras</span></label>
-          <input type="text" id="inCodigo" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="AEMF1234" maxlength="12"></div>
-        <button type="button" class="btn btn-accent btn-grande" id="btnEntrarCodigo">Entrar con el código</button>
-        <p class="aviso" id="codigoAviso"></p>
-      </div>
+      <p class="entrar-crear">¿No tiene cuenta? <a href="#" id="lnkCrear">Crear cuenta</a></p>
 
       <p class="entrar-pie">Restoration Doctor &middot; AMG &nbsp;&middot;&nbsp; <span id="entrarVersion"></span></p>
+    </div>
+  </section>
+
+  <!-- CREAR CUENTA: correo + contraseña + nombre + código del equipo (se lo da el manager). -->
+  <section class="pantalla entrar" id="pCrear" hidden>
+    <div class="entrar-caja">
+      <div class="marca">
+        <svg class="logo" viewBox="0 0 64 64" aria-hidden="true">
+          <rect x="4" y="4" width="56" height="56" rx="16" fill="var(--accent)"/>
+          <circle cx="32" cy="32" r="15" fill="none" stroke="#fff" stroke-width="4.5"/>
+          <circle cx="32" cy="32" r="5.5" fill="#fff"/>
+          <path d="M14 20 a22 22 0 0 1 10 -10" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" opacity=".85"/>
+        </svg>
+        <div class="marca-nombre">Crear cuenta</div>
+        <div class="marca-lema">Con su correo entra desde cualquier aparato</div>
+      </div>
+      <div class="field"><label for="crNombre">Su nombre</label><input type="text" id="crNombre" autocomplete="name" placeholder="Como lo conocen en el equipo"></div>
+      <div class="field"><label for="crCorreo">Correo</label><input type="email" id="crCorreo" autocomplete="email" inputmode="email" placeholder="nombre@correo.com"></div>
+      <div class="field"><label for="crClave">Contraseña <span class="hint">6 letras o más</span></label>
+        <div class="clave"><input type="password" id="crClave" autocomplete="new-password" placeholder="••••••••"><button type="button" class="ojo" id="btnOjo2" aria-label="Ver contraseña">Ver</button></div></div>
+      <div class="field"><label for="crCodigo">Código del equipo <span class="hint">se lo da el manager</span></label><input type="text" id="crCodigo" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="ABC123"></div>
+      <button type="button" class="btn btn-accent btn-grande" id="btnCrear">Crear cuenta</button>
+      <p class="aviso" id="crearAviso"></p>
+      <p class="entrar-crear">¿Ya tiene cuenta? <a href="#" id="lnkVolverEntrar">Entrar</a></p>
+      <p class="entrar-pie">Restoration Doctor &middot; AMG</p>
     </div>
   </section>
 
