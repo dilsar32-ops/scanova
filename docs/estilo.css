@@ -1080,3 +1080,211 @@ body.fv-editando .fv-asa{ visibility:hidden; }
   .ed-hoja .ed-mat, .ed-hoja .ed-lect{ margin:10px 0; }
 }
 @media (max-width:899px){ body.fv-editando .fv-flecha{ z-index:4; } }
+
+/* ---------- HOME (su diseño, 12 oct 2026): 4 tarjetas con "Last update", New Project, tabla con miniatura y Last Update ---------- */
+.tarj-ult{ display:flex; align-items:flex-start; gap:8px; margin-top:10px; padding-top:10px; border-top:1px solid var(--line); color:var(--ink-soft); font-size:13px; line-height:1.35; }
+.tarj-ult > .ic{ width:18px; height:18px; flex:0 0 auto; color:var(--ink-mute); margin-top:1px; }
+.tarj-ult small{ display:block; font-size:12.5px; color:var(--ink-mute); }
+.tarj-ult span{ white-space:nowrap; }
+.tc-nom{ display:flex; align-items:center; gap:12px; min-width:0; }
+.tc-nom-t{ min-width:0; }
+.tc-mini{ display:none; flex:0 0 auto; width:56px; height:40px; border-radius:6px; overflow:hidden; background:linear-gradient(135deg,#e9f0fa,#dfe8f5); }
+.tc-mini img{ width:100%; height:100%; object-fit:cover; display:block; }
+.tc-ult{ display:none; color:var(--ink-soft); font-size:14.5px; line-height:1.3; }
+.tc-ult small{ display:block; color:var(--ink-mute); font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.inicio-nuevo{ display:none; }
+@media (min-width:900px){
+  .recientes{ grid-template-columns:repeat(4, minmax(0,1fr)); gap:18px; margin-bottom:22px; }
+  .tarj-foto{ aspect-ratio:16 / 8; }
+  .tarj-cuerpo{ padding:16px 16px 14px; }
+  .tarj-dir{ margin-top:3px; }
+  .tarj-dir + .tarj-dir{ margin-top:0; }
+  .tarj-ult{ font-size:14.5px; margin-top:14px; padding-top:14px; }
+  .tarj-ult small{ font-size:14px; }
+  .tarj-ult > .ic{ width:20px; height:20px; }
+  .inicio-nuevo{ display:inline-flex; margin:0 0 26px; min-height:46px; padding:0 22px; font-size:16px; }
+  .tc-mini{ display:block; }
+  .tc-ult{ display:block; min-width:0; }
+  .tcab, .tfila{ grid-template-columns:minmax(0,1.5fr) minmax(0,1.6fr) minmax(0,.8fr) minmax(0,.8fr) minmax(0,.95fr) 46px; }
+  .tfila{ min-height:60px; }
+}
+@media (min-width:900px) and (max-width:1180px){
+  .recientes{ grid-template-columns:repeat(2, minmax(0,1fr)); }
+  .tcab, .tfila{ grid-template-columns:minmax(0,1.5fr) minmax(0,1.3fr) minmax(0,.85fr) minmax(0,.9fr) minmax(0,.95fr) 40px; }
+}
+@media (max-width:899px){
+  .tarj-ult{ border-top:0; padding-top:0; margin-top:7px; font-size:12.5px; }
+  .tarj-ult > .ic{ width:15px; height:15px; }
+  .tarj-ult small{ display:inline; font-size:12.5px; } .tarj-ult small::before{ content:' · '; }
+}
+
+/* ---------- WELCOME ARRIBA (su pedido, 12 oct 2026; solo computadora) ---------- */
+.tope-fecha{ display:none; }
+@media (min-width:900px){ .tope{ position:relative; z-index:3; } }
+/* Welcome a la altura del logo, en la barra de arriba, cuando cabe junto al buscador (menú fijo desde 1220px; escondido,
+   desde 1020px). La barra se alinea con el contenido. La fecha va junto al buscador si cabe; si no, debajo del subtítulo. */
+.tope-bienv{ display:none; }
+@media (min-width:1220px){
+  body:has(#pInicio:not([hidden])) .tope{ align-items:flex-start; padding-left:max(44px, calc((100% - 1180px) / 2)); padding-right:max(44px, calc((100% - 1180px) / 2)); }
+  body:has(#pInicio:not([hidden])) .tope-bienv{ display:block; margin-right:auto; min-width:0; }
+  body:has(#pInicio:not([hidden])) #pInicio .bienv{ display:none; }
+  body:has(#pInicio:not([hidden])) #pInicio{ padding-top:16px; }
+  .tope-bienv .bienv-fecha{ display:block; padding-top:8px; font-size:14px; }
+}
+@media (min-width:1410px){
+  body:has(#pInicio:not([hidden])) .tope-bienv .bienv-fecha{ display:none; }
+  body:has(#pInicio:not([hidden])) .tope-fecha{ display:block; align-self:center; color:var(--ink-soft); font-size:15px; white-space:nowrap; margin-right:6px; }
+}
+@media (min-width:900px){
+  .tope-bienv .bienv-t{ font-size:40px; }
+  .tope-bienv .bienv-sub{ font-size:18px; margin-top:8px; }
+  .tope:has(.tope-bienv) .tope-buscar, .tope:has(.tope-bienv) .tope-btn, .tope:has(.tope-bienv) .avatar-tope{ flex:0 0 auto; }
+}
+
+/* ---------- HOME EN EL TELÉFONO (su diseño, 12 oct 2026): lupa arriba, Welcome con fecha, Recent Projects deslizables
+   con puntitos, All Projects con New Project, buscador y estado a la vista, filas con foto; el menú con quién arriba ---------- */
+.tope-buscar-tel, .lat-cerrar, .tarj-hace, .rec-puntos, .inicio-nuevo-tel{ display:none; }
+@media (max-width:899px){
+  .tope-menu{ color:var(--accent); }
+  .tope-buscar-tel{ display:grid; }
+  .tope-logo{ font-size:25px; }
+  /* Welcome */
+  #pInicio .bienv{ flex-direction:column; gap:0; margin:2px 0 18px; }
+  #pInicio .bienv-sub{ margin-top:6px; color:#4a6390; font-size:15.5px; }
+  #pInicio .bienv-fecha{ display:block; padding-top:4px; font-size:15px; color:var(--ink-soft); }
+  /* Recent Projects: tarjetas que se deslizan */
+  .recientes{ flex-direction:row; gap:10px; overflow-x:auto; overflow-y:hidden; touch-action:pan-x pan-y; scroll-snap-type:x mandatory; scrollbar-width:none; margin:0 -18px 8px; padding:2px 18px 6px; }
+  .recientes::-webkit-scrollbar{ display:none; }
+  .recientes .tarj{ display:block; flex:0 0 46%; scroll-snap-align:start; background:var(--card); border:1px solid var(--line); border-radius:12px; overflow:hidden; box-shadow:var(--sombra); }
+  .recientes .tarj-foto{ height:96px; border-radius:0; }
+  .tarj-hace{ display:block; position:absolute; top:8px; right:8px; background:rgba(20,26,38,.72); color:#fff; font-size:12.5px; font-weight:600; padding:3px 9px; border-radius:999px; }
+  .recientes .tarj-cuerpo{ padding:10px 10px 10px; }
+  .recientes .tarj-nom{ font-size:14.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .recientes .tarj-dir{ font-size:13px; margin-top:2px; }
+  .recientes .tarj-dir + .tarj-dir{ margin-top:0; }
+  .recientes .tarj .pill{ margin-top:6px; font-size:12px; }
+  .recientes .tarj-ult{ border-top:0; padding-top:0; margin-top:8px; font-size:12.5px; }
+  .recientes .tarj-ult small{ display:block; font-size:12.5px; } .recientes .tarj-ult small::before{ content:none; }
+  .tu-pre{ display:none; }
+  .rec-puntos{ display:flex; justify-content:center; gap:8px; margin:4px 0 18px; }
+  .rec-puntos:empty{ display:none; }
+  .rec-puntos i{ width:8px; height:8px; border-radius:50%; background:#c9d3e3; }
+  .rec-puntos i.on{ background:var(--accent); }
+  /* All Projects: título + New Project; buscador; estado + ordenar */
+  .sec-inicio{ display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px; align-items:center; }
+  .sec-inicio .sec-t{ font-size:21px; }
+  .inicio-nuevo-tel{ display:inline-flex; min-height:42px; padding:0 16px; font-size:15px; }
+  .sec-inicio .sec-herr{ display:contents; }
+  .sec-inicio .buscar{ grid-column:1 / -1; order:3; }
+  .sec-inicio .sel{ order:4; }
+  .sec-inicio .icono-btn{ order:5; }
+  /* Filas: foto, nombre, dirección, etapa; a la derecha hace cuánto y el PM; ••• */
+  .tabla .tfila{ grid-template-columns:72px minmax(0,1fr) auto 30px; grid-template-areas:"mini nom ult acc" "mini dir ult acc" "mini est ult acc"; column-gap:10px; row-gap:2px; padding:10px; align-items:center; }
+  .tabla .tc-nom{ display:contents; }
+  .tabla .tc-mini{ display:block; grid-area:mini; width:72px; height:56px; border-radius:8px; align-self:center; }
+  .tabla .tc-nom-t{ grid-area:nom; } .tabla .tf-movil{ display:none; }
+  .tabla .tc-dir{ display:block; grid-area:dir; font-size:13px; color:var(--ink-soft); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .tabla .tc-est{ grid-area:est; } .tabla .tc-est .pill{ font-size:12px; padding:2px 9px; }
+  .tabla .tc-ult{ display:block; grid-area:ult; font-size:13px; padding-left:10px; border-left:1px solid var(--line); align-self:center; }
+  .tabla .tc-ult small{ font-size:12.5px; }
+  .tabla .tc-acc{ grid-area:acc; } .tabla .tc-acc .mas-btn{ display:grid; width:30px; } .tabla .chev-movil{ display:none; }
+  .tabla .mas-btn .ic{ transform:rotate(90deg); }
+  /* El menú: Scanova360 con la X, quién arriba, Home en azul claro, Sign Out abajo */
+  .lat-cab{ display:flex; align-items:center; justify-content:space-between; padding:0 4px 18px 12px; }
+  .lateral .lat-cab .lat-logo{ padding:0; }
+  .lat-cerrar{ display:grid; place-items:center; width:38px; height:38px; border:0; background:none; color:var(--ink-soft); cursor:pointer; border-radius:10px; }
+  .lat-cerrar svg{ width:24px; height:24px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; }
+  .lateral .lateral-quien{ order:-1; padding:4px 10px 18px; }
+  .lateral .lat-cab{ order:-2; }
+  .lateral .lateral-quien .avatar{ width:52px; height:52px; font-size:19px; }
+  .lateral .quien-nom{ font-size:17px; font-weight:700; } .lateral .quien-rol{ color:var(--ink-soft); font-size:14px; }
+  .lateral .navitem{ padding:13px 14px; font-size:17px; }
+  .lateral .navitem.on{ background:var(--accent-soft); color:var(--accent); }
+  .lateral .salir-link{ border-top:1px solid var(--line); padding-top:16px; margin-top:6px; }
+}
+@media (max-width:899px){
+  .recientes{ scroll-padding-left:18px; }
+  .recientes .tarj{ flex-basis:39%; }
+  .recientes .tarj-foto{ height:88px; }
+  .sec-inicio .icono-btn{ justify-self:end; }
+}
+@media (max-width:899px){
+  .sec-inicio .buscar{ grid-row:2; }
+  .sec-inicio .sel{ grid-column:1 / -1; grid-row:3; margin-right:56px; }
+  .sec-inicio .icono-btn{ grid-column:2; grid-row:3; width:46px; height:44px; }
+}
+@media (max-width:899px){ .tabla .tfila{ grid-template-columns:72px minmax(0,1fr) 96px 30px; } .tabla .tc-ult small{ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; } }
+@media (max-width:899px){ .tabla .tfila{ grid-template-columns:64px minmax(0,1fr) 84px 26px; column-gap:9px; } .tabla .tc-mini{ width:64px; height:52px; } .tabla .tc-ult{ padding-left:8px; } }
+@media (max-width:899px){ .lateral .salir-link{ color:var(--ink); font-size:16.5px; } }
+/* Su pedido: en el teléfono caben los 4 más recientes (dos y dos), sin deslizar */
+@media (max-width:899px){
+  .recientes{ display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:10px; overflow:visible; margin:0 0 20px; padding:0; scroll-snap-type:none; }
+  .recientes .tarj{ flex:none; }
+  .recientes .tarj-foto{ height:92px; }
+  .rec-puntos{ display:none !important; }
+}
+/* Su pedido: el menú del teléfono más angosto, que tape menos la pantalla */
+@media (max-width:899px){
+  body.menu-abierto .lateral{ width:206px; padding-left:8px; padding-right:8px; }
+  .lateral .lat-cab{ padding:0 0 14px 8px; }
+  .lateral .lat-cab .lat-logo{ font-size:22px; }
+  .lat-cerrar{ width:32px; height:32px; } .lat-cerrar svg{ width:20px; height:20px; }
+  .lateral .lateral-quien{ padding:2px 6px 14px; gap:10px; }
+  .lateral .lateral-quien .avatar{ width:40px; height:40px; font-size:16px; flex:0 0 auto; }
+  .lateral .quien-texto{ min-width:0; }
+  .lateral .quien-nom{ font-size:15px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; } .lateral .quien-rol{ font-size:13px; }
+  .lateral .navitem{ font-size:15.5px; padding:11px 10px; gap:12px; }
+  .lateral .navitem .ic{ width:21px; height:21px; }
+  .lateral .salir-link{ font-size:15.5px; }
+}
+/* Su pedido: en el teléfono caben 4 tarjetas chiquitas en una fila y se desliza para ver más; All Projects sube */
+@media (min-width:900px){ .recientes .tarj:nth-child(n+5){ display:none; } }
+@media (max-width:899px){
+  .recientes{ display:grid; grid-auto-flow:column; grid-template-columns:none; grid-auto-columns:calc((100% - 24px) / 4); gap:8px; overflow-x:auto; overflow-y:hidden; touch-action:pan-x pan-y; scroll-snap-type:x mandatory; scrollbar-width:none; margin:0 0 18px; padding:2px 0 4px; }
+  .recientes .tarj{ scroll-snap-align:start; border-radius:10px; }
+  .recientes .tarj-foto{ height:64px; }
+  .recientes .tarj-foto .sin-foto small{ display:none; }
+  .recientes .tarj-foto .sin-foto .ic{ width:20px; height:20px; }
+  .recientes .tarj .mas-btn.flot{ display:none; }
+  .tarj-hace{ top:4px; right:4px; font-size:10px; padding:1px 6px; }
+  .recientes .tarj-cuerpo{ padding:6px 6px 7px; }
+  .recientes .tarj-nom{ font-size:12px; line-height:1.2; }
+  .recientes .tarj-dir{ font-size:10.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .recientes .tarj-dir + .tarj-dir{ display:none; }
+  .recientes .tarj .pill{ margin-top:4px; font-size:9.5px; padding:1px 6px; max-width:100%; overflow:hidden; text-overflow:ellipsis; }
+  .recientes .tarj-ult{ display:none; }
+  .rec-puntos{ display:none !important; }
+}
+/* Su pedido (teléfono): la fecha sube al lado del Welcome, más chica; el subtítulo más chico */
+@media (max-width:899px){
+  #pInicio .bienv{ display:grid; grid-template-columns:minmax(0,1fr) auto; column-gap:10px; align-items:end; margin:0 0 14px; }
+  #pInicio .bienv > div:first-child{ display:contents; }
+  #pInicio .bienv-t{ grid-column:1; grid-row:1; font-size:27px; }
+  #pInicio .bienv-sub{ grid-column:1 / -1; grid-row:2; font-size:13.5px; margin-top:4px; }
+  #pInicio .bienv-fecha{ grid-column:2; grid-row:1; padding:0 0 3px; font-size:12px; line-height:1.25; text-align:right; white-space:normal; max-width:96px; }
+}
+
+/* Su pedido: el menú de la computadora queda fijo, un poco más angosto */
+@media (min-width:900px){
+  .lateral{ width:222px; flex:0 0 222px; padding:28px 14px 20px; }
+  .lat-logo{ font-size:30px; padding:0 10px 30px; }
+  .navitem{ gap:13px; padding:12px 13px; margin-bottom:6px; font-size:15.5px; }
+  .navitem .ic{ width:22px; height:22px; }
+}
+.tu-pre{ font-style:normal; }
+/* Su pedido (teléfono): la bienvenida un poquito más chica */
+@media (max-width:899px){
+  #pInicio .bienv-t{ font-size:23px; }
+  #pInicio .bienv-sub{ font-size:12.5px; margin-top:3px; }
+}
+/* Su pedido (computadora): Home usa todo el ancho que dejó el menú más angosto, con orillas chicas */
+@media (min-width:900px){
+  main:has(> #pInicio:not([hidden])){ padding-left:24px; padding-right:24px; }
+  #pInicio.pantalla{ max-width:none; }
+  body:has(#pInicio:not([hidden])) .tope, body:has(#pInicio:not([hidden])) .tope{ padding-left:24px; padding-right:24px; }
+}
+@media (min-width:1220px){
+  body:has(#pInicio:not([hidden])) .tope{ padding-left:24px; padding-right:24px; }
+}
+/* Su pedido (teléfono): sin la fecha en Home */
+@media (max-width:899px){ #pInicio .bienv-fecha{ display:none; } #pInicio .bienv{ grid-template-columns:minmax(0,1fr); } }

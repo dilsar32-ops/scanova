@@ -229,6 +229,7 @@ body.en-inicio{ overflow:hidden; }
   <symbol id="i-saturacion" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" stroke-dasharray="2.2 2.2"/></symbol>
   <symbol id="i-termometro" viewBox="0 0 24 24"><path d="M10 14.5V5a2 2 0 0 1 4 0v9.5a4 4 0 1 1-4 0z"/><path d="M12 10v7"/></symbol>
   <symbol id="i-nitidez" viewBox="0 0 24 24"><path d="M12 4 21 19H3z"/></symbol>
+  <symbol id="i-reloj" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
   <symbol id="i-logo" viewBox="0 0 64 64"><rect x="4" y="4" width="56" height="56" rx="16" fill="var(--accent)" stroke="none"/><circle cx="32" cy="32" r="15" fill="none" stroke="#fff" stroke-width="4.5"/><circle cx="32" cy="32" r="5.5" fill="#fff" stroke="none"/><path d="M14 20a22 22 0 0 1 10-10" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" opacity=".85"/></symbol>
 </svg>
 
@@ -236,7 +237,7 @@ body.en-inicio{ overflow:hidden; }
 
   <!-- BARRA LATERAL (computadora): el diseño de Amilcar. En el teléfono se esconde y manda la barra de abajo. -->
   <nav class="lateral" id="lateral" aria-label="Menu">
-    <div class="lat-logo" translate="no">Scanova<span>360</span></div>
+    <div class="lat-cab"><div class="lat-logo" translate="no">Scanova<span>360</span></div><button type="button" class="lat-cerrar" data-cerrar-menu aria-label="Close menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
     <button type="button" class="navitem" data-nav="inicio"><svg class="ic"><use href="#i-casa"/></svg><span>Home</span></button>
     <button type="button" class="navitem" data-nav="proyectos"><svg class="ic"><use href="#i-carpeta"/></svg><span>Projects</span></button>
     <button type="button" class="navitem solo-movil" data-nav="galeria"><svg class="ic"><use href="#i-galeria"/></svg><span>Gallery</span></button>
@@ -260,7 +261,11 @@ body.en-inicio{ overflow:hidden; }
       <button type="button" class="tope-btn tope-menu" id="btnMenu" aria-label="Menu"><svg class="ic"><use href="#i-menu"/></svg></button>
       <div class="tope-logo" translate="no">Scanova<span>360</span></div>
       <span class="sr" id="subtitulo">Home</span>
+      <!-- Home en la computadora: el Welcome sube aquí, a la altura del logo (su pedido). -->
+      <div class="tope-bienv"><h1 class="bienv-t">Welcome, <span id="topeNombre"></span></h1><p class="bienv-sub">Capture. Plan. Restore. All in one place.</p><div class="bienv-fecha" id="topeFecha2"></div></div>
+      <span class="tope-fecha" id="topeFecha"></span>
       <label class="tope-buscar"><svg class="ic"><use href="#i-buscar"/></svg><input type="search" id="inBuscarTodo" placeholder="Search projects, clients, or addresses..." autocomplete="off"></label>
+      <button type="button" class="tope-btn tope-buscar-tel" id="btnBuscarTel" aria-label="Search"><svg class="ic"><use href="#i-buscar"/></svg></button>
       <button type="button" class="tope-btn" id="btnCampana" aria-label="Notifications"><svg class="ic"><use href="#i-campana"/></svg><span class="punto" id="campanaPunto" hidden></span></button>
       <span translate="no" class="avatar avatar-azul avatar-tope" id="avatarBarra">·</span>
     </header>
@@ -353,8 +358,11 @@ body.en-inicio{ overflow:hidden; }
         </div>
         <div class="sec-cab"><h2 class="sec-t">Recent Projects</h2><button type="button" class="ver-todo" data-nav="proyectos">View All</button></div>
         <div class="recientes" id="recientes" translate="no"></div>
-        <div class="sec-cab sec-tabla"><h2 class="sec-t">All Projects</h2>
-          <button type="button" class="icono-btn" id="btnFiltroI" aria-label="Filter"><svg class="ic"><use href="#i-filtro"/></svg></button>
+        <div class="rec-puntos" id="recPuntos" aria-hidden="true"></div>
+        <button type="button" class="btn btn-accent inicio-nuevo" id="btnNuevoInicio" data-nuevo-inicio><svg class="ic"><use href="#i-mas"/></svg>New Project</button>
+        <div class="sec-cab sec-tabla sec-inicio"><h2 class="sec-t">All Projects</h2>
+          <button type="button" class="btn btn-accent inicio-nuevo-tel" data-nuevo-inicio><svg class="ic"><use href="#i-mas"/></svg>New Project</button>
+          <button type="button" class="icono-btn" id="btnFiltroI" aria-label="Sort"><svg class="ic"><use href="#i-ajustes"/></svg></button>
           <div class="sec-herr" id="herrInicio">
             <label class="sel"><select id="selEstadoI" aria-label="Status"><option value="todos">All Statuses</option><option value="en_curso">In Progress</option><option value="planeacion">Planning</option><option value="completado">Completed</option><option value="archivado">Archived</option></select><svg class="ic"><use href="#i-chev"/></svg></label>
             <label class="buscar"><svg class="ic"><use href="#i-buscar"/></svg><input type="search" id="inBuscarI" placeholder="Search projects..." autocomplete="off"></label>

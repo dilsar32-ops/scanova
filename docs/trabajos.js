@@ -172,6 +172,7 @@ function pintarAvanceForma(){ const v = avanceForma($('#fAvance').value); $('#fA
 
 export function conectar(){
   $('#btnNuevo').addEventListener('click', () => { editando = null; llenarForma(null); irA('pForma', 'pProyectos'); });
+  $$('[data-nuevo-inicio]').forEach(b => b.addEventListener('click', () => { editando = null; llenarForma(null); irA('pForma', 'pInicio'); }));
   $('#btnFormaCancelar').addEventListener('click', atras);
   $('#btnFormaGuardar').addEventListener('click', guardarForma);
   $('#fAvance').addEventListener('input', pintarAvanceForma);

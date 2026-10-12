@@ -32,6 +32,18 @@ export function progresoHtml(t){
 }
 export const fechaEn = (iso) => { if(!iso) return ''; const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }); };
 export const hoyLargo = (d) => d.toLocaleDateString('en-US', { weekday:'long', month:'short', day:'numeric', year:'numeric' });
+// "Last update": hace cuánto (2h ago, 1d ago...). ahora se pasa para poder probarlo.
+export function haceTiempo(iso, ahora){
+  const t = new Date(iso).getTime(); if(!iso || isNaN(t)) return '';
+  const s = Math.max(0, Math.round(((ahora == null ? Date.now() : ahora) - t) / 1000));
+  if(s < 60) return 'just now'; const m = Math.floor(s / 60); if(m < 60) return m + 'm ago';
+  const h = Math.floor(m / 60); if(h < 24) return h + 'h ago'; const d = Math.floor(h / 24); if(d < 30) return d + 'd ago';
+  const mo = Math.floor(d / 30); return mo < 12 ? mo + 'mo ago' : Math.floor(mo / 12) + 'y ago';
+}
+// La dirección en dos líneas (calle / ciudad), cortando en la primera coma.
+export function partirDireccion(dir){ const s = String(dir || '').trim(); const i = s.indexOf(','); return i < 0 ? [s, ''] : [s.slice(0, i).trim(), s.slice(i + 1).trim()]; }
+const porPM = (t) => t && t.encargado ? t.encargado + ' (PM)' : '';
+const PRE = (x) => '<i class="tu-pre">' + x + '</i>';   // "Last update: " y "By ": en el teléfono no salen (su diseño)
 export const primerNombre = (n) => String(n || '').trim().split(/\s+/)[0] || '';
 // Los 3 más recientes (por última actividad), sin los archivados.
 export function recientes(lista, n = 3){
@@ -55,32 +67,33 @@ export function ordenar(lista, campo, dir){
   return (lista || []).slice().sort((a, b) => { const x = val(a), y = val(b); return (x < y ? -1 : x > y ? 1 : 0) * d; });
 }
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
-// Una tarjeta de Recent Projects: foto, •••, nombre, dirección, fecha, etapa y avance.
-export function tarjetaHtml(t, img){
+// Una tarjeta de Recent Projects (su diseño): foto, •••, nombre, dirección en dos líneas, etapa, y "Last update · By PM".
+export function tarjetaHtml(t, img, ahora){
   const foto = img ? '<img src="' + esc(img) + '" alt="" loading="lazy">' : '<span class="sin-foto">' + IC('camara') + '<small>No photos yet</small></span>';
   return `<article class="tarj" data-abrir="${esc(t.id)}">
-    <div class="tarj-foto">${foto}<button type="button" class="mas-btn flot" data-menu="${esc(t.id)}" aria-label="Options">${IC('puntos')}</button></div>
+    <div class="tarj-foto">${foto}${t.updated_at ? `<span class="tarj-hace">${esc(haceTiempo(t.updated_at, ahora))}</span>` : ''}<button type="button" class="mas-btn flot" data-menu="${esc(t.id)}" aria-label="Options">${IC('puntos')}</button></div>
     <div class="tarj-cuerpo">
       <div class="tarj-nom">${esc(t.cliente)}</div>
-      <div class="tarj-dir">${esc(t.direccion || 'No address')}</div>
-      <div class="tarj-fecha">${esc(fechaEn(t.updated_at))}</div>
-      ${pillHtml(t)}${progresoHtml(t)}
+      ${(() => { const [a, b] = partirDireccion(t.direccion); return `<div class="tarj-dir">${esc(a || 'No address')}</div>${b ? `<div class="tarj-dir">${esc(b)}</div>` : ''}`; })()}
+      ${pillHtml(t)}
+      <div class="tarj-ult">${IC('reloj')}<div><span>${PRE('Last update: ')}${esc(haceTiempo(t.updated_at, ahora))}</span>${porPM(t) ? `<small>${PRE('By ')}${esc(porPM(t))}</small>` : ''}</div></div>
     </div>
   </article>`;
 }
 // Una fila de All Projects. En el teléfono: nombre + fecha, etapa y la flechita; en la computadora, 4 columnas y •••.
-export function filaHtml(t){
+export function filaHtml(t, img, ahora){
   return `<div class="tfila" data-abrir="${esc(t.id)}">
-    <div class="tc-nom" translate="no"><div class="tn">${esc(t.cliente)}</div><div class="tf-movil">${esc(fechaEn(t.updated_at))}</div></div>
+    <div class="tc-nom" translate="no"><span class="tc-mini">${img ? '<img src="' + esc(img) + '" alt="" loading="lazy">' : ''}</span><div class="tc-nom-t"><div class="tn">${esc(t.cliente)}</div><div class="tf-movil">${esc(fechaEn(t.updated_at))}</div></div></div>
     <div class="tc-dir" translate="no">${esc(t.direccion || '—')}</div>
     <div class="tc-fecha">${esc(fechaEn(t.updated_at))}</div>
     <div class="tc-est">${pillHtml(t)}</div>
+    <div class="tc-ult"><span>${esc(haceTiempo(t.updated_at, ahora))}</span>${porPM(t) ? `<small>${PRE('By ')}${esc(porPM(t))}</small>` : ''}</div>
     <div class="tc-acc"><button type="button" class="mas-btn" data-menu="${esc(t.id)}" aria-label="Options">${IC('puntos')}</button>${IC('chev-der', 'chev-movil')}</div>
   </div>`;
 }
 export function cabTablaHtml(orden){
   const col = (campo, txt) => `<button type="button" class="tc-orden${orden && orden.campo === campo ? ' on' : ''}" data-orden="${campo}">${txt}${IC('orden')}</button>`;
-  return `<div class="tcab">${col('nombre', 'Project Name')}${col('direccion', 'Address')}${col('fecha', 'Date')}${col('estado', 'Status')}<span></span></div>`;
+  return `<div class="tcab">${col('nombre', 'Project Name')}${col('direccion', 'Address')}${col('fecha', 'Date')}${col('estado', 'Status')}${col('fecha', 'Last Update').replace('data-orden="fecha"', 'data-orden="fecha" data-col="ult"')}<span></span></div>`;
 }
 
 // ---------- la página ----------
@@ -100,7 +113,8 @@ function tabla(sel, vista, max){
   const lista = ordenar(filtrarPanel(d.LISTA, vista.estado, vista.texto), ORDEN.campo, ORDEN.dir);
   const filas = max ? lista.slice(0, max) : lista;
   const vacio = !d.LISTA.length ? 'No projects yet. Tap <b>New Project</b> to create the first one.' : 'No projects match.';
-  caja.innerHTML = cabTablaHtml(ORDEN) + (filas.length ? filas.map(filaHtml).join('') : '<p class="vacio">' + vacio + '</p>') +
+  const ahora = Date.now(); const mini = (t) => d.MINIS[(d.RECIENTES[t.id] || [])[0]] || '';
+  caja.innerHTML = cabTablaHtml(ORDEN) + (filas.length ? filas.map(t => filaHtml(t, mini(t), ahora)).join('') : '<p class="vacio">' + vacio + '</p>') +
     (max && lista.length > max ? '<button type="button" class="tabla-mas" data-nav="proyectos">View all ' + lista.length + ' projects</button>' : '');
 }
 async function cargarPortadas(rec){
@@ -111,15 +125,18 @@ async function cargarPortadas(rec){
 }
 function pintarRecientes(){
   const caja = $('#recientes'); if(!caja) return;
-  const d = trabajos.datos(); const rec = recientes(d.LISTA);
-  caja.innerHTML = d.cargando ? '<p class="vacio">Loading…</p>' : rec.length ? rec.map(t => tarjetaHtml(t, portadaDe(t))).join('')
+  const d = trabajos.datos(); const rec = recientes(d.LISTA, 12); const ahora = Date.now();   // la computadora enseña 4; el teléfono 4 a la vista y se desliza para ver más
+  caja.innerHTML = d.cargando ? '<p class="vacio">Loading…</p>' : rec.length ? rec.map(t => tarjetaHtml(t, portadaDe(t), ahora)).join('')
     : '<div class="vacio-tarj">' + IC('carpeta') + '<div><b>No active projects yet.</b><br>Create one in <b>Projects</b> and it will show here with its latest photo.</div></div>';
+  const pp = $('#recPuntos'); if(pp){ pp.innerHTML = rec.length > 1 ? rec.map((_, i) => `<i${i ? '' : ' class="on"'}></i>`).join('') : ''; }
   return rec;
 }
 export function pintar(){
   const nom = primerNombre(PERFIL && PERFIL.full_name);
   const bn = $('#bienvNombre'); if(bn) bn.textContent = nom || 'back';
   const bf = $('#bienvFecha'); if(bf) bf.textContent = hoyLargo(new Date());
+  ['#topeFecha', '#topeFecha2'].forEach(x => { const e = $(x); if(e) e.textContent = hoyLargo(new Date()); });
+  const tn = $('#topeNombre'); if(tn) tn.textContent = nom || 'back';
   const rec = pintarRecientes() || [];
   tabla('#tablaInicio', VISTA.inicio, 8);
   tabla('#tablaProyectos', VISTA.proyectos, 0);
@@ -225,7 +242,16 @@ export function conectar(){
     if(pantallaActual() !== 'pProyectos') irA('pProyectos');
     pintar();
   });
-  $('#btnFiltroI').addEventListener('click', () => $('#herrInicio').classList.toggle('abierto'));
+  // Teléfono (su diseño): el buscador y el estado siempre a la vista; el botón de al lado ordena la lista.
+  $('#btnFiltroI').addEventListener('click', (e) => { e.stopPropagation();
+    const op = [['fecha', -1, 'Last update (newest)'], ['fecha', 1, 'Last update (oldest)'], ['nombre', 1, 'Name (A–Z)'], ['estado', 1, 'Status']];
+    abrirMenuEn(e.currentTarget, op.map(([c, d, t]) => `<button type="button" data-orden-tel="${c}" data-dir="${d}">${ORDEN.campo === c && ORDEN.dir === d ? IC('check') : '<svg class="ic"></svg>'}${t}</button>`).join('')); });
+  document.addEventListener('click', (e) => { const b = e.target.closest('[data-orden-tel]'); if(!b) return; ORDEN = { campo: b.dataset.ordenTel, dir: Number(b.dataset.dir) }; cerrarMenu(); pintar(); });
+  // Los puntitos siguen al carrusel de Recent Projects.
+  $('#recientes').addEventListener('scroll', (e) => { const c = e.currentTarget; const n = c.children.length; if(n < 2) return;
+    const i = Math.round(c.scrollLeft / Math.max(1, c.scrollWidth - c.clientWidth) * (n - 1)); $$('#recPuntos i').forEach((x, k) => x.classList.toggle('on', k === i)); }, { passive:true });
+  // La lupa de arriba (teléfono): lleva al buscador de All Projects.
+  $('#btnBuscarTel').addEventListener('click', () => { if($('#pInicio').hidden){ irA('pInicio'); pintar(); } const i = $('#inBuscarI'); if(i){ i.scrollIntoView({ block:'center' }); i.focus(); } });
   $('#btnFiltroP').addEventListener('click', () => $('#herrProyectos').classList.toggle('abierto'));
   $('#btnCampana').addEventListener('click', (e) => {
     const n = Number($('#campanaPunto').dataset.n || 0);
