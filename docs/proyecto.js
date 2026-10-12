@@ -284,7 +284,7 @@ function pintarEscoger(){
   const niveles = NIVELES.map(n => '<h4 class="cuarto-nivel">' + esc(n.nombre) + '</h4>' + cuartosDe(n.id).map(c => op({ nivel_id:n.id, cuarto_id:c.id }, c.nombre, n.nombre, 'casa')).join('') + op({ nivel_id:n.id }, 'Whole ' + n.nombre, 'No specific room', 'cubo') +
       (ESC_ABRIR === n.id ? '<p class="cuarto-ayuda">Pick the new room:</p>' + tipos(n.id) : `<button type="button" class="pdet-link cuarto-agregar" data-abrir-tipos="${esc(n.id)}">${IC('mas')}Add room to ${esc(n.nombre)}</button>`)).join('');
   $('#cuartoLista').innerHTML = (NIVELES.length ? niveles : '<p class="cuarto-ayuda">This project has no levels yet. Tap one to add it:</p>' + rapidos) +
-    (NIVELES.length ? (ESC_ABRIR === '+nivel' ? '<h4 class="cuarto-nivel">New level</h4>' + rapidos : `<button type="button" class="pdet-link cuarto-agregar" data-abrir-tipos="+nivel">${IC('mas')}Add level</button>`) : '') +
+    (NIVELES.length ? (ESC_ABRIR === '+nivel' ? '<h4 class="cuarto-nivel">New level</h4>' + rapidos : `<button type="button" class="pdet-link cuarto-agregar cuarto-nivel-nuevo" data-abrir-tipos="+nivel">${IC('mas')}Add level</button>`) : '') +
     '<h4 class="cuarto-nivel">Other</h4>' + op({}, 'No room', 'Keep it without a room', 'archivo') + '<p class="aviso" id="cuartoHojaAviso"></p>';
 }
 async function crearNivel(nombre){
