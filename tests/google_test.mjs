@@ -1,13 +1,34 @@
-// Scanova360 · Continuar con Google: la dirección a Supabase y la lectura de la vuelta.
+// Scanova360 · Continuar con Google: la ida directa a Google desde scanova360.com y la lectura de la vuelta.
 import fs from 'node:fs';
-import { urlGoogle, leerVuelta, ESQUEMA_APARATO } from '../docs/app.js';
+import { leerVuelta, ESQUEMA_APARATO, urlEntrarGoogle } from '../docs/app.js';
+import * as G from '../docs/google.js';
 let pass = 0, fail = 0;
 const ok = (l, c) => { if(c){ pass++; console.log('  ok  ' + l); } else { fail++; console.log('  FAIL ' + l); } };
 const app = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
 const idx = fs.readFileSync(new URL('../docs/index.html', import.meta.url), 'utf8');
 const swift = fs.readFileSync(new URL('../ios/App/App/BridgeViewController.swift', import.meta.url), 'utf8');
-ok('urlGoogle: authorize de Supabase con provider=google y la vuelta codificada', urlGoogle('https://scanova360.com/') === 'https://ogrvdsawqpiqkkevaewb.supabase.co/auth/v1/authorize?provider=google&redirect_to=https%3A%2F%2Fscanova360.com%2F');
-ok('urlGoogle: en el aparato vuelve por scanova360://auth', urlGoogle(ESQUEMA_APARATO + '://auth').endsWith('redirect_to=scanova360%3A%2F%2Fauth'));
+ok('urlEntrarGoogle: en el navegador va a scanova360.com/google/', urlEntrarGoogle('https://scanova360.com/?cb=1#x', false) === 'https://scanova360.com/google/');
+ok('urlEntrarGoogle: en la app lleva ?app=1', urlEntrarGoogle('https://scanova360.com/', true) === 'https://scanova360.com/google/?app=1');
+ok('urlEntrarGoogle: la copia de prueba se queda en su carpeta', urlEntrarGoogle('http://localhost:8731/scanova_real/index.html', false) === 'http://localhost:8731/scanova_real/google/');
+ok('esquema del aparato sigue siendo scanova360', ESQUEMA_APARATO === 'scanova360');
+const u = new URL(G.urlGoogleDirecto({ clientId: G.GOOGLE_CLIENT_ID, redirectUri: 'https://scanova360.com/google/', nonceHash: 'h', state: 'w.s' }));
+ok('Google: vuelve a scanova360.com/google/ (no a supabase.co)', u.origin === 'https://accounts.google.com' && u.searchParams.get('redirect_uri') === 'https://scanova360.com/google/');
+ok('Google: pide id_token con openid email profile, nonce y estado', u.searchParams.get('response_type') === 'id_token' && u.searchParams.get('scope') === 'openid email profile' && u.searchParams.get('nonce') === 'h' && u.searchParams.get('state') === 'w.s');
+ok('Google: el client_id es el del cliente Scanova360 Web', /^320782849765-[a-z0-9]+\.apps\.googleusercontent\.com$/.test(u.searchParams.get('client_id')));
+ok('dirPagina: quita index.html', G.dirPagina('https://scanova360.com', '/google/index.html') === 'https://scanova360.com/google/' && G.dirPagina('https://scanova360.com', '/google/') === 'https://scanova360.com/google/');
+ok('estado: recuerda si vino de la app', G.esDeApp(G.estadoNuevo(true, 'x')) && !G.esDeApp(G.estadoNuevo(false, 'x')) && !G.esDeApp(''));
+ok('leerGoogle: comprobante y estado', JSON.stringify(G.leerGoogle('#state=a.1&id_token=tok&authuser=0')) === JSON.stringify({ id_token: 'tok', state: 'a.1' }));
+ok('leerGoogle: error y nada', G.leerGoogle('#error=access_denied&state=w.1').error === 'access_denied' && G.leerGoogle('') === null && G.leerGoogle('#features') === null);
+const fs1 = G.fragmentoSesion({ access_token: 'A', refresh_token: 'R', expires_in: 3600 });
+ok('la sesión vuelve en el formato que la app ya lee', JSON.stringify(leerVuelta(fs1)) === JSON.stringify({ access_token: 'A', refresh_token: 'R' }));
+ok('el error vuelve legible a la app', leerVuelta(G.fragmentoError('Se canceló la entrada con Google.')).error === 'Se canceló la entrada con Google.');
+ok('salida: la app vuelve por scanova360://auth, el navegador a la página principal', G.urlSalida('#x', true, 'https://scanova360.com/google/') === 'scanova360://auth#x' && G.urlSalida('#x', false, 'https://scanova360.com/google/') === 'https://scanova360.com/#x' && G.urlSalida('#x', false, 'http://localhost:8731/scanova_real/google/') === 'http://localhost:8731/scanova_real/#x');
+const h = await G.sha256hex('abc');
+ok('sha256hex: hex en minúsculas como lo compara Supabase', h === 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+ok('azar: 64 letras hex y distintas', /^[0-9a-f]{64}$/.test(G.azar()) && G.azar() !== G.azar());
+const pg = fs.readFileSync(new URL('../docs/google/index.html', import.meta.url), 'utf8');
+ok('página google/: cambia el comprobante en Supabase con grant_type=id_token y el nonce sin hash', /grant_type=id_token/.test(pg) && /provider: 'google', id_token: vuelta\.id_token, nonce: g\.nonce/.test(pg));
+ok('página google/: rechaza una vuelta con otro estado y borra el comprobante de la barra', /g\.state !== vuelta\.state/.test(pg) && /history\.replaceState/.test(pg));
 const v = leerVuelta('#access_token=aaa&expires_in=3600&refresh_token=bbb&token_type=bearer');
 ok('leerVuelta: sesión del fragmento', v && v.access_token === 'aaa' && v.refresh_token === 'bbb' && !v.error);
 ok('leerVuelta: sin # también sirve', leerVuelta('access_token=x').access_token === 'x');

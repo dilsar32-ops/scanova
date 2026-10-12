@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Entrando · Scanova360</title>
+<style>
+:root{ --ink:#0a1130; --ink2:#4d5a6b; --azul:#0b64de; --fondo:#f3f6fa; }
+@media (prefers-color-scheme: dark){ :root{ --ink:#e8eef8; --ink2:#a3b0c2; --fondo:#0f1622; } }
+*{ box-sizing:border-box; }
+body{ margin:0; min-height:100vh; display:grid; place-items:center; background:var(--fondo); color:var(--ink);
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif; }
+.caja{ text-align:center; padding:24px; }
+.logo{ font-size:30px; font-weight:800; letter-spacing:-.035em; }
+.logo span{ color:var(--azul); }
+.msg{ margin-top:14px; color:var(--ink2); font-size:16px; }
+.giro{ width:28px; height:28px; margin:18px auto 0; border-radius:50%; border:3px solid rgba(11,100,222,.2); border-top-color:var(--azul); animation:g 0.9s linear infinite; }
+@keyframes g{ to{ transform:rotate(360deg); } }
+@media (prefers-reduced-motion: reduce){ .giro{ animation:none; } }
+</style>
+</head>
+<body>
+<div class="caja">
+  <div class="logo">Scanova<span>360</span></div>
+  <div class="giro" aria-hidden="true"></div>
+  <p class="msg" id="msg">Conectando con Google…</p>
+</div>
+<script type="module">
+import { SUPABASE_URL, ANON_KEY } from '../config.js';
+import { GOOGLE_CLIENT_ID, CLAVE_GOOGLE, azar, sha256hex, dirPagina, estadoNuevo, esDeApp, urlGoogleDirecto,
+  leerGoogle, fragmentoSesion, fragmentoError, errorLegible, urlSalida } from '../google.js';
+
+const aqui = dirPagina(location.origin, location.pathname);
+const msg = t => { document.getElementById('msg').textContent = t; };
+const vuelta = leerGoogle(location.hash);
+
+if(!vuelta){
+  // Ida: se inventa un nonce (Supabase lo comprueba) y un estado, se guardan aquí mismo y se va a Google.
+  const app = new URLSearchParams(location.search).get('app') === '1';
+  const nonce = azar(32), state = estadoNuevo(app, azar(16));
+  try{ sessionStorage.setItem(CLAVE_GOOGLE, JSON.stringify({ nonce, state })); }catch{}
+  location.replace(urlGoogleDirecto({ clientId: GOOGLE_CLIENT_ID, redirectUri: aqui, nonceHash: await sha256hex(nonce), state }));
+} else {
+  // Vuelta: se borra el comprobante de la barra, se cambia por la sesión de Supabase y se regresa a la app.
+  history.replaceState(null, '', location.pathname);
+  const app = esDeApp(vuelta.state);
+  let g = {}; try{ g = JSON.parse(sessionStorage.getItem(CLAVE_GOOGLE) || '{}'); sessionStorage.removeItem(CLAVE_GOOGLE); }catch{}
+  let frag;
+  if(vuelta.error) frag = fragmentoError(errorLegible(vuelta.error));
+  else if(!g.nonce || g.state !== vuelta.state) frag = fragmentoError('La entrada con Google se venció. Intente otra vez.');
+  else {
+    msg('Entrando…');
+    try{
+      const r = await fetch(SUPABASE_URL + '/auth/v1/token?grant_type=id_token', { method: 'POST',
+        headers: { apikey: ANON_KEY, 'content-type': 'application/json' },
+        body: JSON.stringify({ provider: 'google', id_token: vuelta.id_token, nonce: g.nonce }) });
+      const d = await r.json().catch(() => ({}));
+      frag = (r.ok && d.access_token) ? fragmentoSesion(d)
+        : fragmentoError(d.error_description || d.msg || d.message || 'El servidor no aceptó la entrada con Google.');
+    }catch{ frag = fragmentoError('Sin conexión. Intente otra vez.'); }
+  }
+  location.replace(urlSalida(frag, app, aqui));
+}
+</script>
+</body>
+</html>

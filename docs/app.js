@@ -1,5 +1,6 @@
 // Scanova · arranque, sesión y navegación. Las pantallas viven en index.html; lo de trabajos en trabajos.js.
 import { SUPABASE_URL, ANON_KEY, APP_BUILD, EMPRESA } from './config.js';
+import { ESQUEMA_APARATO, urlEntrarGoogle } from './google.js';
 import * as trabajos from './trabajos.js';
 import * as personas from './personas.js';
 import * as fotos from './fotos.js';
@@ -71,11 +72,10 @@ export async function pedirEntrada(codigo, nombre){
 // Que pantalla le toca a esta cuenta: trabajos si esta activa (o es manager), espera si esta pausada.
 export function puedeEntrar(p){ return !!(p && p.company_id && (p.role === 'manager' || (p.status || 'active') === 'active')); }
 // ---------- CONTINUAR CON GOOGLE ----------
-// Supabase manda a Google y regresa con la sesión en el fragmento (#access_token=...).
-// En el navegador se va y se vuelve a scanova360.com. En el aparato nativo Google no deja entrar desde una vista
-// web metida en una app, así que se abre la hoja segura de iOS (plugin EntrarWeb) y vuelve por scanova360://auth.
-export const ESQUEMA_APARATO = 'scanova360';
-export function urlGoogle(volverA){ return SUPABASE_URL + '/auth/v1/authorize?provider=google&redirect_to=' + encodeURIComponent(volverA); }
+// La página google/ (junto a la app) habla con Google y regresa con la sesión en el fragmento (#access_token=...).
+// Google solo ve scanova360.com (ver google.js). En el aparato nativo Google no deja entrar desde una vista web
+// metida en una app, así que se abre la hoja segura de iOS (plugin EntrarWeb) y vuelve por scanova360://auth.
+export { ESQUEMA_APARATO, urlEntrarGoogle };
 // Pura: lee lo que Supabase deja en el fragmento. null si no es una vuelta de inicio de sesión.
 export function leerVuelta(fragmento){
   const f = String(fragmento || '').replace(/^#/, ''); if(!f) return null;
@@ -91,11 +91,11 @@ let NOMBRE_GOOGLE = '', CORREO_GOOGLE = '';
 async function entrarConGoogle(aviso){
   aviso.classList.remove('ok'); aviso.textContent = '';
   const nativo = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform();
-  if(!nativo){ window.location.assign(urlGoogle(location.origin + location.pathname)); return; }
+  if(!nativo){ window.location.assign(urlEntrarGoogle(location.href, false)); return; }
   const P = window.Capacitor.Plugins && window.Capacitor.Plugins.EntrarWeb;
   if(!P){ aviso.textContent = 'Esta versión de la app todavía no tiene Google. Entre con su correo, o actualice la app.'; return; }
   try{
-    const r = await P.abrir({ url: urlGoogle(ESQUEMA_APARATO + '://auth'), esquema: ESQUEMA_APARATO });
+    const r = await P.abrir({ url: urlEntrarGoogle(location.href, true), esquema: ESQUEMA_APARATO });
     if(!r || r.cancelado) return;
     const u = String(r.url || ''); await procesarVuelta(leerVuelta(u.includes('#') ? u.slice(u.indexOf('#')) : ''), aviso);
   }catch(e){ aviso.textContent = 'No se pudo entrar con Google. ' + String(e && e.message || ''); }
