@@ -11,13 +11,11 @@ export async function contarPendientes(){
   if(!r.ok) return 0;
   const f = await r.json(); return Array.isArray(f) ? f.length : 0;
 }
-// La entrada "Personas" (barra lateral y pestaña de abajo) solo la ve el manager; el número rojo = cuántos esperan.
+// Quién pide entrar (solo el manager): el número rojo en Settings y en More, y el puntito de la campana.
 export async function pintarConteo(){
-  const b = $('#btnPersonas'), c = $('#personasConteo'); if(!b) return;
-  b.hidden = !esManager();
-  const n = b.hidden ? 0 : await contarPendientes();
-  c.textContent = String(n); c.hidden = !n;
-  $$('.pie [data-nav="personas"]').forEach(t => { t.hidden = !esManager(); const cc = t.querySelector('.conteo'); if(cc){ cc.textContent = String(n); cc.hidden = !n; } });
+  const n = esManager() ? await contarPendientes() : 0;
+  ['#ajustesConteo', '#masConteo', '#pieConteo'].forEach(sel => { const c = $(sel); if(c){ c.textContent = String(n); c.hidden = !n; } });
+  const p = $('#campanaPunto'); if(p){ p.hidden = !n; p.dataset.n = String(n); }
 }
 export async function cargar(){
   const aviso = $('#personasAviso'); aviso.textContent = '';
