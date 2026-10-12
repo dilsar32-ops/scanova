@@ -1,0 +1,20 @@
+{
+  "appId": "com.restorationdoctor.scanova360",
+  "appName": "Scanova360",
+  "webDir": "public",
+  "bundledWebRuntime": false,
+  "server": {
+    "url": "https://scanova360.com/app/",
+    "cleartext": false
+  },
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#192d43"
+  },
+  "packageClassList": [
+    "SpeechRecognition",
+    "FilesystemPlugin",
+    "PushNotificationsPlugin",
+    "SharePlugin"
+  ]
+}

@@ -1,0 +1,6 @@
+framework module CapacitorCommunitySpeechRecognition {
+  umbrella header "CapacitorCommunitySpeechRecognition-umbrella.h"
+
+  export *
+  module * { export * }
+}

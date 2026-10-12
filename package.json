@@ -1,0 +1,21 @@
+{
+  "name": "field-report-app",
+  "version": "1.0.0",
+  "description": "Daily field reports app - Labor Log, Equipment Count, Crew Communication, Drying Report",
+  "scripts": {
+    "sync": "npx cap sync ios",
+    "open": "npx cap open ios"
+  },
+  "dependencies": {
+    "@capacitor-community/speech-recognition": "^6.0.1",
+    "@capacitor/android": "^6.2.2",
+    "@capacitor/core": "^6.0.0",
+    "@capacitor/filesystem": "^6.0.4",
+    "@capacitor/ios": "^6.0.0",
+    "@capacitor/push-notifications": "^6.0.5",
+    "@capacitor/share": "^6.0.4"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.0.0"
+  }
+}
