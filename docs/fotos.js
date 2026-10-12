@@ -165,7 +165,7 @@ function botonesSubir(){
   const archivado = TRABAJO && TRABAJO.estado === 'archivado';
   if(archivado) return '<p class="parche">Este trabajo está archivado: se puede ver, pero no se le suben fotos. Reactívelo para seguir.</p>';
   return `<div class="fsubir">
-    ${tactil ? '<label class="btn btn-accent"><svg class="ic"><use href="#i-camara"/></svg>Tomar foto<input type="file" accept="image/*" capture="environment" hidden data-subir></label>' : ''}
+    ${tactil ? '<button type="button" class="btn btn-accent" data-camara><svg class="ic"><use href="#i-camara"/></svg>Tomar fotos</button>' : ''}
     <label class="btn ${tactil ? 'btn-outline' : 'btn-accent'}"><svg class="ic"><use href="#i-mas"/></svg>${tactil ? 'Del carrete' : 'Subir fotos'}<input type="file" accept="image/*" multiple hidden data-subir></label>
   </div>`;
 }
@@ -184,6 +184,10 @@ export function pintar(urls){
     : '<div class="vacio-fotos"><svg class="ic"><use href="#i-camara"/></svg><div><b>Todavía no hay fotos en este trabajo.</b><br>Tome la primera con el botón de arriba; aquí salen por día, con quién las tomó.</div></div>';
   caja.innerHTML = botonesSubir() + tandaHtml() + cuerpo;
   const n = $('#fotosConteo'); if(n) n.textContent = '(' + FOTOS.length + ')';
+  // La portada de la ficha = la foto más nueva (antes se quedaba vacía si las fotos llegaban después de abrir).
+  const masNueva = porDia(FOTOS).flatMap(d => d.fotos)[0];
+  const portada = $('#trabajoFicha .portada');
+  if(portada && masNueva && urls[masNueva.id]){ const img = portada.querySelector('img'); if(!img || img.getAttribute('src') !== urls[masNueva.id]) portada.innerHTML = '<img src="' + esc(urls[masNueva.id]) + '" alt="">'; }
 }
 
 // ---------- subir una tanda (una a la vez: así una foto pesada no tumba a las demás) ----------
@@ -259,5 +263,7 @@ export function conectar(){
   $('#visorBorrar').addEventListener('click', borrarFoto);
   document.addEventListener('keydown', (e) => { if($('#visor').hidden) return; if(e.key === 'Escape') cerrarVisor(); if(e.key === 'ArrowLeft') visorMover(-1); if(e.key === 'ArrowRight') visorMover(1); });
 }
+// El proyecto abierto (para la cámara y el botón del centro).
+export const trabajoActual = () => TRABAJO;
 // solo para pruebas
 export const _estado = () => ({ TRABAJO, FOTOS, TANDA });

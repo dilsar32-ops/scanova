@@ -187,6 +187,7 @@ body.en-inicio{ overflow:hidden; }
   <symbol id="i-galeria" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17.5l5-4.5 3.5 3 3-2.5 4.5 4"/></symbol>
   <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
   <symbol id="i-orden" viewBox="0 0 24 24"><path d="M8.5 9.5 12 6l3.5 3.5M8.5 14.5 12 18l3.5-3.5"/></symbol>
+  <symbol id="i-ubicacion" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.4" fill="currentColor" stroke="none"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/></symbol>
   <symbol id="i-logo" viewBox="0 0 64 64"><rect x="4" y="4" width="56" height="56" rx="16" fill="var(--accent)" stroke="none"/><circle cx="32" cy="32" r="15" fill="none" stroke="#fff" stroke-width="4.5"/><circle cx="32" cy="32" r="5.5" fill="#fff" stroke="none"/><path d="M14 20a22 22 0 0 1 10-10" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" opacity=".85"/></symbol>
 </svg>
 
@@ -389,7 +390,14 @@ body.en-inicio{ overflow:hidden; }
           <div class="forma-grid">
             <div class="field"><label for="fCliente">Cliente</label><input type="text" id="fCliente" autocomplete="off" placeholder="Nombre del cliente"></div>
             <div class="field"><label for="fTelefono">Teléfono</label><input type="tel" id="fTelefono" autocomplete="off" placeholder="(703) 555-0100"></div>
-            <div class="field ancho"><label for="fDireccion">Dirección</label><input type="text" id="fDireccion" autocomplete="off" placeholder="Calle, ciudad"></div>
+            <div class="field ancho"><label for="fDireccion">Dirección</label>
+              <div class="dir-campo">
+                <input type="text" id="fDireccion" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="Escriba la dirección o toque 📍">
+                <button type="button" class="dir-ubicar" id="btnUbicar" aria-label="Usar mi ubicación" title="Usar mi ubicación"><svg class="ic"><use href="#i-ubicacion"/></svg></button>
+                <div class="dir-sug" id="fDireccionSug" hidden></div>
+              </div>
+              <input type="hidden" id="fLat"><input type="hidden" id="fLng">
+              <p class="dir-nota" id="fDireccionNota"></p></div>
             <div class="field"><label for="fCorreo">Correo <span class="hint">opcional</span></label><input type="email" id="fCorreo" autocomplete="off"></div>
             <div class="field"><label for="fTipo">Tipo de trabajo</label>
               <select id="fTipo">
@@ -442,6 +450,23 @@ body.en-inicio{ overflow:hidden; }
     <div class="hoja-caja" role="dialog" aria-labelledby="capturaTitulo">
       <div class="hoja-cab"><h2 id="capturaTitulo">Take a photo for…</h2><button type="button" class="cerrar-hoja" data-cerrar-hoja aria-label="Close">✕</button></div>
       <div class="hoja-lista" id="capturaLista"></div>
+    </div>
+  </div>
+  <!-- LA CAMARA DE SCANOVA: se queda abierta y toma una foto tras otra; cada una se sube sola. -->
+  <div class="camara" id="camara" hidden>
+    <video id="camVideo" playsinline autoplay muted></video>
+    <div class="cam-flash" id="camFlash"></div>
+    <div class="cam-arriba"><button type="button" class="cam-x" id="camCerrar" aria-label="Close camera">✕</button><div class="cam-titulo"><small>Taking photos for</small><b id="camProyecto"></b></div></div>
+    <div class="cam-error" id="camError" hidden>
+      <p id="camErrorTxt"></p>
+      <button type="button" class="btn btn-accent" id="camTelefono"><svg class="ic"><use href="#i-camara"/></svg>Use the phone camera</button>
+      <button type="button" class="btn btn-outline" id="camOtraVez">Try again</button>
+    </div>
+    <div class="cam-abajo">
+      <div class="cam-ultima" id="camUltima" hidden></div>
+      <button type="button" class="cam-disparo" id="camDisparo" aria-label="Take photo" disabled><span></span></button>
+      <button type="button" class="cam-listo" id="camListo">Done</button>
+      <div class="cam-conteo" id="camConteo"></div>
     </div>
   </div>
   <!-- El menú ••• de cada proyecto (y el aviso de la campana). -->

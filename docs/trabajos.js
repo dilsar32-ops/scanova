@@ -115,16 +115,21 @@ export function pintar(){ AL_CAMBIAR(); }
 // Pura: el avance escrito en la forma -> número 0-100, o null si se dejó vacío.
 export function avanceForma(v){ const s = String(v == null ? '' : v).trim(); if(s === '') return null; const n = Number(s); return isFinite(n) ? Math.max(0, Math.min(100, Math.round(n))) : null; }
 export const ETAPAS_FORMA = ['planeacion', 'en_curso', 'completado'];
+// Pura: el punto escrito (lat/lng) -> número, o null si está vacío o no es número.
+export const numONulo = (v) => { const s = String(v == null ? '' : v).trim(); if(s === '') return null; const n = Number(s); return isFinite(n) ? n : null; };
 function leerForma(){
   return { cliente: $('#fCliente').value.trim(), direccion: $('#fDireccion').value.trim(), telefono: $('#fTelefono').value.trim(),
            correo: $('#fCorreo').value.trim(), tipo: $('#fTipo').value, notas: $('#fNotas').value.trim(),
-           etapa: ETAPAS_FORMA.includes($('#fEtapa').value) ? $('#fEtapa').value : 'en_curso', avance: avanceForma($('#fAvance').value) };
+           etapa: ETAPAS_FORMA.includes($('#fEtapa').value) ? $('#fEtapa').value : 'en_curso', avance: avanceForma($('#fAvance').value),
+           lat: numONulo($('#fLat').value), lng: numONulo($('#fLng').value) };
 }
 function llenarForma(t){
   $('#fCliente').value = t ? (t.cliente || '') : ''; $('#fDireccion').value = t ? (t.direccion || '') : '';
   $('#fTelefono').value = t ? (t.telefono || '') : ''; $('#fCorreo').value = t ? (t.correo || '') : '';
   $('#fTipo').value = t ? (t.tipo || '') : ''; $('#fNotas').value = t ? (t.notas || '') : '';
   $('#fEtapa').value = t && ETAPAS_FORMA.includes(t.etapa) ? t.etapa : 'en_curso';
+  $('#fLat').value = t && t.lat != null ? String(t.lat) : ''; $('#fLng').value = t && t.lng != null ? String(t.lng) : '';
+  const nd = $('#fDireccionNota'); if(nd){ nd.textContent = ''; nd.classList.remove('error'); }
   $('#fAvance').value = t && t.avance != null ? String(t.avance) : ''; pintarAvanceForma();
   $('#formaTitulo').textContent = t ? 'Editar trabajo' : 'Trabajo nuevo';
   $('#formaAviso').textContent = '';
@@ -135,7 +140,7 @@ async function guardarForma(){
   const mal = validar(f); if(mal){ aviso.textContent = mal; return; }
   const b = $('#btnFormaGuardar'); b.disabled = true; b.textContent = 'Guardando…';
   try{
-    const base = { cliente: f.cliente, direccion: f.direccion, telefono: f.telefono || null, correo: f.correo || null, tipo: f.tipo, notas: f.notas || null };
+    const base = { cliente: f.cliente, direccion: f.direccion, telefono: f.telefono || null, correo: f.correo || null, tipo: f.tipo, notas: f.notas || null, lat: f.lat, lng: f.lng };
     const enviar = (cuerpo) => editando
       ? authFetch('/rest/v1/fotos_trabajos?id=eq.' + encodeURIComponent(editando.id), { method:'PATCH', headers:{ Prefer:'return=representation' }, body: JSON.stringify({ ...cuerpo, updated_at: new Date().toISOString() }) })
       : authFetch('/rest/v1/fotos_trabajos', { method:'POST', headers:{ Prefer:'return=representation' }, body: JSON.stringify(cuerpo) });
@@ -195,5 +200,7 @@ export function conectar(){
   $('#fAvanceBarra').addEventListener('input', (e) => { $('#fAvance').value = e.target.value; pintarAvanceForma(); });
   $('#btnAvanceQuitar').addEventListener('click', () => { $('#fAvance').value = ''; pintarAvanceForma(); });
 }
+// El proyecto que está en pantalla (para el botón de la cámara).
+export const proyectoAbierto = () => abierto;
 // solo para pruebas
 export const _estado = () => ({ LISTA, abierto });

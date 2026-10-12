@@ -5,6 +5,8 @@ import * as trabajos from './trabajos.js';
 import * as personas from './personas.js';
 import * as fotos from './fotos.js';
 import * as panel from './panel.js';
+import * as camara from './camara.js';
+import * as direccion from './direccion.js';
 
 export const $ = (s, r = document) => r.querySelector(s);
 export const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -166,7 +168,7 @@ export function irA(id, desde){
   $('#subtitulo').textContent = { pEntrar:'Scanova360', pCrear:'Crear cuenta', pEspera:'Cuenta en espera', pInicio:'Home', pProyectos:'Projects', pPersonas:'Team', pForma:'Project', pTrabajo:'Project', pGaleria:'Gallery', pMas:'More' }[id] || 'Scanova360';
   const m = $('#main'); if(m) m.scrollTo(0, 0); window.scrollTo(0, 0);
 }
-export function atras(){ const a = pila.pop(); if(a) irA(a); else irA('pInicio'); if(!a || a === 'pInicio' || a === 'pProyectos') trabajos.pintar(); }
+export function atras(){ const a = pila.pop(); if(a) irA(a); else irA('pInicio'); if(!a || a === 'pInicio' || a === 'pProyectos'){ trabajos.pintar(); trabajos.cargar(); } }
 // Una sección que todavía no tiene diseño: pantalla que lo dice (no finge que funciona).
 let PRONTO = '';
 const TEXTO_PRONTO = {
@@ -287,9 +289,9 @@ async function arrancar(){
     const b = e.target.closest('[data-nav]'); if(!b) return;
     const n = b.dataset.nav;
     if(n === 'atras') atras();
-    else if(n === 'inicio' || n === 'trabajos'){ pila.length = 0; irA('pInicio'); panel.pintar(); }
-    else if(n === 'proyectos'){ pila.length = 0; irA('pProyectos'); panel.pintar(); }
-    else if(n === 'galeria'){ pila.length = 0; irA('pGaleria'); panel.pintarGaleria(); }
+    else if(n === 'inicio' || n === 'trabajos'){ pila.length = 0; irA('pInicio'); panel.pintar(); trabajos.cargar(); }
+    else if(n === 'proyectos'){ pila.length = 0; irA('pProyectos'); panel.pintar(); trabajos.cargar(); }
+    else if(n === 'galeria'){ pila.length = 0; irA('pGaleria'); panel.pintarGaleria(); trabajos.cargar(); }
     else if(n === 'mas'){ pila.length = 0; irA('pMas'); }
     else if(n === 'capture') panel.abrirCaptura();
     else if(n === 'settings' || n === 'personas'){ if(esManager()){ pila.length = 0; irA('pPersonas', 'pInicio'); personas.cargar(); } else pronto('settings'); }
@@ -300,6 +302,8 @@ async function arrancar(){
   trabajos.conectar();
   trabajos.alCambiar(panel.pintar);
   panel.conectar();
+  camara.conectar();
+  direccion.conectar(() => trabajos.datos().LISTA);
   personas.conectar();
   fotos.conectar();
 
