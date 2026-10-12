@@ -8,7 +8,7 @@ de fotos. Nada de la página actual se toca.
 
 | Pieza | Hoy | En la nueva página |
 |---|---|---|
-| GitHub | cuenta `dilsar32-ops`; `amg-reportes` publicada por GitHub Pages (gratis, un solo `index.html` de 2.9 MB) | repositorio nuevo `scanova` → `dilsar32-ops.github.io/scanova`; código partido en archivos pequeños |
+| GitHub | cuenta `dilsar32-ops`; `amg-reportes` publicada por GitHub Pages (gratis, un solo `index.html` de 2.9 MB) | repositorio nuevo `scanova` → `scanova360.com`; código partido en archivos pequeños |
 | Supabase | proyecto Pro `ogrvdsawqpiqkkevaewb`: 42 tablas, 78 funciones, 6 funciones edge, 3 buckets (`app` público, `recibos` y `contenidos` privados) | **mismas cuentas** (`auth`, `companies`, `profiles`, `my_company()`, `my_role()`, `my_status()`); tablas NUEVAS con prefijo `fotos_`; funciones edge NUEVAS con prefijo `fotos-` |
 | Cómo entra la gente | manager: correo + contraseña · crew: sesión anónima + código del equipo + código personal · temporales: nombre + PIN (sin cuenta) | igual: el manager y el crew entran con lo que ya tienen; los temporales **no** entran a la plataforma de fotos (no tienen cuenta); si hace falta, se les da código personal como al crew |
 | Fotos | CompanyCam (de pago) + bucket `contenidos` (solo Contenidos) | **Cloudflare R2** (sin cobro por descargas) |
