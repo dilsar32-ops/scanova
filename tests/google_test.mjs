@@ -1,0 +1,21 @@
+// Scanova360 · Continuar con Google: la dirección a Supabase y la lectura de la vuelta.
+import fs from 'node:fs';
+import { urlGoogle, leerVuelta, ESQUEMA_APARATO } from '../docs/app.js';
+let pass = 0, fail = 0;
+const ok = (l, c) => { if(c){ pass++; console.log('  ok  ' + l); } else { fail++; console.log('  FAIL ' + l); } };
+const app = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+const idx = fs.readFileSync(new URL('../docs/index.html', import.meta.url), 'utf8');
+const swift = fs.readFileSync(new URL('../ios/App/App/BridgeViewController.swift', import.meta.url), 'utf8');
+ok('urlGoogle: authorize de Supabase con provider=google y la vuelta codificada', urlGoogle('https://scanova360.com/') === 'https://ogrvdsawqpiqkkevaewb.supabase.co/auth/v1/authorize?provider=google&redirect_to=https%3A%2F%2Fscanova360.com%2F');
+ok('urlGoogle: en el aparato vuelve por scanova360://auth', urlGoogle(ESQUEMA_APARATO + '://auth').endsWith('redirect_to=scanova360%3A%2F%2Fauth'));
+const v = leerVuelta('#access_token=aaa&expires_in=3600&refresh_token=bbb&token_type=bearer');
+ok('leerVuelta: sesión del fragmento', v && v.access_token === 'aaa' && v.refresh_token === 'bbb' && !v.error);
+ok('leerVuelta: sin # también sirve', leerVuelta('access_token=x').access_token === 'x');
+ok('leerVuelta: error de Google legible (+ = espacio)', leerVuelta('#error=server_error&error_description=Unable+to+exchange').error === 'Unable to exchange');
+ok('leerVuelta: fragmento vacío o ajeno = null (no confunde un #ancla)', leerVuelta('') === null && leerVuelta('#features') === null && leerVuelta(null) === null);
+ok('index: los dos botones nacen escondidos y la pantalla del código existe', /id="btnGoogle" hidden/.test(idx) && /id="btnGoogle2" hidden/.test(idx) && /id="pCodigo"/.test(idx) && /id="btnGcPedir"/.test(idx));
+ok('app: el botón solo aparece si Supabase tiene Google activado', /\/auth\/v1\/settings/.test(app) && /external\.google/.test(app));
+ok('app: la vuelta limpia la dirección (el token no se queda en la barra)', /history\.replaceState\(null, '', location\.pathname \+ location\.search\)/.test(app));
+ok('app: cuenta de Google sin equipo pide el código (no se borra la sesión)', /pedirCodigo\(\)/.test(app) && /provider === 'google'/.test(app));
+ok('aparato: hoja segura de iOS (ASWebAuthenticationSession) registrada como EntrarWeb', /ASWebAuthenticationSession\(url: url, callbackURLScheme: esquema\)/.test(swift) && /jsName = "EntrarWeb"/.test(swift) && /registerPluginInstance\(EntrarWebPlugin\(\)\)/.test(swift));
+console.log(`\n${pass} ok, ${fail} fail`); process.exit(fail ? 1 : 0);

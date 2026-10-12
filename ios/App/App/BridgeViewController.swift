@@ -1,5 +1,6 @@
 import UIKit
 import Capacitor
+import AuthenticationServices
 
 // The stock CAPBridgeViewController only auto-registers plugins that ship
 // as separate npm/CocoaPods packages - it reads their class names out of
@@ -59,7 +60,45 @@ class BridgeViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(AsistenteVozPlugin())  // microfono + nivel para el asistente global
         bridge?.registerPluginInstance(CerebroVozPlugin())    // el modelo del telefono que interpreta lo que oye
         bridge?.registerPluginInstance(MensajePlugin())      // mandar el invoice por Mensajes, ya dirigido al cliente
+        bridge?.registerPluginInstance(EntrarWebPlugin())    // Scanova360: Continuar con Google en la hoja segura de iOS
 
         // Scanova360: sin actualizador (la web vive en el sitio).
+    }
+}
+
+// CONTINUAR CON GOOGLE en el aparato (Scanova360, 12 oct 2026).
+// Google no deja iniciar sesion dentro de una vista web metida en una app (error "disallowed_useragent").
+// La salida que Apple da para esto es ASWebAuthenticationSession: una hoja segura de Safari que comparte
+// las cuentas de Google del telefono y regresa a la app por scanova360://auth con la sesion en el fragmento.
+@objc(EntrarWebPlugin)
+public class EntrarWebPlugin: CAPPlugin, CAPBridgedPlugin, ASWebAuthenticationPresentationContextProviding {
+    public let identifier = "EntrarWebPlugin"
+    public let jsName = "EntrarWeb"
+    public let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "abrir", returnType: CAPPluginReturnPromise)
+    ]
+    private var sesion: ASWebAuthenticationSession?
+
+    @objc func abrir(_ call: CAPPluginCall) {
+        guard let texto = call.getString("url"), let url = URL(string: texto),
+              let esquema = call.getString("esquema"), !esquema.isEmpty else {
+            call.reject("falta la url o el esquema"); return
+        }
+        DispatchQueue.main.async {
+            let ses = ASWebAuthenticationSession(url: url, callbackURLScheme: esquema) { [weak self] vuelta, error in
+                self?.sesion = nil
+                if let vuelta = vuelta { call.resolve(["url": vuelta.absoluteString]); return }
+                if let e = error as? ASWebAuthenticationSessionError, e.code == .canceledLogin { call.resolve(["cancelado": true]); return }
+                call.reject(error?.localizedDescription ?? "no se pudo entrar")
+            }
+            ses.presentationContextProvider = self
+            ses.prefersEphemeralWebBrowserSession = false
+            self.sesion = ses
+            if !ses.start() { self.sesion = nil; call.reject("no se pudo abrir la hoja de Google") }
+        }
+    }
+
+    public func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        return bridge?.viewController?.view.window ?? ASPresentationAnchor()
     }
 }

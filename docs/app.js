@@ -70,6 +70,58 @@ export async function pedirEntrada(codigo, nombre){
 }
 // Que pantalla le toca a esta cuenta: trabajos si esta activa (o es manager), espera si esta pausada.
 export function puedeEntrar(p){ return !!(p && p.company_id && (p.role === 'manager' || (p.status || 'active') === 'active')); }
+// ---------- CONTINUAR CON GOOGLE ----------
+// Supabase manda a Google y regresa con la sesión en el fragmento (#access_token=...).
+// En el navegador se va y se vuelve a scanova360.com. En el aparato nativo Google no deja entrar desde una vista
+// web metida en una app, así que se abre la hoja segura de iOS (plugin EntrarWeb) y vuelve por scanova360://auth.
+export const ESQUEMA_APARATO = 'scanova360';
+export function urlGoogle(volverA){ return SUPABASE_URL + '/auth/v1/authorize?provider=google&redirect_to=' + encodeURIComponent(volverA); }
+// Pura: lee lo que Supabase deja en el fragmento. null si no es una vuelta de inicio de sesión.
+export function leerVuelta(fragmento){
+  const f = String(fragmento || '').replace(/^#/, ''); if(!f) return null;
+  const q = new URLSearchParams(f);
+  if(q.get('access_token')) return { access_token: q.get('access_token'), refresh_token: q.get('refresh_token') || '' };
+  if(q.get('error') || q.get('error_description')) return { error: (q.get('error_description') || q.get('error') || '').replace(/\+/g, ' ') };
+  return null;
+}
+async function googleActivo(){
+  try{ const r = await fetch(SUPABASE_URL + '/auth/v1/settings', { headers:{ apikey: ANON_KEY } }); const d = await r.json(); return !!(d && d.external && d.external.google); }catch{ return false; }
+}
+let NOMBRE_GOOGLE = '', CORREO_GOOGLE = '';
+async function entrarConGoogle(aviso){
+  aviso.classList.remove('ok'); aviso.textContent = '';
+  const nativo = window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform();
+  if(!nativo){ window.location.assign(urlGoogle(location.origin + location.pathname)); return; }
+  const P = window.Capacitor.Plugins && window.Capacitor.Plugins.EntrarWeb;
+  if(!P){ aviso.textContent = 'Esta versión de la app todavía no tiene Google. Entre con su correo, o actualice la app.'; return; }
+  try{
+    const r = await P.abrir({ url: urlGoogle(ESQUEMA_APARATO + '://auth'), esquema: ESQUEMA_APARATO });
+    if(!r || r.cancelado) return;
+    const u = String(r.url || ''); await procesarVuelta(leerVuelta(u.includes('#') ? u.slice(u.indexOf('#')) : ''), aviso);
+  }catch(e){ aviso.textContent = 'No se pudo entrar con Google. ' + String(e && e.message || ''); }
+}
+// Con la vuelta en la mano: guardar la sesión, saber quién es, y llevarlo a donde le toca.
+async function procesarVuelta(v, aviso){
+  if(!v) return false;
+  if(v.error){ abrirEntrar('pEntrar'); $('#entrarAviso').textContent = 'No se pudo entrar con Google: ' + v.error; return true; }
+  guardarSes({ access_token: v.access_token, refresh_token: v.refresh_token, user_id: null });
+  const r = await authFetch('/auth/v1/user'); const u = r.ok ? await r.json() : null;
+  if(!u || !u.id){ guardarSes(null); abrirEntrar('pEntrar'); $('#entrarAviso').textContent = 'No se pudo entrar con Google. Intente otra vez.'; return true; }
+  guardarSes({ ...SES, user_id: u.id });
+  const m = u.user_metadata || {}; NOMBRE_GOOGLE = m.full_name || m.name || ''; CORREO_GOOGLE = u.email || '';
+  const p = await cargarPerfil();
+  if(p && p.company_id){
+    if(p.role !== 'manager' && p.status === 'removed'){ guardarSes(null); abrirEntrar('pEntrar'); $('#entrarAviso').textContent = 'Esa cuenta no está autorizada en este equipo. Hable con el manager.'; return true; }
+    pintarQuien(); await llegar(p); return true;
+  }
+  pedirCodigo(); return true;
+}
+// Entró con Google pero no es del equipo todavía: pedir el código (queda en espera hasta que el manager apruebe).
+function pedirCodigo(){
+  $('#gcNombre').value = NOMBRE_GOOGLE; $('#gcCodigo').value = ''; $('#gcAviso').textContent = '';
+  $('#gcCorreo').textContent = 'Entró con Google' + (CORREO_GOOGLE ? ' (' + CORREO_GOOGLE + ')' : '') + '. Falta el código del equipo.';
+  abrirEntrar('pCodigo');
+}
 export function salir(){ guardarSes(null); PERFIL = null; pila.length = 0; if(esAparato()) irA('pEntrar'); else cerrarEntrar(); }
 
 // ---------- la bienvenida (la imagen aprobada): se ve solo sin sesión y solo en el navegador ----------
@@ -89,6 +141,7 @@ export function ocultarInicio(){ const i = $('#inicio'); if(i){ i.hidden = true;
 // Se cierra con la X, tocando fuera de la tarjeta o con Escape, y se vuelve a la bienvenida.
 let MODAL = false;
 export function abrirEntrar(cual){
+  if(esAparato()){ irA(cual || 'pEntrar'); return; }   // en la app no hay bienvenida detrás: pantalla normal
   MODAL = true; document.body.classList.add('modal-entrar');
   irA(cual || 'pEntrar');
   const ai = (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);   // en el teléfono no se abre el teclado solo
@@ -99,11 +152,11 @@ export function cerrarEntrar(){ MODAL = false; document.body.classList.remove('m
 // ---------- navegación: una pantalla a la vez, con su salida al pie ----------
 const pila = [];
 export function irA(id, desde){
-  const enVentana = MODAL && (id === 'pEntrar' || id === 'pCrear' || id === 'pEspera');
+  const enVentana = MODAL && (id === 'pEntrar' || id === 'pCrear' || id === 'pEspera' || id === 'pCodigo');
   if(!enVentana){ MODAL = false; document.body.classList.remove('modal-entrar'); ocultarInicio(); }
   if(desde) pila.push(desde);
   $$('.pantalla').forEach(p => { p.hidden = p.id !== id; });
-  const solo = (id === 'pEntrar' || id === 'pCrear' || id === 'pEspera');
+  const solo = (id === 'pEntrar' || id === 'pCrear' || id === 'pEspera' || id === 'pCodigo');
   document.body.classList.toggle('modo-entrar', solo);
   $('#pie').hidden = solo;
   $('#btnAtras').hidden = !pila.length;
@@ -134,6 +187,20 @@ async function arrancar(){
   ojo('#btnOjo', '#inClave'); ojo('#btnOjo2', '#crClave');
   $('#lnkCrear').addEventListener('click', (e) => { e.preventDefault(); $('#crearAviso').textContent = ''; irA('pCrear'); });
   $('#lnkVolverEntrar').addEventListener('click', (e) => { e.preventDefault(); irA('pEntrar'); });
+  $('#btnGoogle').addEventListener('click', () => entrarConGoogle($('#entrarAviso')));
+  $('#btnGoogle2').addEventListener('click', () => entrarConGoogle($('#crearAviso')));
+  $('#lnkGcOtra').addEventListener('click', (e) => { e.preventDefault(); salir(); });
+  $('#btnGcPedir').addEventListener('click', async () => {
+    const aviso = $('#gcAviso'); aviso.textContent = '';
+    const nombre = ($('#gcNombre').value || '').trim(), codigo = ($('#gcCodigo').value || '').trim().toUpperCase();
+    if(!nombre) return aviso.textContent = 'Escriba su nombre.';
+    if(!codigo) return aviso.textContent = 'Escriba el código del equipo (pídaselo al manager).';
+    const b = $('#btnGcPedir'); b.disabled = true; b.textContent = 'Pidiendo…';
+    try{ const p = await pedirEntrada(codigo, nombre); pintarQuien(); await llegar(p); }
+    catch(e){ const m = String(e && e.message || ''); aviso.textContent = /codigo_invalido/.test(m) ? 'Ese código del equipo no existe. Pídaselo al manager.' : (m || 'No se pudo. Revise su internet.'); }
+    b.disabled = false; b.textContent = 'Pedir entrada';
+  });
+  googleActivo().then(si => { $$('.g-solo').forEach(x => { x.hidden = !si; }); });
   // Recuperar: Supabase manda el correo con el enlace; aqui solo se pide.
   $('#lnkOlvide').addEventListener('click', async (e) => {
     e.preventDefault();
@@ -215,10 +282,14 @@ async function arrancar(){
   personas.conectar();
   fotos.conectar();
 
+  // ¿Viene de vuelta de Google? (#access_token=... o #error=...): se limpia la dirección y se entra.
+  const vuelta = leerVuelta(location.hash);
+  if(vuelta){ history.replaceState(null, '', location.pathname + location.search); if(!esAparato()) mostrarInicio(); if(await procesarVuelta(vuelta)) return; }
   SES = leerSes();
   if(SES && SES.access_token){
     const p = await cargarPerfil();
     if(p && p.company_id){ pintarQuien(); await llegar(p); return; }
+    if(p && !p.company_id || (!p && SES.user_id)){ const r = await authFetch('/auth/v1/user'); const u = r.ok ? await r.json() : null; if(u && u.app_metadata && u.app_metadata.provider === 'google'){ const m = u.user_metadata || {}; NOMBRE_GOOGLE = m.full_name || m.name || ''; CORREO_GOOGLE = u.email || ''; if(!esAparato()) mostrarInicio(); pedirCodigo(); return; } }
     guardarSes(null);
   }
   if(esAparato()) irA('pEntrar'); else mostrarInicio();
