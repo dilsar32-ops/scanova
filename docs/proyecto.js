@@ -65,11 +65,11 @@ export function etiquetasDe(t){
   const vistas = new Set();
   return l.map(x => ({ t: String(x && x.t || '').trim().slice(0, 40), c: ETQ_COLORES[x && x.c] ? x.c : 'gris' })).filter(x => x.t && !vistas.has(x.t.toLowerCase()) && vistas.add(x.t.toLowerCase()));
 }
-const ETAPA_COLOR = { planeacion:'morado', en_curso:'amarillo', completado:'azul', archivado:'gris' };
+// Solo las etiquetas que él pone (ya no se agregan solas Active ni la etapa: él puso las suyas).
+// La única que sale sola es "Archived", para que nunca se le pase que el proyecto está archivado.
 export const chipEtq = (txt, color) => `<span class="etq-c c-${esc(color)}">${esc(txt)}</span>`;
 export function etiquetasHtml(t){
-  const e = panel.etapaDe(t); const arch = t.estado === 'archivado';
-  return chipEtq(arch ? 'Archived' : 'Active', arch ? 'gris' : 'verde') + etiquetasDe(t).map(x => chipEtq(x.t, x.c)).join('') + (arch ? '' : chipEtq(panel.ETAPAS[e], ETAPA_COLOR[e]));
+  return (t.estado === 'archivado' ? chipEtq('Archived', 'gris') : '') + etiquetasDe(t).map(x => chipEtq(x.t, x.c)).join('');
 }
 // Etiquetas usadas en otros proyectos: para escogerlas con un toque.
 export function sugerenciasEtq(lista, actuales){
@@ -373,8 +373,7 @@ function abrirEtiquetas(){
 function pintarEtiquetas(guardarTexto){
   const txt = guardarTexto && $('#etqTxt') ? $('#etqTxt').value : '';
   const sug = sugerenciasEtq(trabajos.datos().LISTA, ETQ_EDIT);
-  $('#detHojaCuerpo').innerHTML = `<p class="etq-nota">Status and stage (Active, In Progress…) change with <b>Edit Project</b>. Here go your own labels.</p>
-    <div class="etq-lista">${ETQ_EDIT.length ? ETQ_EDIT.map((x, i) => `<span class="etq-c c-${esc(x.c)}">${esc(x.t)}<button type="button" data-etq-quitar="${i}" aria-label="Remove ${esc(x.t)}">✕</button></span>`).join('') : '<span class="pdet-vacio">No labels yet.</span>'}</div>
+  $('#detHojaCuerpo').innerHTML = `<div class="etq-lista">${ETQ_EDIT.length ? ETQ_EDIT.map((x, i) => `<span class="etq-c c-${esc(x.c)}">${esc(x.t)}<button type="button" data-etq-quitar="${i}" aria-label="Remove ${esc(x.t)}">✕</button></span>`).join('') : '<span class="pdet-vacio">No labels yet.</span>'}</div>
     ${sug.length ? '<h4 class="etq-sub">Used in other projects</h4><div class="etq-lista">' + sug.map(x => `<button type="button" class="etq-c c-${esc(x.c)} etq-sug" data-etq-sug='${esc(JSON.stringify(x))}'>+ ${esc(x.t)}</button>`).join('') + '</div>' : ''}
     <h4 class="etq-sub">New label</h4>
     <div class="etq-nueva"><input type="text" id="etqTxt" maxlength="40" placeholder="Flood Doctor Contract" value="${esc(txt)}"><button type="button" class="btn btn-outline btn-chico" data-etq-agregar>Add</button></div>
