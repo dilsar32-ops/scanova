@@ -266,13 +266,38 @@ function pintarPronto(){
 
 // ---------- escoger un cuarto (mover fotos o la cámara) ----------
 let AL_ESCOGER = null;
+// Escoger nivel/cuarto (mover fotos o la cámara). Aquí mismo se crean el nivel y el cuarto si todavía no existen.
+let ESC_TITULO = '', ESC_ACTUAL = null, ESC_ABRIR = '';
 export function escogerCuarto(titulo, actual, fn){
-  AL_ESCOGER = fn;
-  $('#cuartoTitulo').textContent = titulo;
+  AL_ESCOGER = fn; ESC_TITULO = titulo; ESC_ACTUAL = actual || null; ESC_ABRIR = '';
+  pintarEscoger();
+  $('#hojaCuarto').hidden = false;
+}
+function pintarEscoger(){
+  $('#cuartoTitulo').textContent = ESC_TITULO;
+  const actual = ESC_ACTUAL;
   const marca = (d) => (actual && (actual.cuarto_id || null) === (d.cuarto_id || null) && (actual.nivel_id || null) === (d.nivel_id || null)) ? ' on' : '';
   const op = (d, txt, sub, ic) => `<button type="button" class="cap-fila cuarto-op${marca(d)}" data-escoger='${esc(JSON.stringify(d))}'><span class="cap-foto">${IC(ic)}</span><span class="cap-texto"><b>${esc(txt)}</b>${sub ? '<small>' + esc(sub) + '</small>' : ''}</span></button>`;
-  $('#cuartoLista').innerHTML = (NIVELES.length ? NIVELES.map(n => '<h4 class="cuarto-nivel">' + esc(n.nombre) + '</h4>' + op({ nivel_id:n.id }, 'Whole level', n.nombre, 'cubo') + cuartosDe(n.id).map(c => op({ nivel_id:n.id, cuarto_id:c.id }, c.nombre, n.nombre, 'casa')).join('')).join('') : '<p class="vacio">This project has no levels or rooms yet. Add them in the <b>Rooms</b> tab.</p>') + op({}, 'No room', 'Keep it without a room', 'archivo');
-  $('#hojaCuarto').hidden = false;
+  const tipos = (nid) => '<div class="chips envolver cuarto-nuevo">' + TIPOS_CUARTO.map(r => `<button type="button" class="chip" data-crear-cuarto="${esc(nid)}" data-tipo="${esc(r)}">${esc(r)}</button>`).join('') + '</div>';
+  const usados = new Set(NIVELES.map(x => x.nombre));
+  const rapidos = '<div class="chips envolver cuarto-nuevo">' + NIVELES_RAPIDOS.filter(r => !usados.has(r) || r === 'Other').map(r => `<button type="button" class="chip" data-crear-nivel="${esc(r)}">${esc(r)}</button>`).join('') + '</div>';
+  const niveles = NIVELES.map(n => '<h4 class="cuarto-nivel">' + esc(n.nombre) + '</h4>' + cuartosDe(n.id).map(c => op({ nivel_id:n.id, cuarto_id:c.id }, c.nombre, n.nombre, 'casa')).join('') + op({ nivel_id:n.id }, 'Whole ' + n.nombre, 'No specific room', 'cubo') +
+      (ESC_ABRIR === n.id ? '<p class="cuarto-ayuda">Pick the new room:</p>' + tipos(n.id) : `<button type="button" class="pdet-link cuarto-agregar" data-abrir-tipos="${esc(n.id)}">${IC('mas')}Add room to ${esc(n.nombre)}</button>`)).join('');
+  $('#cuartoLista').innerHTML = (NIVELES.length ? niveles : '<p class="cuarto-ayuda">This project has no levels yet. Tap one to add it:</p>' + rapidos) +
+    (NIVELES.length ? (ESC_ABRIR === '+nivel' ? '<h4 class="cuarto-nivel">New level</h4>' + rapidos : `<button type="button" class="pdet-link cuarto-agregar" data-abrir-tipos="+nivel">${IC('mas')}Add level</button>`) : '') +
+    '<h4 class="cuarto-nivel">Other</h4>' + op({}, 'No room', 'Keep it without a room', 'archivo') + '<p class="aviso" id="cuartoHojaAviso"></p>';
+}
+async function crearNivel(nombre){
+  const r = await authFetch('/rest/v1/fotos_niveles', { method:'POST', headers:{ Prefer:'return=representation' }, body: JSON.stringify({ trabajo_id: T.id, nombre, orden: NIVELES.length }) });
+  if(!r.ok) throw new Error(r.status === 404 ? 'falta correr sql/fotos-04-niveles.sql' : 'HTTP ' + r.status);
+  const fila = (await r.json())[0]; if(!fila) throw new Error('the database did not return the level');
+  NIVELES.push(fila); pintarTodo(); return fila;
+}
+async function crearCuarto(nivel_id, nombre, tipo){
+  const r = await authFetch('/rest/v1/fotos_cuartos', { method:'POST', headers:{ Prefer:'return=representation' }, body: JSON.stringify({ trabajo_id: T.id, nivel_id, nombre, tipo: tipo || null, orden: cuartosDe(nivel_id).length }) });
+  if(!r.ok) throw new Error(r.status === 404 ? 'falta correr sql/fotos-04-niveles.sql' : 'HTTP ' + r.status);
+  const fila = (await r.json())[0]; if(!fila) throw new Error('the database did not return the room');
+  CUARTOS.push(fila); pintarTodo(); return fila;
 }
 function cerrarEscoger(){ $('#hojaCuarto').hidden = true; AL_ESCOGER = null; }
 
@@ -427,7 +452,7 @@ export function conectar(){
   detalles.usarNombres(fotos.nombreDe, fotos.cargarNombres);
   detalles.alCambiar(() => { if(T) pintarActividad(); });
   detalles.conectar();
-  camara.usarCuartos({ hay: (id) => !!(T && T.id === id && NIVELES.length), destino: destinoActual, nombre: nombreDestino, escoger: escogerCuarto });
+  camara.usarCuartos({ hay: (id) => !!(T && T.id === id), destino: destinoActual, nombre: nombreDestino, escoger: escogerCuarto });
   fotos.alPintar(pintarFotos);
   fotos.usarDestino(destinoActual);
   fotos.usarOrdenVisor(ordenVisible);
@@ -487,6 +512,19 @@ export function conectar(){
     if(q('#btnPorCuarto')){ POR_CUARTO = !POR_CUARTO; pintarFotos(); return; }
     if(q('#btnSeleccionar')){ MODO_SEL = !MODO_SEL; SEL.clear(); pintarFotos(); return; }
     if((el = q('[data-sel-accion]'))){ const ids = [...SEL]; if(el.dataset.selAccion === 'mover') mover(ids); else papelera(ids); return; }
+    if((el = q('[data-abrir-tipos]'))){ ESC_ABRIR = ESC_ABRIR === el.dataset.abrirTipos ? '' : el.dataset.abrirTipos; pintarEscoger(); return; }
+    if((el = q('[data-crear-nivel]'))){ let nombre = el.dataset.crearNivel;
+      if(nombre === 'Other'){ nombre = (prompt('Level name') || '').trim(); if(!nombre) return; }
+      el.disabled = true;
+      crearNivel(nombre).then(n => { ESC_ABRIR = n.id; pintarEscoger(); }).catch(err => { el.disabled = false; const a = $('#cuartoHojaAviso'); if(a) a.textContent = 'Could not add the level. ' + String(err && err.message || err); });
+      return; }
+    if((el = q('[data-crear-cuarto]'))){ const nid = el.dataset.crearCuarto, tipo = el.dataset.tipo;
+      let nombre = tipo === 'Other' ? (prompt('Room name') || '').trim() : nombreLibre(tipo, cuartosDe(nid).map(x => x.nombre));
+      if(!nombre) return;
+      el.disabled = true;
+      crearCuarto(nid, nombre, tipo).then(c => { const fn = AL_ESCOGER; cerrarEscoger(); if(fn) fn({ nivel_id: c.nivel_id, cuarto_id: c.id }); })
+        .catch(err => { el.disabled = false; const a = $('#cuartoHojaAviso'); if(a) a.textContent = 'Could not add the room. ' + String(err && err.message || err); });
+      return; }
     if((el = q('[data-escoger]'))){ const d = JSON.parse(el.dataset.escoger); const fn = AL_ESCOGER; cerrarEscoger(); if(fn) fn(d); return; }
     if(q('[data-cerrar-cuarto]') || e.target.id === 'hojaCuarto'){ cerrarEscoger(); return; }
   });

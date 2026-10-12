@@ -48,12 +48,15 @@ async function encender(){
 // Abrir la cámara para un proyecto. Devuelve false si este aparato no tiene cámara para la página
 // (entonces se usa la del teléfono, una por vez, en el mismo toque).
 // A qué nivel/cuarto van las fotos de la cámara. La ficha del proyecto presta la lista (usarCuartos).
-let DEST = {}, CUARTOS = null;
+let DEST = {}, CUARTOS = null, ESCOGER_PROYECTO = null;
+export const usarEscogerProyecto = (fn) => { ESCOGER_PROYECTO = fn; };
 export const usarCuartos = (api) => { CUARTOS = api; };
 export function pintarCuarto(){
   const b = $('#camCuarto'); if(!b) return;
+  // Siempre a la vista (aunque el proyecto todavía no tenga niveles: desde aquí se crean).
   const hay = !!(CUARTOS && TRABAJO && CUARTOS.hay(TRABAJO.id));
-  b.hidden = !hay; if(hay) $('#camCuartoTxt').textContent = CUARTOS.nombre(DEST);
+  b.hidden = !CUARTOS || !TRABAJO;
+  $('#camCuartoTxt').textContent = hay && (DEST.nivel_id || DEST.cuarto_id) ? CUARTOS.nombre(DEST) : 'Level & room';
 }
 export function abrir(trabajo){
   if(!trabajo) return false;
@@ -64,6 +67,13 @@ export function abrir(trabajo){
   $('#camara').hidden = false; document.body.classList.add('con-camara');
   pintar(); encender();
   return true;
+}
+// Cambiar de proyecto sin cerrar la cámara (desde "Taking photos for…").
+export function cambiar(trabajo){
+  if(!trabajo) return;
+  TRABAJO = trabajo; DEST = {};
+  $('#camProyecto').textContent = trabajo.cliente || '';
+  pintarCuarto(); pintar();
 }
 export function cerrar(){
   apagar(); $('#camara').hidden = true; document.body.classList.remove('con-camara'); TRABAJO = null;
@@ -95,7 +105,8 @@ export function conectar(){
   $('#camCerrar').addEventListener('click', cerrar);
   $('#camOtraVez').addEventListener('click', encender);
   $('#camTelefono').addEventListener('click', () => { camaraDelTelefono(); });
-  $('#camCuarto').addEventListener('click', () => { if(CUARTOS) CUARTOS.escoger('Photos go to…', DEST, (d) => { DEST = d || {}; pintarCuarto(); }); });
+  $('#camCuarto').addEventListener('click', () => { if(CUARTOS && TRABAJO && CUARTOS.hay(TRABAJO.id)) CUARTOS.escoger('Photos go to…', DEST, (d) => { DEST = d || {}; pintarCuarto(); }); });
+  $('#camProyectoBtn').addEventListener('click', () => { if(ESCOGER_PROYECTO) ESCOGER_PROYECTO(); });
   // "Tomar fotos" de la ficha del proyecto.
   document.addEventListener('click', (e) => {
     if(!e.target.closest('[data-camara]')) return;

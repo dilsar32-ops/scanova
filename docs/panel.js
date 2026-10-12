@@ -5,6 +5,7 @@ import { $, $$, irA, esManager, PERFIL } from './app.js';
 import * as trabajos from './trabajos.js';
 import * as fotos from './fotos.js';
 import * as camara from './camara.js';
+import * as cerca from './cerca.js';
 
 // Se piden al usarse (no al cargar): así no importa en qué orden se cargan los módulos.
 const esc = (v) => trabajos.esc(v);
@@ -170,29 +171,48 @@ function abrirProyecto(id){
 // Dentro de un proyecto va directo a ese proyecto (no vuelve a preguntar). Afuera, se escoge el proyecto.
 // En el teléfono abre la cámara de Scanova (muchas fotos seguidas); en la computadora, escoger archivos.
 const esTactil = () => (navigator.maxTouchPoints || 0) > 0 || /iPhone|iPad|Android/i.test(navigator.userAgent);
-export function abrirCaptura(){
+// desdeCamara = el título "Taking photos for…" de la cámara: escoger (o cambiar) el proyecto sin cerrar la cámara.
+// La lista pone primero los proyectos más cercanos a donde está parado.
+let SEQ_CAP = 0;
+export function abrirCaptura(desdeCamara){
   const t = trabajos.proyectoAbierto();
-  if(pantallaActual() === 'pTrabajo' && t && t.estado !== 'archivado'){
+  if(!desdeCamara && pantallaActual() === 'pTrabajo' && t && t.estado !== 'archivado'){
     if(esTactil()) camara.abrir(t);
     else { const inp = document.querySelector('#fotosPanel input[data-subir][multiple]'); if(inp) inp.click(); }
     return;
   }
   const d = trabajos.datos(); const hoja = $('#hojaCaptura'); const lista = $('#capturaLista');
-  const activos = d.LISTA.filter(t => t.estado !== 'archivado').slice().sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
-  const tactil = esTactil();
-  const fila = (t) => `<span class="cap-foto">${portadaDe(t) ? '<img src="' + esc(portadaDe(t)) + '" alt="">' : IC('camara')}</span>
-      <span class="cap-texto"><b>${esc(t.cliente)}</b><small>${esc(t.direccion || '')}</small></span>
-      <span class="cap-accion">${IC(tactil ? 'camara' : 'mas')}${tactil ? 'Photos' : 'Upload'}</span>`;
-  lista.innerHTML = activos.length ? activos.map(t => tactil
-      ? `<button type="button" class="cap-fila" data-camara-para="${esc(t.id)}">${fila(t)}</button>`
-      : `<label class="cap-fila">${fila(t)}<input type="file" accept="image/*" multiple hidden data-capturar="${esc(t.id)}"></label>`).join('')
-    : '<p class="vacio">No active projects. Create one in <b>Projects</b> first.</p>';
-  $('#capturaTitulo').textContent = tactil ? 'Take photos for…' : 'Add photos to…';
+  const activos = d.LISTA.filter(x => x.estado !== 'archivado');
+  const tactil = !!desdeCamara || esTactil();
+  const actual = desdeCamara && t ? t.id : '';
+  const pinta = (orden, nota) => {
+    const fila = (x, i) => { const dist = cerca.textoDistancia(x.d);
+      return `<span class="cap-foto">${portadaDe(x.t) ? '<img src="' + esc(portadaDe(x.t)) + '" alt="">' : IC('camara')}</span>
+      <span class="cap-texto"><b>${esc(x.t.cliente)}</b><small>${esc(x.t.direccion || '')}</small>${dist ? `<span class="cap-dist${i === 0 ? ' cerca' : ''}">${IC('ubicacion')}${i === 0 ? 'Nearest · ' : ''}${esc(dist)}</span>` : ''}</span>
+      <span class="cap-accion">${x.t.id === actual ? IC('check') + 'Now' : IC(tactil ? 'camara' : 'mas') + (tactil ? 'Photos' : 'Upload')}</span>`; };
+    lista.innerHTML = (nota ? '<p class="cap-nota">' + IC('ubicacion') + esc(nota) + '</p>' : '') + (orden.length ? orden.map((x, i) => desdeCamara
+        ? `<button type="button" class="cap-fila${x.t.id === actual ? ' on' : ''}" data-camara-cambiar="${esc(x.t.id)}">${fila(x, i)}</button>`
+        : tactil ? `<button type="button" class="cap-fila" data-camara-para="${esc(x.t.id)}">${fila(x, i)}</button>`
+        : `<label class="cap-fila">${fila(x, i)}<input type="file" accept="image/*" multiple hidden data-capturar="${esc(x.t.id)}"></label>`).join('')
+      : '<p class="vacio">No active projects. Create one in <b>Projects</b> first.</p>');
+  };
+  const pos0 = null;
+  pinta(cerca.ordenarCercanos(activos, pos0, cerca.coordsDe), activos.length ? 'Finding the projects closest to you…' : '');
+  $('#capturaTitulo').textContent = desdeCamara ? 'Taking photos for…' : tactil ? 'Take photos for…' : 'Add photos to…';
+  hoja.classList.toggle('sobre-cam', !!desdeCamara);
   hoja.hidden = false;
+  const seq = ++SEQ_CAP;
+  const ordenar = (pos) => cerca.ordenarCercanos(activos, pos, cerca.coordsDe);
+  cerca.miPosicion().then(async (pos) => {
+    if(seq !== SEQ_CAP || hoja.hidden) return;
+    pinta(ordenar(pos), pos ? '' : 'Could not get your location. Showing the most recent projects.');
+    if(pos && await cerca.ubicarProyectos(activos) && seq === SEQ_CAP && !hoja.hidden) pinta(ordenar(pos), '');
+  });
 }
-function cerrarCaptura(){ $('#hojaCaptura').hidden = true; }
+function cerrarCaptura(){ const h = $('#hojaCaptura'); h.hidden = true; h.classList.remove('sobre-cam'); SEQ_CAP++; }
 
 export function conectar(){
+  camara.usarEscogerProyecto(() => abrirCaptura(true));
   const filtro = (selSel, inSel, vista) => {
     $(selSel).addEventListener('change', (e) => { vista.estado = e.target.value; pintar(); });
     $(inSel).addEventListener('input', (e) => { vista.texto = e.target.value; pintar(); });
@@ -232,6 +252,8 @@ export function conectar(){
     if(ab && !e.target.closest('label')){ abrirProyecto(ab.dataset.abrir); return; }
     const cp = e.target.closest('[data-camara-para]');
     if(cp){ const t = trabajos.datos().LISTA.find(x => x.id === cp.dataset.camaraPara); cerrarCaptura(); if(t){ trabajos.abrir(t, false, pantallaActual()); camara.abrir(t); } return; }
+    const cc = e.target.closest('[data-camara-cambiar]');
+    if(cc){ const t = trabajos.datos().LISTA.find(x => x.id === cc.dataset.camaraCambiar); cerrarCaptura(); if(t){ if(!trabajos.proyectoAbierto() || trabajos.proyectoAbierto().id !== t.id) trabajos.abrir(t, pantallaActual() === 'pTrabajo'); camara.cambiar(t); } return; }
     if(e.target.closest('[data-cerrar-hoja]') || e.target.id === 'hojaCaptura'){ cerrarCaptura(); return; }
   });
   // Escogió proyecto y tomó/escogió la foto: se abre el proyecto y la foto entra a su cola de subida.
