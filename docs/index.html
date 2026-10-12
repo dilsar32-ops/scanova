@@ -32,53 +32,58 @@ body{ margin:0; min-height:100vh; color:var(--ink); font-family:"Plus Jakarta Sa
 a{ color:inherit; text-decoration:none; }
 
 /* ---------- cabecera ---------- */
-.top{ max-width:1300px; margin:0 auto; padding:30px 44px 0; display:flex; align-items:center; justify-content:space-between; gap:20px; }
-.logo{ font-size:40px; font-weight:800; letter-spacing:-.035em; line-height:1; color:#0a1130; }
+.top{ max-width:1300px; margin:0 auto; padding:clamp(18px, 2vw, 30px) clamp(20px, 2.9vw, 44px) 0; display:flex; align-items:center; justify-content:space-between; gap:20px; }
+.logo{ font-size:clamp(28px, 2.7vw, 42px); font-weight:800; letter-spacing:-.035em; line-height:1; color:#0a1130; }
 .logo span{ color:var(--azul); }
 .nav{ display:flex; align-items:center; gap:34px; }
-.nav a{ font-size:15px; font-weight:500; color:#1f2a3a; }
+.nav a{ font-size:clamp(13px, 1vw, 15px); font-weight:500; color:#1f2a3a; }
 .nav a:hover{ color:var(--azul); }
 .sep{ width:1px; height:26px; background:#2a3446; opacity:.7; margin:0 -4px; }
-.signin{ background:var(--pill); border-radius:999px; padding:12px 34px; font-size:16px !important; font-weight:600 !important; color:var(--ink) !important; }
+.signin{ background:var(--pill); border-radius:999px; padding:clamp(9px, .8vw, 12px) clamp(22px, 2.2vw, 34px); font-size:clamp(14px, 1.05vw, 16px) !important; font-weight:600 !important; color:var(--ink) !important; }
 .signin:hover{ background:#d9e1ee; color:var(--ink) !important; }
 
 /* ---------- portada ---------- */
-.hero{ text-align:center; padding:92px 20px 48px; }
-.hero h1{ margin:0 auto; font-size:clamp(34px, 6.2vw, 78px); line-height:1.04; font-weight:800; letter-spacing:-.04em; max-width:900px; text-wrap:balance; }
+.hero{ text-align:center; padding:clamp(44px, 6vw, 92px) 20px clamp(26px, 3.1vw, 48px); }
+.hero h1{ margin:0 auto; font-size:clamp(30px, 4.6vw, 70px); line-height:1.04; font-weight:800; letter-spacing:-.04em; max-width:900px; text-wrap:balance; }
 .hero h1 span{ color:var(--azul); }
-.hero p{ margin:24px auto 36px; max-width:540px; font-size:clamp(17px, 1.7vw, 22px); line-height:1.42; color:var(--ink2); font-weight:500; text-wrap:balance; }
-.cta{ display:inline-flex; align-items:center; justify-content:center; gap:16px; height:64px; padding:0 46px; border-radius:999px; color:#fff; font-size:22px; font-weight:600; letter-spacing:-.01em;
+.hero p{ margin:clamp(14px, 1.6vw, 24px) auto clamp(22px, 2.3vw, 36px); max-width:clamp(300px, 35vw, 540px); font-size:clamp(15px, 1.43vw, 22px); line-height:1.42; color:var(--ink2); font-weight:500; text-wrap:balance; }
+.cta{ display:inline-flex; align-items:center; justify-content:center; gap:clamp(10px, 1vw, 16px); height:clamp(48px, 4.2vw, 64px); padding:0 clamp(26px, 3vw, 46px); border-radius:999px; color:#fff; font-size:clamp(17px, 1.5vw, 23px); font-weight:600; letter-spacing:-.01em;
   background:linear-gradient(90deg, #2b7cf7 0%, #0b5ed7 100%); box-shadow:0 14px 34px rgba(11,100,222,.35), inset 0 1px 0 rgba(255,255,255,.28); transition:transform .15s ease, box-shadow .15s ease; }
 .cta:hover{ transform:translateY(-1px); box-shadow:0 18px 40px rgba(11,100,222,.42), inset 0 1px 0 rgba(255,255,255,.28); }
-.cta svg{ width:26px; height:26px; fill:none; stroke:#fff; stroke-width:2.2; stroke-linecap:round; stroke-linejoin:round; }
+.cta svg{ width:clamp(20px, 1.7vw, 26px); height:clamp(20px, 1.7vw, 26px); fill:none; stroke:#fff; stroke-width:2.2; stroke-linecap:round; stroke-linejoin:round; }
 
 /* ---------- tarjetas ---------- */
-.cards{ max-width:1250px; margin:52px auto 0; padding:0 44px; display:grid; grid-template-columns:repeat(3, 1fr); gap:46px; }
+.cards{ max-width:1290px; margin:clamp(30px, 3.4vw, 52px) auto 0; padding:0 clamp(20px, 2.9vw, 44px); display:grid; grid-template-columns:repeat(3, 1fr); gap:clamp(22px, 2.9vw, 46px); }
 .card{ min-width:0; }
 .foto{ position:relative; }
-.foto img{ display:block; width:100%; aspect-ratio:380 / 214; object-fit:cover; border-radius:10px; box-shadow:0 10px 30px rgba(14,18,26,.10); background:#e6ecf4; }
-.icono{ position:absolute; left:14px; bottom:-20px; width:66px; height:66px; border-radius:50%; background:#fff; box-shadow:0 8px 22px rgba(14,18,26,.16); display:grid; place-items:center; }
-.icono svg{ width:28px; height:28px; fill:none; stroke:var(--azul); stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round; }
+.foto img{ display:block; width:100%; height:auto; aspect-ratio:380 / 214; object-fit:cover; border-radius:10px; box-shadow:0 10px 30px rgba(14,18,26,.10); background:#e6ecf4; }
+.icono{ position:absolute; left:14px; bottom:-20px; width:clamp(50px, 4.3vw, 66px); height:clamp(50px, 4.3vw, 66px); border-radius:50%; background:#fff; box-shadow:0 8px 22px rgba(14,18,26,.16); display:grid; place-items:center; }
+.icono svg{ width:clamp(22px, 1.8vw, 28px); height:clamp(22px, 1.8vw, 28px); fill:none; stroke:var(--azul); stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round; }
 .icono.oscuro svg{ stroke:#1a2232; }
-.card h2{ margin:46px 0 8px; padding-left:14px; font-size:26px; font-weight:700; letter-spacing:-.02em; }
-.card p{ margin:0; padding-left:14px; font-size:19px; line-height:1.45; color:var(--ink2); font-weight:500; }
+.card h2{ margin:clamp(36px, 3vw, 46px) 0 6px; padding-left:14px; font-size:clamp(19px, 1.6vw, 25px); font-weight:700; letter-spacing:-.02em; }
+.card p{ margin:0; padding-left:14px; font-size:clamp(15px, 1.3vw, 20px); line-height:1.45; color:var(--ink2); font-weight:500; }
 
 /* ---------- pie ---------- */
-.tagline{ display:flex; align-items:center; justify-content:center; gap:28px; margin:92px auto 64px; padding:0 20px; font-size:13px; font-weight:600; letter-spacing:.34em; text-transform:uppercase; color:#6b7a90; }
+.tagline{ display:flex; align-items:center; justify-content:center; gap:28px; margin:clamp(48px, 6vw, 92px) auto clamp(36px, 4.2vw, 64px); padding:0 20px; font-size:clamp(11px, .85vw, 13px); font-weight:600; letter-spacing:.34em; text-transform:uppercase; color:#6b7a90; }
 .tagline i{ display:block; width:56px; height:1px; background:#9aa6b8; flex:0 1 auto; }
 .tagline span{ white-space:nowrap; }
 
 /* ---------- tableta y telefono ---------- */
-@media (max-width:1100px){ .cards{ gap:30px; padding:0 32px; } .top{ padding:24px 32px 0; } .card h2{ font-size:23px; } .card p{ font-size:17px; } }
+@media (max-width:1100px){ .cards{ gap:24px; padding:0 32px; } .card h2{ font-size:20px; } .card p{ font-size:15.5px; } }
+@media (max-width:900px) and (min-width:721px){ .cards{ max-width:720px; gap:20px; } .card h2{ font-size:18px; } .card p{ font-size:14.5px; } }
 @media (max-width:720px){
   .top{ padding:18px 20px 0; }
-  .logo{ font-size:32px; }
+  .logo{ font-size:28px; }
   .nav{ gap:14px; } .nav a:not(.signin), .sep{ display:none; }
-  .signin{ padding:10px 24px; }
-  .hero{ padding:56px 20px 36px; }
-  .hero p{ margin:18px auto 28px; }
-  .cta{ width:100%; max-width:380px; height:58px; font-size:19px; padding:0 28px; }
-  .cards{ grid-template-columns:1fr; gap:38px; padding:0 20px; max-width:480px; margin-top:36px; }
+  .signin{ padding:9px 22px; font-size:14px !important; }
+  .hero{ padding:44px 20px 30px; }
+  .hero h1{ font-size:30px; }
+  .hero p{ margin:14px auto 24px; font-size:15.5px; max-width:320px; }
+  .cta{ width:auto; min-width:240px; max-width:340px; height:52px; font-size:17px; padding:0 30px; }
+  .cards{ grid-template-columns:1fr; gap:30px; padding:0 24px; max-width:380px; margin-top:30px; }
+  .icono{ width:54px; height:54px; bottom:-16px; } .icono svg{ width:24px; height:24px; }
+  .card h2{ margin:34px 0 4px; font-size:20px; }
+  .card p{ font-size:15px; }
   .tagline{ margin:64px auto 44px; gap:14px; letter-spacing:.2em; font-size:11px; } .tagline i{ width:30px; }
 }
 </style>
