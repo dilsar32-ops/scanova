@@ -84,7 +84,7 @@ export function irA(id, desde){
   // La barra lateral y las pestañas de abajo marcan en qué parte está (Trabajos abarca forma y ficha).
   const seccion = { pTrabajos:'trabajos', pForma:'trabajos', pTrabajo:'trabajos', pPersonas:'personas' }[id] || '';
   $$('[data-nav]').forEach(b => b.classList.toggle('on', !!seccion && b.dataset.nav === seccion));
-  $('#subtitulo').textContent = { pEntrar:'Scanova', pCrear:'Crear cuenta', pEspera:'Cuenta en espera', pTrabajos:'Trabajos', pPersonas:'Personas', pForma:'Trabajo', pTrabajo:'Trabajo' }[id] || 'Scanova';
+  $('#subtitulo').textContent = { pEntrar:'Scanova360', pCrear:'Crear cuenta', pEspera:'Cuenta en espera', pTrabajos:'Trabajos', pPersonas:'Personas', pForma:'Trabajo', pTrabajo:'Trabajo' }[id] || 'Scanova360';
   const m = $('#main'); if(m) m.scrollTo(0, 0); window.scrollTo(0, 0);
 }
 export function atras(){ const a = pila.pop(); if(a) irA(a); else irA('pTrabajos'); if(a === 'pTrabajos' || !a) trabajos.pintar(); }
@@ -179,7 +179,7 @@ async function arrancar(){
     if(n === 'atras') atras();
     else if(n === 'trabajos'){ pila.length = 0; irA('pTrabajos'); trabajos.pintar(); }
     else if(n === 'personas'){ if(!esManager()) return; pila.length = 0; irA('pPersonas', 'pTrabajos'); personas.cargar(); }
-    else if(n === 'salir'){ if(confirm('¿Salir de Scanova en este aparato?')) salir(); }
+    else if(n === 'salir'){ if(confirm('¿Salir de Scanova360 en este aparato?')) salir(); }
   });
   trabajos.conectar();
   personas.conectar();
@@ -193,4 +193,4 @@ async function arrancar(){
   }
   irA('pEntrar');
 }
-if(typeof document !== 'undefined'){ document.addEventListener('DOMContentLoaded', arrancar); console.info('Scanova', APP_BUILD); }
+if(typeof document !== 'undefined'){ document.addEventListener('DOMContentLoaded', arrancar); console.info('Scanova360', APP_BUILD); }

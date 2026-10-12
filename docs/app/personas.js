@@ -52,7 +52,7 @@ export function pintar(){
 async function decidir(userId, aprobar){
   const aviso = $('#personasAviso'); aviso.textContent = '';
   const s = SOLICITUDES.find(x => x.user_id === userId); if(!s) return;
-  if(!aprobar && !confirm('¿Rechazar a ' + (s.nombre || s.correo || 'esta persona') + '? No podrá entrar a Scanova.')) return;
+  if(!aprobar && !confirm('¿Rechazar a ' + (s.nombre || s.correo || 'esta persona') + '? No podrá entrar a Scanova360.')) return;
   const r = await authFetch('/rest/v1/rpc/fotos_decidir_entrada', { method:'POST', body: JSON.stringify({ p_user: userId, p_aprobar: !!aprobar }) });
   const t = await r.text();
   if(!r.ok){ aviso.textContent = 'No se pudo. ' + (/solo_manager/.test(t) ? 'Solo el manager puede aprobar.' : ('(' + r.status + ')')); return; }
