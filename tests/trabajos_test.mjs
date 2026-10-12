@@ -1,5 +1,5 @@
 // Scanova · pruebas de lo puro de trabajos.js (filtrar, validar, tipos, teléfono).
-import * as T from '../docs/trabajos.js';
+import * as T from '../docs/app/trabajos.js';
 let pass = 0, fail = 0;
 const ok = (l, c) => { if(c){ pass++; console.log('  ok  ' + l); } else { fail++; console.log('  FAIL ' + l); } };
 const L = [
