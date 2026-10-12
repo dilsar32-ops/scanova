@@ -8,6 +8,8 @@ import * as panel from './panel.js';
 import * as camara from './camara.js';
 import * as direccion from './direccion.js';
 import * as proyecto from './proyecto.js';
+import * as foto from './foto.js';
+import * as editor from './editor.js';
 
 export const $ = (s, r = document) => r.querySelector(s);
 export const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -160,15 +162,16 @@ export function irA(id, desde){
   if(!enVentana){ MODAL = false; document.body.classList.remove('modal-entrar'); ocultarInicio(); }
   if(desde) pila.push(desde);
   document.body.classList.remove('menu-abierto');
+  if(id !== 'pFoto' && editor.activo()) editor.cerrar(true);
   if(id !== 'pTrabajo'){ const k = $('#cajonDetalles'); if(k){ k.hidden = true; document.body.classList.remove('con-cajon'); } }
   $$('.pantalla').forEach(p => { p.hidden = p.id !== id; });
   const solo = (id === 'pEntrar' || id === 'pCrear' || id === 'pEspera' || id === 'pCodigo');
   document.body.classList.toggle('modo-entrar', solo);
   $('#pie').hidden = solo;
   // La barra lateral y la de abajo marcan en qué parte está (Projects abarca la forma y la ficha).
-  const seccion = { pInicio:'inicio', pProyectos:'proyectos', pForma:'proyectos', pTrabajo:'proyectos', pNivel:'proyectos', pCuarto:'proyectos', pPersonas:'settings', pGaleria:'galeria', pMas:'mas', pPronto: PRONTO }[id] || '';
+  const seccion = { pInicio:'inicio', pProyectos:'proyectos', pForma:'proyectos', pTrabajo:'proyectos', pNivel:'proyectos', pCuarto:'proyectos', pFoto:'proyectos', pPersonas:'settings', pGaleria:'galeria', pMas:'mas', pPronto: PRONTO }[id] || '';
   $$('[data-nav]').forEach(b => b.classList.toggle('on', !!seccion && b.dataset.nav === seccion));
-  $('#subtitulo').textContent = { pEntrar:'Scanova360', pCrear:'Crear cuenta', pEspera:'Cuenta en espera', pInicio:'Home', pProyectos:'Projects', pPersonas:'Team', pForma:'Project', pTrabajo:'Project', pNivel:'Level', pCuarto:'Room', pGaleria:'Gallery', pMas:'More' }[id] || 'Scanova360';
+  $('#subtitulo').textContent = { pEntrar:'Scanova360', pCrear:'Crear cuenta', pEspera:'Cuenta en espera', pInicio:'Home', pProyectos:'Projects', pPersonas:'Team', pForma:'Project', pTrabajo:'Project', pNivel:'Level', pCuarto:'Room', pFoto:'Photo', pGaleria:'Gallery', pMas:'More' }[id] || 'Scanova360';
   const m = $('#main'); if(m) m.scrollTo(0, 0); window.scrollTo(0, 0);
 }
 export function atras(){ const a = pila.pop(); if(a) irA(a); else irA('pInicio'); if(!a || a === 'pInicio' || a === 'pProyectos'){ trabajos.pintar(); trabajos.cargar(); } }
@@ -310,6 +313,7 @@ async function arrancar(){
   panel.conectar();
   camara.conectar();
   proyecto.conectar();
+  foto.conectar();
   direccion.conectar(() => trabajos.datos().LISTA);
   personas.conectar();
   fotos.conectar();

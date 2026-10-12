@@ -240,6 +240,18 @@ async function procesarTanda(){
     const urls = await urlsFirmadas(FOTOS.map(f => f.id), 'mini'); pintar(urls);
   } finally { subiendo = false; }
 }
+// Subir UNA foto ya hecha (la copia editada) y esperar a que quede: devuelve la foto nueva. La original no se toca.
+export async function subirCopia(file, destino){
+  if(!TRABAJO) throw new Error('no project open');
+  const { foto, repetida } = await subirUna(TRABAJO.id, file, () => {});
+  if(foto && !repetida && destino && (destino.nivel_id || destino.cuarto_id)){
+    try{ const r = await authFetch('/rest/v1/fotos_fotos?id=eq.' + encodeURIComponent(foto.id), { method:'PATCH', headers:{ Prefer:'return=representation' }, body: JSON.stringify({ nivel_id: destino.nivel_id || null, cuarto_id: destino.cuarto_id || null }) });
+      if(r.ok){ const x = (await r.json())[0]; if(x){ foto.nivel_id = x.nivel_id; foto.cuarto_id = x.cuarto_id; } } }catch{}
+  }
+  if(foto && !repetida && !FOTOS.some(f => f.id === foto.id)) FOTOS.unshift(foto);
+  const urls = await urlsFirmadas(FOTOS.map(f => f.id), 'mini'); pintar(urls);
+  return { foto, repetida };
+}
 export function encolar(files, destino){
   const lista = Array.from(files || []).filter(esImagen);
   if(!lista.length || !TRABAJO) return;
@@ -248,13 +260,25 @@ export function encolar(files, destino){
   pintar(); procesarTanda();
 }
 
-// ---------- ver en grande ----------
+// ---------- ver una foto ----------
+// Tocar una foto abre la VENTANA de la foto (foto.js: detalles, etiquetas, tareas, comentarios). La vista negra de
+// antes (#visor) se queda: es la PANTALLA COMPLETA (botón de expandir) y sigue con su papelera y sus flechas.
 const ordenVisor = () => ORDEN_FN ? ORDEN_FN(FOTOS) : porDia(FOTOS).flatMap(d => d.fotos);
+let AL_FOTO = null;
+export const alAbrirFoto = (fn) => { AL_FOTO = fn; };
+export const visorLista = () => ordenVisor();
+export const visorIndice = () => VISOR_I;
+export const fotoActual = () => ordenVisor()[VISOR_I] || null;
 export async function abrirVisor(fotoId){
   const i = ordenVisor().findIndex(f => f.id === fotoId); if(i < 0) return;
-  VISOR_I = i; $('#visor').hidden = false; document.body.classList.add('con-visor');
-  await pintarVisor();
+  VISOR_I = i;
+  if(AL_FOTO){ AL_FOTO(true); return; }
+  abrirGrande();
 }
+export function irFoto(i){ const n = ordenVisor().length; if(!n) return; VISOR_I = ((i % n) + n) % n; if(AL_FOTO) AL_FOTO(false); }
+// La pantalla completa (la vista negra de siempre).
+export async function abrirGrande(){ if(VISOR_I < 0) return; $('#visor').hidden = false; document.body.classList.add('con-visor'); await pintarVisor(); }
+const grandeAbierta = () => !$('#visor').hidden;
 async function pintarVisor(){
   const lista = ordenVisor(); const f = lista[VISOR_I]; if(!f) return cerrarVisor();
   $('#visorImg').src = ''; $('#visorPie').textContent = '';
@@ -266,17 +290,36 @@ async function pintarVisor(){
   $('#visorImg').src = urls[f.id] || (URLS.mini[f.id] ? URLS.mini[f.id].url : '');
   $('#visorPie').textContent = f.nota || '';
 }
-export function cerrarVisor(){ $('#visor').hidden = true; document.body.classList.remove('con-visor'); VISOR_I = -1; }
+// Cerrar la pantalla completa: si la ventana de la foto está detrás, se queda en la misma foto.
+export function cerrarVisor(){
+  $('#visor').hidden = true; document.body.classList.remove('con-visor');
+  if(AL_FOTO && $('#pFoto') && !$('#pFoto').hidden) AL_FOTO(false); else VISOR_I = -1;
+}
 function visorMover(d){ if(VISOR_I < 0) return; const n = ordenVisor().length; if(!n) return cerrarVisor(); VISOR_I = (VISOR_I + d + n) % n; pintarVisor(); }
-async function borrarFoto(){
-  const f = ordenVisor()[VISOR_I]; if(!f) return;
-  if(!confirm('¿Mandar esta foto a la papelera? El manager la puede recuperar después.')) return;
+// Mandar la foto abierta a la papelera (la usan la pantalla completa y el ••• de la ventana). Devuelve '' o el error.
+export async function borrarFotoActual(){
+  const f = ordenVisor()[VISOR_I]; if(!f) return 'No photo.';
+  if(!confirm('Move this photo to the trash? The manager can recover it later.')) return null;
   const r = await authFetch('/rest/v1/fotos_fotos?id=eq.' + encodeURIComponent(f.id), { method:'PATCH', headers:{ Prefer:'return=representation' }, body: JSON.stringify({ estado:'papelera', eliminada_at: new Date().toISOString(), eliminada_por: PERFIL ? PERFIL.id : null }) });
   const filas = r.ok ? await r.json() : [];
-  if(!r.ok || !filas.length){ $('#visorPie').textContent = 'No se pudo borrar (' + r.status + ').'; return; }
+  if(!r.ok || !filas.length) return 'Could not delete it (' + r.status + '). Only the manager or who took it can.';
   FOTOS = FOTOS.filter(x => x.id !== f.id);
-  const quedan = ordenVisor().length; if(!quedan) cerrarVisor(); else { VISOR_I = Math.min(VISOR_I, quedan - 1); pintarVisor(); }
+  const quedan = ordenVisor().length; VISOR_I = quedan ? Math.min(VISOR_I, quedan - 1) : -1;
   pintar();
+  return '';
+}
+async function borrarFoto(){
+  const err = await borrarFotoActual(); if(err === null) return;
+  if(err){ $('#visorPie').textContent = err; return; }
+  if(VISOR_I < 0){ cerrarVisor(); if(AL_FOTO) AL_FOTO(false); } else pintarVisor();
+}
+// Guardar la nota (descripción) de una foto: manager o quien la tomó.
+export async function guardarNota(fotoId, nota){
+  const r = await authFetch('/rest/v1/fotos_fotos?id=eq.' + encodeURIComponent(fotoId), { method:'PATCH', headers:{ Prefer:'return=representation' }, body: JSON.stringify({ nota: nota || null }) });
+  const filas = r.ok ? await r.json() : [];
+  if(!filas.length) return false;
+  const f = FOTOS.find(x => x.id === fotoId); if(f) f.nota = filas[0].nota;
+  return true;
 }
 
 export function conectar(){
@@ -293,7 +336,10 @@ export function conectar(){
   $('#visorAnt').addEventListener('click', () => visorMover(-1));
   $('#visorSig').addEventListener('click', () => visorMover(1));
   $('#visorBorrar').addEventListener('click', borrarFoto);
-  document.addEventListener('keydown', (e) => { if($('#visor').hidden) return; if(e.key === 'Escape') cerrarVisor(); if(e.key === 'ArrowLeft') visorMover(-1); if(e.key === 'ArrowRight') visorMover(1); });
+  document.addEventListener('keydown', (e) => {
+    if(grandeAbierta()){ if(e.key === 'Escape') cerrarVisor(); if(e.key === 'ArrowLeft') visorMover(-1); if(e.key === 'ArrowRight') visorMover(1); return; }
+    if($('#pFoto') && !$('#pFoto').hidden && !document.body.classList.contains('fv-editando') && !/INPUT|TEXTAREA|SELECT/.test((document.activeElement || {}).tagName || '')){ if(e.key === 'ArrowLeft') irFoto(VISOR_I - 1); if(e.key === 'ArrowRight') irFoto(VISOR_I + 1); }
+  });
 }
 // El proyecto abierto (para la cámara y el botón del centro).
 export const trabajoActual = () => TRABAJO;
