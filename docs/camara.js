@@ -47,10 +47,19 @@ async function encender(){
 }
 // Abrir la cámara para un proyecto. Devuelve false si este aparato no tiene cámara para la página
 // (entonces se usa la del teléfono, una por vez, en el mismo toque).
+// A qué nivel/cuarto van las fotos de la cámara. La ficha del proyecto presta la lista (usarCuartos).
+let DEST = {}, CUARTOS = null;
+export const usarCuartos = (api) => { CUARTOS = api; };
+export function pintarCuarto(){
+  const b = $('#camCuarto'); if(!b) return;
+  const hay = !!(CUARTOS && TRABAJO && CUARTOS.hay(TRABAJO.id));
+  b.hidden = !hay; if(hay) $('#camCuartoTxt').textContent = CUARTOS.nombre(DEST);
+}
 export function abrir(trabajo){
   if(!trabajo) return false;
   if(!puedeCamaraPropia(navigator)){ camaraDelTelefono(); return false; }
   TRABAJO = trabajo; N = 0; if(ULTIMA){ URL.revokeObjectURL(ULTIMA); ULTIMA = ''; }
+  DEST = CUARTOS && CUARTOS.hay(trabajo.id) ? CUARTOS.destino() : {}; pintarCuarto();
   $('#camProyecto').textContent = trabajo.cliente || '';
   $('#camara').hidden = false; document.body.classList.add('con-camara');
   pintar(); encender();
@@ -77,7 +86,7 @@ async function disparar(){
   const archivo = new File([blob], nombreFoto(N, new Date()), { type:'image/jpeg', lastModified: Date.now() });
   if(ULTIMA) URL.revokeObjectURL(ULTIMA); ULTIMA = URL.createObjectURL(blob);
   pintar();
-  if(fotos.trabajoActual() && fotos.trabajoActual().id === TRABAJO.id) fotos.encolar([archivo]);
+  if(fotos.trabajoActual() && fotos.trabajoActual().id === TRABAJO.id) fotos.encolar([archivo], DEST);
 }
 
 export function conectar(){
@@ -86,6 +95,7 @@ export function conectar(){
   $('#camCerrar').addEventListener('click', cerrar);
   $('#camOtraVez').addEventListener('click', encender);
   $('#camTelefono').addEventListener('click', () => { camaraDelTelefono(); });
+  $('#camCuarto').addEventListener('click', () => { if(CUARTOS) CUARTOS.escoger('Photos go to…', DEST, (d) => { DEST = d || {}; pintarCuarto(); }); });
   // "Tomar fotos" de la ficha del proyecto.
   document.addEventListener('click', (e) => {
     if(!e.target.closest('[data-camara]')) return;

@@ -17,8 +17,10 @@ ok('fechaRelativa: ahora mismo / minutos / horas / ayer / días', T.fechaRelativ
 ok('iniciales: dos nombres, uno, vacío', T.iniciales('Amilcar Gonzalez') === 'AG' && T.iniciales('Vero') === 'V' && T.iniciales('  ') === '·');
 ok('mapsUrl: la dirección va codificada', T.mapsUrl('9 Oak Ln, Vienna VA') === 'https://maps.google.com/?q=9%20Oak%20Ln%2C%20Vienna%20VA');
 const t = { id:'x1', cliente:'Lauren <Harris>', direccion:'9 Oak Ln', telefono:'(703) 555-0123', correo:'l@c.com', tipo:'agua', estado:'activo', notas:'Sótano', created_at:hace(86400), updated_at:'2026-10-10T16:00:00Z' };
-const ficha = T.fichaHtml(t, 0, true);
-ok('fichaHtml: portada, título escapado, mapas, Editar, Llamar/Mensaje, Archivar solo manager', /class="portada"/.test(ficha) && /<h1 class="titulo">Lauren &lt;Harris&gt;<\/h1>/.test(ficha) && /id="btnEditar"/.test(ficha) && /href="tel:7035550123"/.test(ficha) && /id="btnArchivar"/.test(ficha) && !/id="btnArchivar"/.test(T.fichaHtml(t, 0, false)));
+const PR = await import('../docs/proyecto.js');
+const cab = PR.cabeceraHtml({ ...t, cliente_nombre:'Harris <Family>', encargado:'Amilcar', fecha_inicio:'2026-10-10', etapa:'en_curso' }, 'x.jpg', true);
+ok('cabeceraHtml: portada, nombre escapado, mapas, etapa, cliente, encargado, fecha, Edit Project y •••', /class="portada"><img src="x.jpg"/.test(cab) && /<h1 class="pcab-t">Lauren &lt;Harris&gt;<\/h1>/.test(cab) && /maps\.google\.com/.test(cab) && /class="etq-c c-verde">Active</.test(cab) && /class="etq-c c-amarillo">In Progress</.test(cab) && /Client: Harris &lt;Family&gt;/.test(cab) && /Project Manager<\/span><span class="corto">PM<\/span>: Amilcar/.test(cab) && /data-editar-etq/.test(cab) && /data-det-abrir/.test(cab) && /Start Date: Oct 10, 2026/.test(cab) && /id="btnEditar"/.test(cab) && /id="btnFichaMenu"/.test(cab));
+ok('cabeceraHtml: sin cliente ni fecha no inventa nada (dice cuándo se creó)', !/Client:/.test(PR.cabeceraHtml(t, '', false)) && /Created: /.test(PR.cabeceraHtml(t, '', false)));
 ok('personaHtml y solicitudHtml: avatar, chip y los dos botones', /class="avatar">AG</.test(personaHtml({ full_name:'Amilcar Gonzalez', role:'manager', status:'active' })) && /data-decidir="si"/.test(solicitudHtml({ user_id:'u1', nombre:'Vero' })));
 
 // ---------- el panel nuevo: etapa, avance, fechas ----------
@@ -51,7 +53,7 @@ ok('avanceForma: vacío = null; número recortado 0-100', T.avanceForma('') === 
 const nav = [...idx.matchAll(/class="navitem" data-nav="([a-z]+)"/g)].map(m => m[1]).join(',');
 ok('barra lateral: Home, Projects, Capture, Plan, Restore, Reports, Clients, Settings (en ese orden) y Sign Out', nav === 'inicio,proyectos,capture,plan,restore,reports,clients,settings' && /Sign Out/.test(idx) && /class="lat-logo" translate="no">Scanova<span>360<\/span>/.test(idx));
 const pie = [...idx.matchAll(/class="tab[^"]*" data-nav="([a-z]+)"/g)].map(m => m[1]).join(',');
-ok('barra de abajo: Home, Projects, la cámara al centro, Gallery, More', pie === 'inicio,proyectos,capture,galeria,mas' && /class="fab"/.test(idx));
+ok('barra de abajo (su segunda imagen): Home, Projects, la cámara al centro, Clients, Settings; Gallery en el menú ☰', pie === 'inicio,proyectos,capture,clients,settings' && /class="fab"/.test(idx) && /id="btnMenu"/.test(idx) && /navitem solo-movil" data-nav="galeria"/.test(idx));
 ok('arriba: buscar "Search projects, clients, or addresses...", campana y avatar', /placeholder="Search projects, clients, or addresses\.\.\."/.test(idx) && /id="btnCampana"/.test(idx) && /id="avatarBarra"/.test(idx));
 ok('Home: Welcome, la frase, Recent Projects con View All, All Projects con All Statuses y buscar', /Welcome, <span id="bienvNombre">/.test(idx) && /Capture\. Plan\. Restore\. All in one place\./.test(idx) && /Recent Projects<\/h2><button type="button" class="ver-todo" data-nav="proyectos">View All/.test(idx) && /<option value="todos">All Statuses<\/option>/.test(idx) && /placeholder="Search projects\.\.\."/.test(idx));
 ok('pantallas: Home, Projects, Gallery, More, la de "viene después", Capture (hoja) y el menú •••', ['pInicio', 'pProyectos', 'pGaleria', 'pMas', 'pPronto', 'hojaCaptura', 'menuPop'].every(id => new RegExp('id="' + id + '"').test(idx)));

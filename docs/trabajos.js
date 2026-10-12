@@ -44,35 +44,9 @@ export function etiquetas(t){
   return '<span class="etq tipo-' + esc(TIPOS[t.tipo] ? t.tipo : 'otro') + '">' + esc(tipoTxt(t.tipo)) + '</span>' +
          '<span class="etq ' + (arch ? 'archivado' : 'activo') + '">' + (arch ? 'Archivado' : 'Activo') + '</span>';
 }
-// Pura: la ficha de un trabajo (portada, título, dirección, etiquetas, acciones y pestañas Fotos / Datos).
-export function fichaHtml(t, nFotos, manager, portadaUrl){
-  const dig = telDigitos(t.telefono); const arch = t.estado === 'archivado';
-  return `<div class="ficha-cab">
-    <div class="portada">${portadaUrl ? '<img src="' + esc(portadaUrl) + '" alt="">' : ICONO('camara')}</div>
-    <div class="ficha-datos">
-      <h1 class="titulo">${esc(t.cliente)}</h1>
-      <a class="direccion" href="${esc(mapsUrl(t.direccion))}" target="_blank" rel="noopener">${esc(t.direccion || 'Sin dirección')}</a>
-      <div class="etqs">${etiquetas(t)}<button type="button" class="enlace-editar" id="btnEditar">${ICONO('lapiz')}Editar</button></div>
-    </div></div>
-    <div class="acciones">
-      ${dig ? '<a class="btn btn-outline" href="tel:' + esc(dig) + '">' + ICONO('tel') + 'Llamar</a><a class="btn btn-outline" href="sms:' + esc(dig) + '">' + ICONO('msj') + 'Mensaje</a>' : ''}
-      ${manager ? '<button type="button" class="btn btn-outline' + (arch ? '' : ' btn-rojo') + '" id="btnArchivar">' + ICONO('archivo') + (arch ? 'Reactivar' : 'Archivar') + '</button>' : ''}
-    </div>
-    <div class="tabs" id="fichaTabs"><button type="button" class="tab-f on" data-tab="fotos">Fotos <span class="n" id="fotosConteo">(${nFotos || 0})</span></button><button type="button" class="tab-f" data-tab="datos">Datos</button></div>
-    <div class="tab-panel" data-panel="fotos">
-      <div id="fotosPanel"><p class="vacio">Cargando fotos…</p></div>
-      <p class="aviso" id="fotosAviso"></p>
-    </div>
-    <div class="tab-panel" data-panel="datos" hidden>
-      <div class="linea"><span>Teléfono</span><span>${t.telefono ? '<a href="tel:' + esc(dig) + '">' + esc(t.telefono) + '</a>' : '—'}</span></div>
-      <div class="linea"><span>Correo</span><span>${t.correo ? '<a href="mailto:' + esc(t.correo) + '">' + esc(t.correo) + '</a>' : '—'}</span></div>
-      <div class="linea"><span>Tipo</span><span>${esc(tipoTxt(t.tipo))}</span></div>
-      <div class="linea"><span>Creado</span><span>${esc(fechaCorta(t.created_at))}</span></div>
-      <div class="linea"><span>Última actividad</span><span>${esc(fechaCorta(t.updated_at))}</span></div>
-      ${t.notas ? '<div class="linea"><span>Notas</span><span>' + esc(t.notas) + '</span></div>' : ''}
-    </div>
-    <p class="aviso" id="fichaAviso"></p>`;
-}
+// La ficha del proyecto (encabezado y pestañas) la dibuja proyecto.js; se registra con usarFicha().
+let FICHA_FN = null;
+export const usarFicha = (fn) => { FICHA_FN = fn; };
 
 let LISTA = [];
 let CARGANDO = true;     // hasta que llega la primera lista
@@ -121,17 +95,20 @@ function leerForma(){
   return { cliente: $('#fCliente').value.trim(), direccion: $('#fDireccion').value.trim(), telefono: $('#fTelefono').value.trim(),
            correo: $('#fCorreo').value.trim(), tipo: $('#fTipo').value, notas: $('#fNotas').value.trim(),
            etapa: ETAPAS_FORMA.includes($('#fEtapa').value) ? $('#fEtapa').value : 'en_curso', avance: avanceForma($('#fAvance').value),
-           lat: numONulo($('#fLat').value), lng: numONulo($('#fLng').value) };
+           lat: numONulo($('#fLat').value), lng: numONulo($('#fLng').value),
+           cliente_nombre: $('#fClienteNombre').value.trim(), encargado: $('#fEncargado').value.trim(), fecha_inicio: $('#fFechaInicio').value || '' };
 }
 function llenarForma(t){
   $('#fCliente').value = t ? (t.cliente || '') : ''; $('#fDireccion').value = t ? (t.direccion || '') : '';
   $('#fTelefono').value = t ? (t.telefono || '') : ''; $('#fCorreo').value = t ? (t.correo || '') : '';
   $('#fTipo').value = t ? (t.tipo || '') : ''; $('#fNotas').value = t ? (t.notas || '') : '';
+  $('#fClienteNombre').value = t ? (t.cliente_nombre || '') : ''; $('#fEncargado').value = t ? (t.encargado || '') : '';
+  $('#fFechaInicio').value = t && t.fecha_inicio ? String(t.fecha_inicio).slice(0, 10) : '';
   $('#fEtapa').value = t && ETAPAS_FORMA.includes(t.etapa) ? t.etapa : 'en_curso';
   $('#fLat').value = t && t.lat != null ? String(t.lat) : ''; $('#fLng').value = t && t.lng != null ? String(t.lng) : '';
   const nd = $('#fDireccionNota'); if(nd){ nd.textContent = ''; nd.classList.remove('error'); }
   $('#fAvance').value = t && t.avance != null ? String(t.avance) : ''; pintarAvanceForma();
-  $('#formaTitulo').textContent = t ? 'Editar trabajo' : 'Trabajo nuevo';
+  $('#formaTitulo').textContent = t ? 'Edit Project' : 'New Project';
   $('#formaAviso').textContent = '';
 }
 
@@ -144,12 +121,20 @@ async function guardarForma(){
     const enviar = (cuerpo) => editando
       ? authFetch('/rest/v1/fotos_trabajos?id=eq.' + encodeURIComponent(editando.id), { method:'PATCH', headers:{ Prefer:'return=representation' }, body: JSON.stringify({ ...cuerpo, updated_at: new Date().toISOString() }) })
       : authFetch('/rest/v1/fotos_trabajos', { method:'POST', headers:{ Prefer:'return=representation' }, body: JSON.stringify(cuerpo) });
-    let r = await enviar({ ...base, etapa: f.etapa, avance: f.avance });
-    // La base todavía sin las columnas nuevas (sql/fotos-03-etapa.sql): se guarda lo demás y se avisa.
-    let sinEtapa = false;
-    if(r.status === 400){ const txt = await r.clone().text(); if(/etapa|avance/.test(txt)){ sinEtapa = true; r = await enviar(base); } }
+    // Se manda todo; si la base todavía no tiene las columnas nuevas, se guarda lo demás y se avisa.
+    const nuevas = { cliente_nombre: f.cliente_nombre || null, encargado: f.encargado || null, fecha_inicio: f.fecha_inicio || null };
+    const etapa = { etapa: f.etapa, avance: f.avance };
+    let cuerpo = { ...base, ...etapa, ...nuevas }; const faltan = [];
+    let r = await enviar(cuerpo);
+    for(let i = 0; i < 2 && r.status === 400; i++){
+      const txt = await r.clone().text();
+      if(/cliente_nombre|encargado|fecha_inicio/.test(txt) && !faltan.includes('04')){ faltan.push('04'); cuerpo = { ...base, ...(faltan.includes('03') ? {} : etapa) }; }
+      else if(/etapa|avance/.test(txt) && !faltan.includes('03')){ faltan.push('03'); cuerpo = { ...base, ...(faltan.includes('04') ? {} : nuevas) }; }
+      else break;
+      r = await enviar(cuerpo);
+    }
     if(!r.ok) throw new Error('HTTP ' + r.status + ' ' + (await r.text()).slice(0, 200));
-    if(sinEtapa) setTimeout(() => { const a = $('#fichaAviso'); if(a) a.textContent = 'Guardado. La etapa y el avance todavía no se guardan: falta correr sql/fotos-03-etapa.sql.'; }, 50);
+    if(faltan.length) setTimeout(() => { const a = $('#fichaAviso'); if(a) a.textContent = 'Guardado. ' + (faltan.includes('04') ? 'Cliente, encargado y fecha todavía no se guardan (falta sql/fotos-04-niveles.sql). ' : '') + (faltan.includes('03') ? 'La etapa y el avance todavía no se guardan (falta sql/fotos-03-etapa.sql).' : ''); }, 50);
     const filas = await r.json();
     if(!Array.isArray(filas) || !filas.length) throw new Error('la base no devolvió la fila');
     const t = filas[0];
@@ -164,16 +149,9 @@ export function editar(t, desde){ editando = t; llenarForma(t); irA('pForma', de
 export function abrir(t, reemplazar, desde){
   abierto = t;
   const portada = (RECIENTES[t.id] || []).map(id => MINIS[id]).find(Boolean) || '';
-  $('#trabajoFicha').innerHTML = fichaHtml(t, FOTOS[t.id], esManager(), portada);
-  $('#btnEditar').addEventListener('click', () => editar(abierto, 'pTrabajo'));
-  const ba = $('#btnArchivar'); if(ba) ba.addEventListener('click', () => archivarTrabajo(abierto, true));
-  $('#fichaTabs').addEventListener('click', (e) => {
-    const b = e.target.closest('[data-tab]'); if(!b) return;
-    $$('#fichaTabs .tab-f').forEach(x => x.classList.toggle('on', x === b));
-    $$('#trabajoFicha .tab-panel').forEach(p => { p.hidden = p.dataset.panel !== b.dataset.tab; });
-  });
+  if(FICHA_FN) FICHA_FN(t, portada);
   if(reemplazar){ irA('pTrabajo'); } else irA('pTrabajo', desde || 'pProyectos');
-  $('#subtitulo').textContent = t.cliente || 'Trabajo';
+  $('#subtitulo').textContent = t.cliente || 'Project';
   fotos.cargar(t);
 }
 
@@ -200,6 +178,8 @@ export function conectar(){
   $('#fAvanceBarra').addEventListener('input', (e) => { $('#fAvance').value = e.target.value; pintarAvanceForma(); });
   $('#btnAvanceQuitar').addEventListener('click', () => { $('#fAvance').value = ''; pintarAvanceForma(); });
 }
+// Cambió una fila desde otra pantalla (etiquetas, descripción): la lista y el proyecto abierto quedan al día.
+export function reemplazar(t){ const i = LISTA.findIndex(x => x.id === t.id); if(i >= 0) LISTA[i] = t; if(abierto && abierto.id === t.id) abierto = t; }
 // El proyecto que está en pantalla (para el botón de la cámara).
 export const proyectoAbierto = () => abierto;
 // solo para pruebas

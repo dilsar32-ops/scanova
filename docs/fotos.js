@@ -128,6 +128,7 @@ async function nombres(){
   if(PERFIL && PERFIL.id && !NOMBRES[PERFIL.id]) NOMBRES[PERFIL.id] = PERFIL.full_name || '';
   return NOMBRES;
 }
+export const cargarNombres = () => nombres();
 export const nombreDe = (userId) => NOMBRES[userId] || (PERFIL && userId === PERFIL.id ? (PERFIL.full_name || 'Usted') : 'Equipo');
 
 // URLs firmadas por lotes (1 h); se cachean 50 min.
@@ -147,7 +148,7 @@ export async function cargar(trabajo){
   const caja = $('#fotosPanel'); if(!caja) return;
   caja.innerHTML = '<p class="vacio">Cargando fotos…</p>';
   const [r] = await Promise.all([
-    authFetch('/rest/v1/fotos_fotos?trabajo_id=eq.' + encodeURIComponent(trabajo.id) + '&estado=eq.activa&select=id,trabajo_id,created_by,subida_at,tomada_at,ancho,alto,bytes,nota&order=subida_at.desc&limit=1000'),
+    authFetch('/rest/v1/fotos_fotos?trabajo_id=eq.' + encodeURIComponent(trabajo.id) + '&estado=eq.activa&select=id,trabajo_id,created_by,subida_at,tomada_at,ancho,alto,bytes,nota,nivel_id,cuarto_id&order=subida_at.desc&limit=1000'),
     nombres(),
   ]);
   if(r.status === 404){ FOTOS = []; pintar(); $('#fotosAviso').textContent = 'Esta parte todavía no está instalada en el servidor: falta correr sql/fotos-01-base.sql.'; return; }
@@ -160,34 +161,57 @@ export async function cargar(trabajo){
   pintar(urls);
 }
 
-function botonesSubir(){
-  const tactil = (navigator.maxTouchPoints || 0) > 0 || /iPhone|iPad|Android/i.test(navigator.userAgent);
-  const archivado = TRABAJO && TRABAJO.estado === 'archivado';
-  if(archivado) return '<p class="parche">Este trabajo está archivado: se puede ver, pero no se le suben fotos. Reactívelo para seguir.</p>';
-  return `<div class="fsubir">
-    ${tactil ? '<button type="button" class="btn btn-accent" data-camara><svg class="ic"><use href="#i-camara"/></svg>Tomar fotos</button>' : ''}
-    <label class="btn ${tactil ? 'btn-outline' : 'btn-accent'}"><svg class="ic"><use href="#i-mas"/></svg>${tactil ? 'Del carrete' : 'Subir fotos'}<input type="file" accept="image/*" multiple hidden data-subir></label>
-  </div>`;
+// La cuadrícula, los filtros por nivel/cuarto y la selección los dibuja la ficha del proyecto (proyecto.js).
+// Aquí quedan los botones de subir, el avance de la tanda y las URLs; la ficha se registra con alPintar().
+let AL_PINTAR = null, DESTINO_FN = () => ({}), AL_CLIC_FN = null, ORDEN_FN = null, ETIQUETA_FN = null;
+export const alPintar = (fn) => { AL_PINTAR = fn; };
+export const usarDestino = (fn) => { DESTINO_FN = fn; };
+export const alClicFoto = (fn) => { AL_CLIC_FN = fn; };
+export const usarOrdenVisor = (fn) => { ORDEN_FN = fn; };
+export const usarEtiqueta = (fn) => { ETIQUETA_FN = fn; };
+export const lista = () => FOTOS;
+export const urlsMini = () => { const u = {}; FOTOS.forEach(f => { const c = URLS.mini[f.id]; if(c && c.vence > Date.now()) u[f.id] = c.url; }); return u; };
+// "Upload Photos": en el iPhone el selector deja escoger del carrete o tomar con la cámara; la cámara de muchas
+// fotos seguidas es el botón azul del centro.
+export function botonesSubir(){
+  if(TRABAJO && TRABAJO.estado === 'archivado') return '';
+  return '<label class="btn btn-accent btn-chico subir-btn"><svg class="ic"><use href="#i-camara"/></svg>Upload Photos<input type="file" accept="image/*" multiple hidden data-subir></label>';
 }
-function tandaHtml(){
+export function tandaHtml(){
   if(!TANDA.length) return '';
   const r = resumenTanda(TANDA);
   const filas = TANDA.filter(i => i.estado !== 'lista' && i.estado !== 'repetida').map(i => `<div class="ftanda-fila ${esc(i.estado)}"><span>${esc(i.nombre)}</span><span>${i.estado === 'fallo' ? '✕ ' + esc(i.error || 'no se pudo') : (i.estado === 'cola' ? 'en espera' : i.estado + '…')}</span></div>`).join('');
   return `<div class="ftanda"><div class="ftanda-cab"><b>${esc(textoAvance(r))}</b>${r.enCurso ? '' : '<button type="button" class="enlace-editar" data-tanda-cerrar>Cerrar</button>'}</div>${filas}${(!r.enCurso && r.fallidas) ? '<div class="ftanda-pie"><button type="button" class="btn btn-outline" data-tanda-reintentar>Reintentar las que fallaron</button></div>' : ''}</div>`;
 }
 export function pintar(urls){
-  const caja = $('#fotosPanel'); if(!caja || !TRABAJO) return;
+  if(!TRABAJO) return;
   urls = urls || {}; FOTOS.forEach(f => { const c = URLS.mini[f.id]; if(!urls[f.id] && c && c.vence > Date.now()) urls[f.id] = c.url; });
-  const dias = porDia(FOTOS);
-  const cuerpo = dias.length ? dias.map(d => `<section class="fdia"><h3 class="fdia-t">${esc(d.titulo)} <span class="n">${d.fotos.length}</span></h3>
-      <div class="fgrid">${d.fotos.map(f => fotoHtml(f, urls[f.id], nombreDe(f.created_by))).join('')}</div></section>`).join('')
-    : '<div class="vacio-fotos"><svg class="ic"><use href="#i-camara"/></svg><div><b>Todavía no hay fotos en este trabajo.</b><br>Tome la primera con el botón de arriba; aquí salen por día, con quién las tomó.</div></div>';
-  caja.innerHTML = botonesSubir() + tandaHtml() + cuerpo;
   const n = $('#fotosConteo'); if(n) n.textContent = '(' + FOTOS.length + ')';
   // La portada de la ficha = la foto más nueva (antes se quedaba vacía si las fotos llegaban después de abrir).
   const masNueva = porDia(FOTOS).flatMap(d => d.fotos)[0];
   const portada = $('#trabajoFicha .portada');
   if(portada && masNueva && urls[masNueva.id]){ const img = portada.querySelector('img'); if(!img || img.getAttribute('src') !== urls[masNueva.id]) portada.innerHTML = '<img src="' + esc(urls[masNueva.id]) + '" alt="">'; }
+  if(AL_PINTAR) AL_PINTAR(urls);
+}
+// Mover fotos a un nivel/cuarto (o sacarlas: null). Devuelve cuántas se movieron de verdad (las de otros solo las mueve el manager).
+export async function moverFotos(ids, destino){
+  if(!ids.length) return 0;
+  const cuerpo = { nivel_id: destino && destino.nivel_id || null, cuarto_id: destino && destino.cuarto_id || null };
+  const r = await authFetch('/rest/v1/fotos_fotos?id=in.(' + ids.map(encodeURIComponent).join(',') + ')', { method:'PATCH', headers:{ Prefer:'return=representation' }, body: JSON.stringify(cuerpo) });
+  if(!r.ok) throw new Error('HTTP ' + r.status);
+  const filas = await r.json();
+  (filas || []).forEach(x => { const f = FOTOS.find(y => y.id === x.id); if(f){ f.nivel_id = x.nivel_id; f.cuarto_id = x.cuarto_id; } });
+  pintar();
+  return (filas || []).length;
+}
+// Mandar varias fotos a la papelera (manager o quien las subió). Devuelve cuántas.
+export async function papeleraFotos(ids){
+  if(!ids.length) return 0;
+  const r = await authFetch('/rest/v1/fotos_fotos?id=in.(' + ids.map(encodeURIComponent).join(',') + ')', { method:'PATCH', headers:{ Prefer:'return=representation' }, body: JSON.stringify({ estado:'papelera', eliminada_at: new Date().toISOString(), eliminada_por: PERFIL ? PERFIL.id : null }) });
+  if(!r.ok) throw new Error('HTTP ' + r.status);
+  const filas = await r.json(); const fuera = new Set((filas || []).map(x => x.id));
+  FOTOS = FOTOS.filter(f => !fuera.has(f.id)); pintar();
+  return fuera.size;
 }
 
 // ---------- subir una tanda (una a la vez: así una foto pesada no tumba a las demás) ----------
@@ -200,6 +224,11 @@ async function procesarTanda(){
       if(!TRABAJO || item.trabajoId !== TRABAJO.id) { item.estado = 'fallo'; item.error = 'cambió de trabajo'; continue; }
       try{
         const { foto, repetida } = await subirUna(item.trabajoId, item.file, (e) => { item.estado = e; pintar(); });
+        // La foto queda en el nivel/cuarto escogido (la fila la escribe la función; el cuarto se le pone aquí).
+        if(foto && !repetida && item.destino && (item.destino.nivel_id || item.destino.cuarto_id)){
+          try{ const r = await authFetch('/rest/v1/fotos_fotos?id=eq.' + encodeURIComponent(foto.id), { method:'PATCH', headers:{ Prefer:'return=representation' }, body: JSON.stringify({ nivel_id: item.destino.nivel_id || null, cuarto_id: item.destino.cuarto_id || null }) });
+            if(r.ok){ const x = (await r.json())[0]; if(x){ foto.nivel_id = x.nivel_id; foto.cuarto_id = x.cuarto_id; } } }catch{}
+        }
         item.estado = repetida ? 'repetida' : 'lista';
         if(!repetida && foto && TRABAJO && foto.trabajo_id === TRABAJO.id && !FOTOS.some(f => f.id === foto.id)) FOTOS.unshift(foto);
       }catch(e){ item.estado = 'fallo'; item.error = String(e && e.message || e); }
@@ -209,15 +238,16 @@ async function procesarTanda(){
     const urls = await urlsFirmadas(FOTOS.map(f => f.id), 'mini'); pintar(urls);
   } finally { subiendo = false; }
 }
-export function encolar(files){
+export function encolar(files, destino){
   const lista = Array.from(files || []).filter(esImagen);
   if(!lista.length || !TRABAJO) return;
-  lista.forEach(f => TANDA.push({ file: f, nombre: f.name || 'foto', trabajoId: TRABAJO.id, estado:'cola', error:'' }));
+  const d = destino || DESTINO_FN() || {};
+  lista.forEach(f => TANDA.push({ file: f, nombre: f.name || 'foto', trabajoId: TRABAJO.id, estado:'cola', error:'', destino: d }));
   pintar(); procesarTanda();
 }
 
 // ---------- ver en grande ----------
-const ordenVisor = () => porDia(FOTOS).flatMap(d => d.fotos);
+const ordenVisor = () => ORDEN_FN ? ORDEN_FN(FOTOS) : porDia(FOTOS).flatMap(d => d.fotos);
 export async function abrirVisor(fotoId){
   const i = ordenVisor().findIndex(f => f.id === fotoId); if(i < 0) return;
   VISOR_I = i; $('#visor').hidden = false; document.body.classList.add('con-visor');
@@ -226,7 +256,7 @@ export async function abrirVisor(fotoId){
 async function pintarVisor(){
   const lista = ordenVisor(); const f = lista[VISOR_I]; if(!f) return cerrarVisor();
   $('#visorImg').src = ''; $('#visorPie').textContent = '';
-  $('#visorQuien').textContent = nombreDe(f.created_by) + ' · ' + diaTxt(fechaFoto(f)) + ' ' + horaTxt(fechaFoto(f));
+  $('#visorQuien').textContent = (ETIQUETA_FN ? ETIQUETA_FN(f) + ' · ' : '') + nombreDe(f.created_by) + ' · ' + diaTxt(fechaFoto(f)) + ' ' + horaTxt(fechaFoto(f));
   $('#visorN').textContent = (VISOR_I + 1) + ' / ' + lista.length;
   $('#visorBorrar').hidden = !(esManager() || (PERFIL && f.created_by === PERFIL.id));
   const urls = await urlsFirmadas([f.id], 'web');
@@ -235,7 +265,7 @@ async function pintarVisor(){
   $('#visorPie').textContent = f.nota || '';
 }
 export function cerrarVisor(){ $('#visor').hidden = true; document.body.classList.remove('con-visor'); VISOR_I = -1; }
-function visorMover(d){ if(VISOR_I < 0) return; VISOR_I = (VISOR_I + d + FOTOS.length) % FOTOS.length; pintarVisor(); }
+function visorMover(d){ if(VISOR_I < 0) return; const n = ordenVisor().length; if(!n) return cerrarVisor(); VISOR_I = (VISOR_I + d + n) % n; pintarVisor(); }
 async function borrarFoto(){
   const f = ordenVisor()[VISOR_I]; if(!f) return;
   if(!confirm('¿Mandar esta foto a la papelera? El manager la puede recuperar después.')) return;
@@ -243,7 +273,7 @@ async function borrarFoto(){
   const filas = r.ok ? await r.json() : [];
   if(!r.ok || !filas.length){ $('#visorPie').textContent = 'No se pudo borrar (' + r.status + ').'; return; }
   FOTOS = FOTOS.filter(x => x.id !== f.id);
-  if(!FOTOS.length) cerrarVisor(); else { VISOR_I = Math.min(VISOR_I, FOTOS.length - 1); pintarVisor(); }
+  const quedan = ordenVisor().length; if(!quedan) cerrarVisor(); else { VISOR_I = Math.min(VISOR_I, quedan - 1); pintarVisor(); }
   pintar();
 }
 
@@ -253,7 +283,7 @@ export function conectar(){
     encolar(inp.files); inp.value = '';
   });
   document.addEventListener('click', (e) => {
-    const foto = e.target.closest('[data-foto]'); if(foto){ abrirVisor(foto.dataset.foto); return; }
+    const foto = e.target.closest('[data-foto]'); if(foto){ if(AL_CLIC_FN && AL_CLIC_FN(foto.dataset.foto)) return; abrirVisor(foto.dataset.foto); return; }
     if(e.target.closest('[data-tanda-cerrar]')){ TANDA = TANDA.filter(i => i.estado !== 'lista' && i.estado !== 'repetida' && i.estado !== 'fallo'); pintar(); return; }
     if(e.target.closest('[data-tanda-reintentar]')){ TANDA.forEach(i => { if(i.estado === 'fallo'){ i.estado = 'cola'; i.error = ''; } }); pintar(); procesarTanda(); return; }
   });

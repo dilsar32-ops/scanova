@@ -140,8 +140,8 @@ export async function pintarGaleria(){
 }
 
 // ---------- el menú ••• (Open / Edit / Archive) ----------
-function cerrarMenu(){ const m = $('#menuPop'); if(m){ m.hidden = true; m.innerHTML = ''; } MENU_ID = null; }
-function abrirMenuEn(btn, html){
+export function cerrarMenu(){ const m = $('#menuPop'); if(m){ m.hidden = true; m.innerHTML = ''; } MENU_ID = null; }
+export function abrirMenuEn(btn, html){
   const m = $('#menuPop'); const app = $('.app');
   m.innerHTML = html; m.hidden = false;
   const r = btn.getBoundingClientRect(), a = app.getBoundingClientRect();
