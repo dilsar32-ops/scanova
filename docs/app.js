@@ -2,6 +2,7 @@
 import { SUPABASE_URL, ANON_KEY, APP_BUILD, EMPRESA } from './config.js';
 import * as trabajos from './trabajos.js';
 import * as personas from './personas.js';
+import * as fotos from './fotos.js';
 
 export const $ = (s, r = document) => r.querySelector(s);
 export const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -182,6 +183,7 @@ async function arrancar(){
   });
   trabajos.conectar();
   personas.conectar();
+  fotos.conectar();
 
   SES = leerSes();
   if(SES && SES.access_token){

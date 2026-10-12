@@ -134,6 +134,39 @@ body.modo-entrar main{ padding:0; }
 .linea span:first-child{ color:var(--ink-soft); }
 .linea a{ color:var(--accent); text-decoration:none; font-weight:600; }
 
+/* ---------- FOTOS ---------- */
+.fsubir{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+.fsubir .btn{ flex:1 1 150px; }
+.ftanda{ background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:14px; font-size:14px; }
+.ftanda-cab{ display:flex; justify-content:space-between; align-items:center; gap:10px; }
+.ftanda-fila{ display:flex; justify-content:space-between; gap:10px; color:var(--ink-soft); padding:4px 0; border-top:1px solid var(--line); }
+.ftanda-fila.fallo{ color:var(--danger); }
+.ftanda-pie{ margin-top:8px; }
+.fdia{ margin-bottom:18px; }
+.fdia-t{ margin:0 0 10px; font-size:16px; font-weight:700; }
+.fdia-t .n{ color:var(--ink-mute); font-weight:500; margin-left:6px; }
+.fgrid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(104px, 1fr)); gap:8px; }
+.ffoto{ position:relative; aspect-ratio:1 / 1; border:0; padding:0; border-radius:6px; overflow:hidden; background:var(--bg2); cursor:pointer; }
+.ffoto img{ width:100%; height:100%; object-fit:cover; display:block; }
+.ffoto-vacia{ display:block; width:100%; height:100%; background:var(--bg2); }
+.fquien{ position:absolute; left:6px; bottom:6px; min-width:24px; height:24px; padding:0 6px; border-radius:12px; background:rgba(20,35,52,.75); color:#fff; font-size:11px; font-weight:700; display:inline-grid; place-items:center; }
+.fquien:empty{ display:none; }
+.foto-vacia img, .miniatura img{ width:100%; height:100%; object-fit:cover; display:block; border-radius:6px; }
+.visor{ position:absolute; inset:0; z-index:40; background:#0b111c; color:#fff; display:flex; flex-direction:column; }
+.visor[hidden]{ display:none !important; }
+.visor-cab{ display:flex; align-items:center; gap:12px; padding:10px 14px; padding-top:calc(10px + env(safe-area-inset-top)); font-size:14px; }
+.visor-quien{ flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.visor-n{ color:#aab4c3; }
+.visor-btn{ font:inherit; font-size:18px; color:#fff; background:rgba(255,255,255,.12); border:0; border-radius:50%; width:40px; height:40px; display:grid; place-items:center; cursor:pointer; flex:0 0 auto; }
+.visor-cuerpo{ flex:1; min-height:0; position:relative; display:flex; align-items:center; justify-content:center; }
+.visor-cuerpo img{ max-width:100%; max-height:100%; object-fit:contain; display:block; }
+.visor-ant, .visor-sig{ position:absolute; top:50%; transform:translateY(-50%); }
+.visor-ant{ left:10px; } .visor-sig{ right:10px; }
+.visor-sig .ic{ transform:scaleX(-1); }
+.visor-pie{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 14px calc(10px + env(safe-area-inset-bottom)); font-size:14px; color:#dfe5ee; }
+.visor-pie .btn{ background:transparent; color:#ff8a8a; border-color:rgba(255,255,255,.25); }
+.app{ position:relative; }
+
 /* ---------- PERSONAS ---------- */
 .bloque{ background:var(--card); border:1px solid var(--line); border-radius:12px; padding:4px 16px 8px; margin:14px 0; }
 .bloque-t{ margin:12px 0 4px; font-size:13px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-soft); }

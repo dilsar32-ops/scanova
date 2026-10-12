@@ -1,5 +1,6 @@
 // Scanova · trabajos: la lista, crear, abrir, editar, archivar. De las fotos solo el conteo por ahora (paso 2).
 import { $, $$, authFetch, irA, atras, esManager } from './app.js';
+import * as fotos from './fotos.js';
 
 export const TIPOS = { agua:'Agua', moho:'Moho', fuego:'Fuego', contenidos:'Contenidos', mudanza:'Mudanza', otro:'Otro' };
 export const tipoTxt = (t) => TIPOS[t] || 'Otro';
@@ -46,13 +47,16 @@ export function etiquetas(t){
 // Pura: una fila de la lista. En el teléfono se ven miniatura + texto; en la computadora, las 4 columnas.
 export function filaHtml(t, nFotos, ahora){
   const n = nFotos || 0; const cuando = esc(fechaRelativa(t.updated_at, ahora));
+  const rec = (RECIENTES[t.id] || []).map(id => MINIS[id]).filter(Boolean);
+  const portada = rec[0] ? '<img src="' + esc(rec[0]) + '" alt="" loading="lazy">' : ICONO('camara');
+  const huecos = rec.map(u => '<span class="foto-vacia"><img src="' + esc(u) + '" alt="" loading="lazy"></span>').join('') + '<span class="foto-vacia"></span>'.repeat(Math.max(0, 4 - rec.length));
   return `<div class="fila-trabajo" data-id="${esc(t.id)}">
-    <div class="col-nom"><div class="miniatura">${ICONO('camara')}</div><div class="col-texto">
+    <div class="col-nom"><div class="miniatura">${portada}</div><div class="col-texto">
       <div class="nom">${esc(t.cliente)}</div><div class="dir">${esc(t.direccion || 'Sin dirección')}</div>
       <div class="etqs">${etiquetas(t)}</div><div class="meta-movil">${cuando}</div></div></div>
     <div class="col-act">${cuando}</div>
     <div class="col-res"><b>${n}</b> ${n === 1 ? 'foto' : 'fotos'}</div>
-    <div class="col-fotos">${'<span class="foto-vacia"></span>'.repeat(4)}</div>
+    <div class="col-fotos">${huecos}</div>
   </div>`;
 }
 // Pura: la ficha de un trabajo (portada, título, dirección, etiquetas, acciones y pestañas Fotos / Datos).
@@ -69,9 +73,10 @@ export function fichaHtml(t, nFotos, manager){
       ${dig ? '<a class="btn btn-outline" href="tel:' + esc(dig) + '">' + ICONO('tel') + 'Llamar</a><a class="btn btn-outline" href="sms:' + esc(dig) + '">' + ICONO('msj') + 'Mensaje</a>' : ''}
       ${manager ? '<button type="button" class="btn btn-outline' + (arch ? '' : ' btn-rojo') + '" id="btnArchivar">' + ICONO('archivo') + (arch ? 'Reactivar' : 'Archivar') + '</button>' : ''}
     </div>
-    <div class="tabs" id="fichaTabs"><button type="button" class="tab-f on" data-tab="fotos">Fotos <span class="n">(${nFotos || 0})</span></button><button type="button" class="tab-f" data-tab="datos">Datos</button></div>
+    <div class="tabs" id="fichaTabs"><button type="button" class="tab-f on" data-tab="fotos">Fotos <span class="n" id="fotosConteo">(${nFotos || 0})</span></button><button type="button" class="tab-f" data-tab="datos">Datos</button></div>
     <div class="tab-panel" data-panel="fotos">
-      <div class="vacio-fotos">${ICONO('camara')}<div><b>Todavía no hay fotos en este trabajo.</b><br>Aquí van a salir por día, con quién las tomó.</div></div>
+      <div id="fotosPanel"><p class="vacio">Cargando fotos…</p></div>
+      <p class="aviso" id="fotosAviso"></p>
     </div>
     <div class="tab-panel" data-panel="datos" hidden>
       <div class="linea"><span>Teléfono</span><span>${t.telefono ? '<a href="tel:' + esc(dig) + '">' + esc(t.telefono) + '</a>' : '—'}</span></div>
@@ -86,6 +91,8 @@ export function fichaHtml(t, nFotos, manager){
 
 let LISTA = [];
 let FOTOS = {};          // trabajo_id -> cuántas fotos
+let RECIENTES = {};      // trabajo_id -> [foto_id...] las 4 más nuevas
+let MINIS = {};          // foto_id -> url firmada (mini)
 let estadoVista = 'activo';
 let abierto = null;      // el trabajo en pantalla
 let editando = null;     // el trabajo que se edita en la forma (null = nuevo)
@@ -97,14 +104,17 @@ export async function cargar(){
   $('#listaTrabajos').innerHTML = '<p class="vacio">Cargando…</p>';
   const [r, rf] = await Promise.all([
     authFetch('/rest/v1/fotos_trabajos?select=' + SELECT + '&order=updated_at.desc&limit=500'),
-    authFetch('/rest/v1/fotos_fotos?select=trabajo_id&limit=5000'),
+    authFetch('/rest/v1/fotos_fotos?select=id,trabajo_id&estado=eq.activa&order=subida_at.desc&limit=5000'),
   ]);
   if(r.status === 404){ LISTA = []; pintar(); aviso.textContent = 'Esta parte todavía no está instalada en el servidor: falta correr sql/fotos-01-base.sql.'; return; }
   if(!r.ok){ LISTA = []; pintar(); aviso.textContent = 'No se pudo leer la lista (' + r.status + '). Revise su internet.'; return; }
   LISTA = await r.json();
-  FOTOS = {};
-  if(rf && rf.ok){ try{ const f = await rf.json(); if(Array.isArray(f)) f.forEach(x => { FOTOS[x.trabajo_id] = (FOTOS[x.trabajo_id] || 0) + 1; }); }catch{} }
+  FOTOS = {}; RECIENTES = {};
+  if(rf && rf.ok){ try{ const f = await rf.json(); if(Array.isArray(f)) f.forEach(x => { FOTOS[x.trabajo_id] = (FOTOS[x.trabajo_id] || 0) + 1; (RECIENTES[x.trabajo_id] = RECIENTES[x.trabajo_id] || []).length < 4 && RECIENTES[x.trabajo_id].push(x.id); }); }catch{} }
   pintar();
+  // Miniaturas de verdad en "Fotos recientes" y en la portada de cada fila: una sola llamada firmada.
+  const ids = Object.values(RECIENTES).flat();
+  if(ids.length){ try{ MINIS = await fotos.urlsFirmadas(ids, 'mini'); pintar(); }catch{} }
 }
 
 export function pintar(){
@@ -164,6 +174,7 @@ export function abrir(t, reemplazar){
   });
   if(reemplazar){ irA('pTrabajo'); } else irA('pTrabajo', 'pTrabajos');
   $('#subtitulo').textContent = t.cliente || 'Trabajo';
+  fotos.cargar(t);
 }
 
 async function archivar(){
