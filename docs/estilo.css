@@ -778,12 +778,9 @@ body.menu-abierto .menu-velo{ display:block; position:absolute; inset:0; z-index
 .cuarto-agregar{ margin:2px 8px 6px; }
 button.cap-fila{ width:100%; font:inherit; color:inherit; background:none; border:0; text-align:left; -webkit-appearance:none; appearance:none; }
 button.cap-fila.on{ background:var(--accent-soft); }
-/* Cámara: el proyecto arriba a lo ancho y el nivel/cuarto en su propia línea debajo. */
-.cam-arriba{ flex-wrap:wrap; row-gap:8px; }
+/* Cámara: el nombre del proyecto se recorta con "…" si es largo; el nivel/cuarto se queda arriba a la derecha. */
 .cam-titulo{ flex:1 1 0; min-width:0; }
 .cam-titulo small{ white-space:nowrap; }
-.cam-cuarto{ order:3; margin-left:52px; max-width:calc(100% - 52px); }
 /* Hoja de nivel/cuarto: cada "Add room" en su renglón bajo su nivel, y "Add level" siempre abajo, aparte. */
 .cuarto-agregar{ display:flex; width:calc(100% - 16px); }
 .cuarto-nivel-nuevo{ border-top:1px solid var(--line); padding-top:12px; margin-top:8px; }
-.cam-arriba .cam-titulo{ flex:1 1 calc(100% - 64px); }
