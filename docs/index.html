@@ -11,80 +11,81 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap">
 <style>
-/* Scanova · pantalla de bienvenida. Reproduce el diseno aprobado el 12 oct 2026 (imagen de referencia):
-   fondo blanco perla con degradados suaves, logo arriba a la izquierda, titulo en dos lineas, boton azul,
-   tres tarjetas Capture / Plan / Restore con foto e icono, y la frase del pie. Solo acceso privado. */
-:root{ --ink:#0e121a; --ink2:#5b6b85; --azul:#0b64de; --azul2:#0a58c4; --pill:#e4eaf3; }
+/* Scanova · pantalla de bienvenida. Reproduce el diseno aprobado (imagen de referencia de 1536x1024) como un
+   LIENZO DE PROPORCION FIJA que se escala para caber ENTERO en la pantalla: no se desplaza ni se mueve, igual
+   que la imagen. En pantallas verticales (telefono) hay un lienzo vertical de 390x844 con las mismas piezas.
+   Fondo blanco perla con degradados suaves. Solo acceso privado. */
+:root{ --ink:#0e121a; --ink2:#5b6b85; --azul:#0b64de; --pill:#e4eaf3; --s:1; }
 *{ box-sizing:border-box; }
-html{ min-height:100%; background:#f3f6fa; overflow-x:hidden; }
-body{ margin:0; min-height:100vh; color:var(--ink); font-family:"Plus Jakarta Sans",system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif; -webkit-text-size-adjust:100%; overflow-x:hidden; position:relative;
+html, body{ margin:0; height:100%; overflow:hidden; overscroll-behavior:none; }
+body{ color:var(--ink); font-family:"Plus Jakarta Sans",system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif; -webkit-text-size-adjust:100%; touch-action:manipulation; position:fixed; inset:0;
   background:
     radial-gradient(55% 45% at 6% 10%, #d9e6f8 0%, rgba(217,230,248,0) 62%),
     radial-gradient(42% 40% at 94% 16%, #d5e3f9 0%, rgba(213,227,249,0) 60%),
     radial-gradient(48% 38% at 88% 88%, #dbe5f4 0%, rgba(219,229,244,0) 60%),
     radial-gradient(38% 34% at 10% 92%, #e2ebf8 0%, rgba(226,235,248,0) 60%),
-    linear-gradient(180deg, #f7f9fc 0%, #f1f5fa 100%);
-  background-repeat:no-repeat; background-size:100% 100%; }
-.fondo{ position:absolute; inset:0; overflow:hidden; z-index:0; pointer-events:none; }
-.ola{ position:absolute; width:min(1100px, 95vw); height:auto; opacity:.42; }
-.ola.a{ left:-18vw; top:120px; } .ola.b{ right:-20vw; bottom:-40px; transform:scaleX(-1); }
-.top, main{ position:relative; z-index:1; }
+    linear-gradient(180deg, #f7f9fc 0%, #f1f5fa 100%); }
 a{ color:inherit; text-decoration:none; }
-
+/* ---------- el lienzo ---------- */
+.lienzo{ position:absolute; left:0; top:0; width:1536px; height:1024px; transform:scale(var(--s)); transform-origin:0 0; }
+.fondo{ position:absolute; inset:0; overflow:hidden; z-index:0; pointer-events:none; }
+.ola{ position:absolute; width:min(1100px, 82vw); height:auto; opacity:.42; }
+.ola.a{ left:-16vw; top:14vh; } .ola.b{ right:-18vw; bottom:-6vh; transform:scaleX(-1); }
+.top, .hero, .cards, .tagline{ position:relative; z-index:1; }
 /* ---------- cabecera ---------- */
-.top{ max-width:1300px; margin:0 auto; padding:clamp(18px, 2vw, 30px) clamp(20px, 2.9vw, 44px) 0; display:flex; align-items:center; justify-content:space-between; gap:20px; }
-.logo{ font-size:clamp(28px, 2.7vw, 42px); font-weight:800; letter-spacing:-.035em; line-height:1; color:#0a1130; }
+.top{ display:flex; align-items:center; justify-content:space-between; padding:33px 113px 0 136px; }
+.logo{ font-size:44px; font-weight:800; letter-spacing:-.035em; line-height:1; color:#0a1130; }
 .logo span{ color:var(--azul); }
-.nav{ display:flex; align-items:center; gap:34px; }
-.nav a{ font-size:clamp(13px, 1vw, 15px); font-weight:500; color:#1f2a3a; }
+.nav{ display:flex; align-items:center; gap:38px; }
+.nav a{ font-size:15px; font-weight:500; color:#1f2a3a; }
 .nav a:hover{ color:var(--azul); }
-.sep{ width:1px; height:26px; background:#2a3446; opacity:.7; margin:0 -4px; }
-.signin{ background:var(--pill); border-radius:999px; padding:clamp(9px, .8vw, 12px) clamp(22px, 2.2vw, 34px); font-size:clamp(14px, 1.05vw, 16px) !important; font-weight:600 !important; color:var(--ink) !important; }
+.sep{ width:1px; height:28px; background:#2a3446; opacity:.7; margin:0 -4px; }
+.signin{ background:var(--pill); border-radius:999px; padding:12px 34px; font-size:16px !important; font-weight:600 !important; color:var(--ink) !important; }
 .signin:hover{ background:#d9e1ee; color:var(--ink) !important; }
-
 /* ---------- portada ---------- */
-.hero{ text-align:center; padding:clamp(44px, 6vw, 92px) 20px clamp(26px, 3.1vw, 48px); }
-.hero h1{ margin:0 auto; font-size:clamp(30px, 4.6vw, 70px); line-height:1.04; font-weight:800; letter-spacing:-.04em; max-width:900px; text-wrap:balance; }
+.hero{ text-align:center; margin-top:96px; }
+.hero h1{ margin:0 auto; font-size:70px; line-height:1.0; font-weight:800; letter-spacing:-.04em; }
 .hero h1 span{ color:var(--azul); }
-.hero p{ margin:clamp(14px, 1.6vw, 24px) auto clamp(22px, 2.3vw, 36px); max-width:clamp(300px, 35vw, 540px); font-size:clamp(15px, 1.43vw, 22px); line-height:1.42; color:var(--ink2); font-weight:500; text-wrap:balance; }
-.cta{ display:inline-flex; align-items:center; justify-content:center; gap:clamp(10px, 1vw, 16px); height:clamp(48px, 4.2vw, 64px); padding:0 clamp(26px, 3vw, 46px); border-radius:999px; color:#fff; font-size:clamp(17px, 1.5vw, 23px); font-weight:600; letter-spacing:-.01em;
-  background:linear-gradient(90deg, #2b7cf7 0%, #0b5ed7 100%); box-shadow:0 14px 34px rgba(11,100,222,.35), inset 0 1px 0 rgba(255,255,255,.28); transition:transform .15s ease, box-shadow .15s ease; }
-.cta:hover{ transform:translateY(-1px); box-shadow:0 18px 40px rgba(11,100,222,.42), inset 0 1px 0 rgba(255,255,255,.28); }
-.cta svg{ width:clamp(20px, 1.7vw, 26px); height:clamp(20px, 1.7vw, 26px); fill:none; stroke:#fff; stroke-width:2.2; stroke-linecap:round; stroke-linejoin:round; }
-
+.hero p{ margin:26px auto 0; max-width:560px; font-size:22px; line-height:1.3; color:var(--ink2); font-weight:500; }
+.cta{ display:inline-flex; align-items:center; justify-content:center; gap:16px; margin-top:36px; height:64px; padding:0 50px; border-radius:999px; color:#fff; font-size:24px; font-weight:600; letter-spacing:-.01em;
+  background:linear-gradient(90deg, #2b7cf7 0%, #0b5ed7 100%); box-shadow:0 14px 34px rgba(11,100,222,.35), inset 0 1px 0 rgba(255,255,255,.28); }
+.cta svg{ width:26px; height:26px; fill:none; stroke:#fff; stroke-width:2.2; stroke-linecap:round; stroke-linejoin:round; }
 /* ---------- tarjetas ---------- */
-.cards{ max-width:1290px; margin:clamp(30px, 3.4vw, 52px) auto 0; padding:0 clamp(20px, 2.9vw, 44px); display:grid; grid-template-columns:repeat(3, 1fr); gap:clamp(22px, 2.9vw, 46px); }
-.card{ min-width:0; }
+.cards{ width:1226px; margin:46px auto 0; display:grid; grid-template-columns:repeat(3, 380px); gap:43px; }
 .foto{ position:relative; }
-.foto img{ display:block; width:100%; height:auto; aspect-ratio:380 / 214; object-fit:cover; border-radius:10px; box-shadow:0 10px 30px rgba(14,18,26,.10); background:#e6ecf4; }
-.icono{ position:absolute; left:14px; bottom:-20px; width:clamp(50px, 4.3vw, 66px); height:clamp(50px, 4.3vw, 66px); border-radius:50%; background:#fff; box-shadow:0 8px 22px rgba(14,18,26,.16); display:grid; place-items:center; }
-.icono svg{ width:clamp(22px, 1.8vw, 28px); height:clamp(22px, 1.8vw, 28px); fill:none; stroke:var(--azul); stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round; }
+.foto img{ display:block; width:380px; height:214px; object-fit:cover; border-radius:10px; box-shadow:0 10px 30px rgba(14,18,26,.10); background:#e6ecf4; }
+.icono{ position:absolute; left:14px; bottom:-20px; width:66px; height:66px; border-radius:50%; background:#fff; box-shadow:0 8px 22px rgba(14,18,26,.16); display:grid; place-items:center; }
+.icono svg{ width:28px; height:28px; fill:none; stroke:var(--azul); stroke-width:1.9; stroke-linecap:round; stroke-linejoin:round; }
 .icono.oscuro svg{ stroke:#1a2232; }
-.card h2{ margin:clamp(36px, 3vw, 46px) 0 6px; padding-left:14px; font-size:clamp(19px, 1.6vw, 25px); font-weight:700; letter-spacing:-.02em; }
-.card p{ margin:0; padding-left:14px; font-size:clamp(15px, 1.3vw, 20px); line-height:1.45; color:var(--ink2); font-weight:500; }
-
+.card h2{ margin:44px 0 6px; padding-left:14px; font-size:24px; font-weight:700; letter-spacing:-.02em; }
+.card p{ margin:0; padding-left:14px; font-size:20px; line-height:1.4; color:var(--ink2); font-weight:500; }
 /* ---------- pie ---------- */
-.tagline{ display:flex; align-items:center; justify-content:center; gap:28px; margin:clamp(48px, 6vw, 92px) auto clamp(36px, 4.2vw, 64px); padding:0 20px; font-size:clamp(11px, .85vw, 13px); font-weight:600; letter-spacing:.34em; text-transform:uppercase; color:#6b7a90; }
-.tagline i{ display:block; width:56px; height:1px; background:#9aa6b8; flex:0 1 auto; }
+.tagline{ display:flex; align-items:center; justify-content:center; gap:28px; margin:68px auto 0; font-size:13px; font-weight:600; letter-spacing:.34em; text-transform:uppercase; color:#6b7a90; }
+.tagline i{ display:block; width:56px; height:1px; background:#9aa6b8; }
 .tagline span{ white-space:nowrap; }
-
-/* ---------- tableta y telefono ---------- */
-@media (max-width:1100px){ .cards{ gap:24px; padding:0 32px; } .card h2{ font-size:20px; } .card p{ font-size:15.5px; } }
-@media (max-width:900px) and (min-width:721px){ .cards{ max-width:720px; gap:20px; } .card h2{ font-size:18px; } .card p{ font-size:14.5px; } }
-@media (max-width:720px){
-  .top{ padding:18px 20px 0; }
-  .logo{ font-size:28px; }
-  .nav{ gap:14px; } .nav a:not(.signin), .sep{ display:none; }
+/* ---------- pantalla vertical (telefono / tableta en vertical): lienzo de 390x844 ---------- */
+@media (orientation:portrait){
+  .lienzo{ width:390px; height:844px; }
+  .ola{ width:160vw; } .ola.a{ left:-50vw; top:16vh; } .ola.b{ right:-55vw; bottom:-4vh; }
+  .top{ padding:24px 24px 0; }
+  .logo{ font-size:30px; }
+  .nav{ gap:12px; } .nav a:not(.signin), .sep{ display:none; }
   .signin{ padding:9px 22px; font-size:14px !important; }
-  .hero{ padding:44px 20px 30px; }
-  .hero h1{ font-size:30px; }
-  .hero p{ margin:14px auto 24px; font-size:15.5px; max-width:320px; }
-  .cta{ width:auto; min-width:240px; max-width:340px; height:52px; font-size:17px; padding:0 30px; }
-  .cards{ grid-template-columns:1fr; gap:30px; padding:0 24px; max-width:380px; margin-top:30px; }
-  .icono{ width:54px; height:54px; bottom:-16px; } .icono svg{ width:24px; height:24px; }
-  .card h2{ margin:34px 0 4px; font-size:20px; }
-  .card p{ font-size:15px; }
-  .tagline{ margin:64px auto 44px; gap:14px; letter-spacing:.2em; font-size:11px; } .tagline i{ width:30px; }
+  .hero{ margin-top:46px; padding:0 20px; }
+  .hero h1{ font-size:33px; line-height:1.08; }
+  .hero p{ margin-top:14px; max-width:300px; font-size:15px; line-height:1.4; }
+  .cta{ margin-top:22px; height:52px; padding:0 30px; font-size:17px; gap:10px; }
+  .cta svg{ width:20px; height:20px; }
+  .cards{ width:342px; margin:34px auto 0; display:flex; flex-direction:column; gap:22px; }
+  .card{ display:flex; align-items:center; gap:16px; }
+  .foto{ flex:0 0 auto; }
+  .foto img{ width:150px; height:84px; border-radius:8px; box-shadow:0 6px 18px rgba(14,18,26,.12); }
+  .icono{ left:8px; bottom:-12px; width:38px; height:38px; box-shadow:0 5px 14px rgba(14,18,26,.18); }
+  .icono svg{ width:18px; height:18px; }
+  .card h2{ margin:0 0 3px; padding-left:0; font-size:18px; }
+  .card p{ padding-left:0; font-size:13px; line-height:1.35; }
+  .tagline{ margin-top:30px; gap:14px; font-size:10px; letter-spacing:.24em; }
+  .tagline i{ width:28px; }
 }
 </style>
 </head>
@@ -93,19 +94,19 @@ a{ color:inherit; text-decoration:none; }
   <svg class="ola a" viewBox="0 0 1200 420"><path d="M0 220 C 220 80, 420 60, 640 160 S 1020 360, 1200 240 L1200 420 L0 420 Z" fill="#cfe0f8"/></svg>
   <svg class="ola b" viewBox="0 0 1200 420"><path d="M0 220 C 220 80, 420 60, 640 160 S 1020 360, 1200 240 L1200 420 L0 420 Z" fill="#cfe0f8"/></svg>
 </div>
+<div class="lienzo" id="lienzo">
 
-<header class="top">
-  <a class="logo" href="./" aria-label="Scanova">Scano<span>va</span></a>
-  <nav class="nav" aria-label="Main">
-    <a href="#features">Features</a>
-    <a href="#features">Solutions</a>
-    <a href="#features">Resources</a>
-    <span class="sep" aria-hidden="true"></span>
-    <a class="signin" href="app/">Sign In</a>
-  </nav>
-</header>
+  <header class="top">
+    <a class="logo" href="./" aria-label="Scanova">Scano<span>va</span></a>
+    <nav class="nav" aria-label="Main">
+      <a href="#features">Features</a>
+      <a href="#features">Solutions</a>
+      <a href="#features">Resources</a>
+      <span class="sep" aria-hidden="true"></span>
+      <a class="signin" href="app/">Sign In</a>
+    </nav>
+  </header>
 
-<main>
   <section class="hero">
     <h1>Document Today.<br>Restore <span>Tomorrow.</span></h1>
     <p>The smarter way to capture, organize, and manage restoration projects &mdash; all in one place.</p>
@@ -114,26 +115,46 @@ a{ color:inherit; text-decoration:none; }
 
   <section class="cards" id="features">
     <article class="card">
-      <div class="foto"><img src="img/capture.jpg" alt="Camera on a table in a bright room being documented" width="748" height="418">
+      <div class="foto"><img src="img/capture.jpg" alt="Camera on a table in a bright room being documented" width="380" height="214">
         <span class="icono oscuro"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3.2l1.6-2.4h6.4L16.8 8H20v11H4z"/><circle cx="12" cy="13.2" r="3.4"/></svg></span></div>
-      <h2>Capture</h2>
-      <p>Document the damage with photos, videos and detailed notes.</p>
+      <div class="texto"><h2>Capture</h2><p>Document the damage with photos, videos and detailed notes.</p></div>
     </article>
     <article class="card">
-      <div class="foto"><img src="img/plan.jpg" alt="Tablet showing a floor plan" width="706" height="418">
+      <div class="foto"><img src="img/plan.jpg" alt="Tablet showing a floor plan" width="380" height="214">
         <span class="icono"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12l8-4.5M12 12L4 7.5M12 12v9"/></svg></span></div>
-      <h2>Plan</h2>
-      <p>Create accurate floor plans, assign tasks and track progress.</p>
+      <div class="texto"><h2>Plan</h2><p>Create accurate floor plans, assign tasks and track progress.</p></div>
     </article>
     <article class="card">
-      <div class="foto"><img src="img/restore.jpg" alt="Blue air mover drying a bright room" width="742" height="418">
+      <div class="foto"><img src="img/restore.jpg" alt="Blue air mover drying a bright room" width="380" height="214">
         <span class="icono"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5c3.2 4 6 7.2 6 10.4a6 6 0 0 1-12 0c0-3.2 2.8-6.4 6-10.4z"/></svg></span></div>
-      <h2>Restore</h2>
-      <p>Monitor drying, manage equipment and deliver lasting results.</p>
+      <div class="texto"><h2>Restore</h2><p>Monitor drying, manage equipment and deliver lasting results.</p></div>
     </article>
   </section>
 
   <p class="tagline"><i></i><span>Building clearer tomorrows</span><i></i></p>
-</main>
+</div>
+<script>
+// El lienzo se escala para caber entero (ancho Y alto) en la pantalla; por eso nunca hay que desplazarse.
+(function(){
+  var l = document.getElementById('lienzo');
+  function ajustar(){
+    var vertical = window.matchMedia('(orientation: portrait)').matches;
+    // W x H = el lienzo; HU = la parte que de verdad lleva contenido (el resto es margen de abajo y se puede quedar fuera)
+    var W = vertical ? 390 : 1536, H = vertical ? 844 : 1024, HU = vertical ? 800 : 990;
+    var vw = window.innerWidth, vh = window.innerHeight;
+    if(window.visualViewport){ vw = window.visualViewport.width; vh = window.visualViewport.height; }
+    var s = Math.min(vw / W, vh / HU);
+    l.style.left = Math.round((vw - W * s) / 2) + 'px';
+    l.style.top = Math.max(0, Math.round((vh - HU * s) / 2)) + 'px';
+    document.documentElement.style.setProperty('--s', s.toFixed(4));
+  }
+  ajustar();
+  window.addEventListener('resize', ajustar);
+  window.addEventListener('orientationchange', function(){ setTimeout(ajustar, 60); });
+  if(window.visualViewport) window.visualViewport.addEventListener('resize', ajustar);
+  // las anclas del menu no tienen a donde ir en un lienzo sin desplazamiento: no saltan
+  document.querySelectorAll('a[href="#features"]').forEach(function(a){ a.addEventListener('click', function(e){ e.preventDefault(); }); });
+})();
+</script>
 </body>
 </html>
