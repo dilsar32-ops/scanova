@@ -1,5 +1,5 @@
 -- =====================================================================
---  fotos-01-base.sql  ·  AMG FOTOS — tablas base (12 oct 2026)
+--  fotos-01-base.sql  ·  SCANOVA — tablas base (12 oct 2026)
 --  Plataforma propia de fotos de trabajos. TODO con prefijo fotos_ : no toca ninguna tabla de
 --  Field Reports. Se apoya en lo que ya existe en este mismo proyecto de Supabase:
 --  companies, profiles, auth.users, my_company(), my_role(), my_status().

@@ -1,4 +1,4 @@
-# AMG Fotos
+# Scanova
 
 Plataforma propia de fotos de trabajos (estilo CompanyCam / Encircle). Independiente de
 Field Reports. Datos en Supabase Pro (tablas `fotos_*`), fotos en Cloudflare R2, página en

@@ -1,4 +1,4 @@
-# AMG Fotos — plan técnico (12 oct 2026)
+# Scanova — plan técnico (12 oct 2026)
 
 Plataforma propia de fotos de trabajos, al estilo de CompanyCam / Encircle.
 **Independiente** de Field Reports: otro repositorio, otro enlace, otras tablas, otra carpeta
@@ -8,7 +8,7 @@ de fotos. Nada de la página actual se toca.
 
 | Pieza | Hoy | En la nueva página |
 |---|---|---|
-| GitHub | cuenta `dilsar32-ops`; `amg-reportes` publicada por GitHub Pages (gratis, un solo `index.html` de 2.9 MB) | repositorio nuevo `amg-fotos` → `dilsar32-ops.github.io/amg-fotos`; código partido en archivos pequeños |
+| GitHub | cuenta `dilsar32-ops`; `amg-reportes` publicada por GitHub Pages (gratis, un solo `index.html` de 2.9 MB) | repositorio nuevo `scanova` → `dilsar32-ops.github.io/scanova`; código partido en archivos pequeños |
 | Supabase | proyecto Pro `ogrvdsawqpiqkkevaewb`: 42 tablas, 78 funciones, 6 funciones edge, 3 buckets (`app` público, `recibos` y `contenidos` privados) | **mismas cuentas** (`auth`, `companies`, `profiles`, `my_company()`, `my_role()`, `my_status()`); tablas NUEVAS con prefijo `fotos_`; funciones edge NUEVAS con prefijo `fotos-` |
 | Cómo entra la gente | manager: correo + contraseña · crew: sesión anónima + código del equipo + código personal · temporales: nombre + PIN (sin cuenta) | igual: el manager y el crew entran con lo que ya tienen; los temporales **no** entran a la plataforma de fotos (no tienen cuenta); si hace falta, se les da código personal como al crew |
 | Fotos | CompanyCam (de pago) + bucket `contenidos` (solo Contenidos) | **Cloudflare R2** (sin cobro por descargas) |
@@ -17,7 +17,7 @@ de fotos. Nada de la página actual se toca.
 ## 2. Estructura de la nueva página
 
 ```
-amg-fotos/
+scanova/
   docs/           la página (GitHub Pages solo publica la raíz o la carpeta /docs; por eso se llama así)
     index.html    cascarón: cabecera, pantallas, barra de abajo
     estilo.css    estilo (mismo lenguaje visual que Field Reports: barras deslizables, pastillas)
@@ -86,7 +86,7 @@ con los primeros 10 GB gratis. 10,000 fotos de 3 MB ≈ 30 GB ≈ menos de US$0.
 
 | Paso | Qué queda funcionando | Qué necesito de Amilcar |
 |---|---|---|
-| 0. Preparar | este plan, la carpeta del proyecto, el repositorio `amg-fotos`, el SQL de las tablas, la función `fotos-subir` | nombre de la app; cuenta de Cloudflare con un bucket R2 y un token de acceso, **pegados por él** en los secretos de Supabase (yo lo guío clic por clic; nunca manejo sus claves) |
+| 0. Preparar | este plan, la carpeta del proyecto, el repositorio `scanova`, el SQL de las tablas, la función `fotos-subir` | nombre de la app; cuenta de Cloudflare con un bucket R2 y un token de acceso, **pegados por él** en los secretos de Supabase (yo lo guío clic por clic; nunca manejo sus claves) |
 | 1. Entrar y trabajos | entrar con las cuentas de siempre, ver/crear/buscar trabajos, en teléfono y computadora | probarlo en su iPhone y en su computadora |
 | 2. Subir y ver fotos | cámara y archivos → R2, línea de tiempo por día, cola con reintentos, comprobación de que la foto sí llegó | una tanda de 50–100 fotos de prueba |
 | 3. Detalle de foto | notas, etiquetas, comentarios, Antes/Después, papelera | sus etiquetas de siempre |
