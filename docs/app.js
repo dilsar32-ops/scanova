@@ -70,7 +70,7 @@ export async function pedirEntrada(codigo, nombre){
 }
 // Que pantalla le toca a esta cuenta: trabajos si esta activa (o es manager), espera si esta pausada.
 export function puedeEntrar(p){ return !!(p && p.company_id && (p.role === 'manager' || (p.status || 'active') === 'active')); }
-export function salir(){ guardarSes(null); PERFIL = null; pila.length = 0; irA('pEntrar'); }
+export function salir(){ guardarSes(null); PERFIL = null; pila.length = 0; if(esAparato()) irA('pEntrar'); else cerrarEntrar(); }
 
 // ---------- la bienvenida (la imagen aprobada): se ve solo sin sesión y solo en el navegador ----------
 // En el aparato nativo o en la app guardada en la pantalla de inicio se va derecho a Entrar.
@@ -84,10 +84,23 @@ export function mostrarInicio(){
 }
 export function ocultarInicio(){ const i = $('#inicio'); if(i){ i.hidden = true; } document.body.classList.remove('en-inicio'); }
 
+// ---------- la entrada como VENTANA EMERGENTE en el centro, con la bienvenida detrás ----------
+// Sign In y Access Workspace la abren; Crear cuenta y la sala de espera siguen dentro de la misma ventana.
+// Se cierra con la X, tocando fuera de la tarjeta o con Escape, y se vuelve a la bienvenida.
+let MODAL = false;
+export function abrirEntrar(cual){
+  MODAL = true; document.body.classList.add('modal-entrar');
+  irA(cual || 'pEntrar');
+  const ai = (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);   // en el teléfono no se abre el teclado solo
+  if(!ai) setTimeout(() => { const c = $('#inCorreo'); if(c && !$('#pEntrar').hidden) c.focus(); }, 280);
+}
+export function cerrarEntrar(){ MODAL = false; document.body.classList.remove('modal-entrar'); mostrarInicio(); }
+
 // ---------- navegación: una pantalla a la vez, con su salida al pie ----------
 const pila = [];
 export function irA(id, desde){
-  ocultarInicio();
+  const enVentana = MODAL && (id === 'pEntrar' || id === 'pCrear' || id === 'pEspera');
+  if(!enVentana){ MODAL = false; document.body.classList.remove('modal-entrar'); ocultarInicio(); }
   if(desde) pila.push(desde);
   $$('.pantalla').forEach(p => { p.hidden = p.id !== id; });
   const solo = (id === 'pEntrar' || id === 'pCrear' || id === 'pEspera');
@@ -188,7 +201,8 @@ async function arrancar(){
   // Navegación: barra lateral (computadora) y pestañas de abajo (teléfono) comparten data-nav.
   document.addEventListener('click', (e) => {
     const bi = e.target.closest('[data-inicio]');
-    if(bi){ e.preventDefault(); if(bi.dataset.inicio === 'entrar'){ ocultarInicio(); irA('pEntrar'); } return; }
+    if(bi){ e.preventDefault(); if(bi.dataset.inicio === 'entrar') abrirEntrar('pEntrar'); return; }
+    if(MODAL && (e.target.closest('[data-cerrar-modal]') || (e.target.classList && e.target.classList.contains('entrar')))){ e.preventDefault(); cerrarEntrar(); return; }
     const b = e.target.closest('[data-nav]'); if(!b) return;
     const n = b.dataset.nav;
     if(n === 'atras') atras();
@@ -196,6 +210,7 @@ async function arrancar(){
     else if(n === 'personas'){ if(!esManager()) return; pila.length = 0; irA('pPersonas', 'pTrabajos'); personas.cargar(); }
     else if(n === 'salir'){ if(confirm('¿Salir de Scanova360 en este aparato?')) salir(); }
   });
+  document.addEventListener('keydown', (e) => { if(e.key === 'Escape' && MODAL) cerrarEntrar(); });
   trabajos.conectar();
   personas.conectar();
   fotos.conectar();
