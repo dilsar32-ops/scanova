@@ -471,12 +471,14 @@ body.en-inicio{ overflow:hidden; }
         <button type="button" class="volver" data-nav="atras"><svg class="ic"><use href="#i-atras"/></svg>Back</button>
         <div class="card forma pforma">
           <h1 class="titulo chico" id="cuartoFormaTitulo">Add Room</h1>
+          <div class="field"><label for="cNivel">Level</label><label class="sel"><select id="cNivel"></select><svg class="ic"><use href="#i-chev"/></svg></label>
+            <div class="c-hechos" id="cHechos"></div></div>
           <div class="field"><label for="cNombre">Room Name</label><input type="text" id="cNombre" autocomplete="off" placeholder="Living Room"></div>
-          <div class="field"><label for="cNivel">Level</label><label class="sel"><select id="cNivel"></select><svg class="ic"><use href="#i-chev"/></svg></label></div>
           <div class="field"><label>Room Type</label><div class="chips envolver" id="cTipos"></div></div>
           <div class="field"><label for="cNotas">Notes <span class="hint">optional</span></label><textarea id="cNotas" placeholder="Any notes about this room…"></textarea></div>
+          <p class="aviso c-aviso" id="cuartoAviso"></p>
           <button type="button" class="btn btn-accent btn-block btn-grande" id="btnCuartoGuardar">Save Room</button>
-          <p class="aviso" id="cuartoAviso"></p>
+          <button type="button" class="btn btn-outline btn-block c-listo" id="btnCuartoListo">Done</button>
         </div>
       </section>
 

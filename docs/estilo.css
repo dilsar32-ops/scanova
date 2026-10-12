@@ -750,3 +750,11 @@ body.menu-abierto .menu-velo{ display:block; position:absolute; inset:0; z-index
   .subir-btn{ margin-left:0; }
   .pgrid.grid{ grid-template-columns:repeat(auto-fill, minmax(170px, 1fr)); }
 }
+/* Add Room: los cuartos que ya tiene el nivel, y "Done" para volver (se agregan varios sin salir). */
+.c-hechos{ display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:8px; }
+.c-hechos small{ color:var(--ink-soft); font-size:12.5px; margin-right:2px; }
+.c-hecho{ display:inline-flex; align-items:center; gap:4px; font-size:13px; font-weight:600; color:var(--accent); background:var(--accent-soft); border-radius:999px; padding:3px 10px 3px 7px; }
+.c-hecho .ic{ width:14px; height:14px; stroke-width:2.6; }
+.c-listo{ margin-top:10px; }
+.c-aviso{ margin:0 0 10px; }
+.c-aviso.ok{ color:var(--accent); font-weight:600; }

@@ -45,5 +45,10 @@ ok('usuariosHtml: iniciales con el nombre al pasar el dedo; vacío lo dice', /ti
 ok('tareaHtml y comentarioHtml: escapan el texto; el ✕ solo si puede borrar', /Pull &lt;b&gt;/.test(D.tareaHtml({ id:'t1', texto:'Pull <b>', hecha:false }, false)) && !/data-tarea-borrar/.test(D.tareaHtml({ id:'t1', texto:'x' }, false)) && /data-com-borrar="c1"/.test(D.comentarioHtml({ id:'c1', texto:'<i>hola</i>', created_at:'2026-10-12T10:00:00Z' }, 'Vero', true)) && /&lt;i&gt;hola/.test(D.comentarioHtml({ id:'c1', texto:'<i>hola</i>', created_at:'2026-10-12T10:00:00Z' }, 'Vero', false)));
 ok('horaCorta: hoy dice "Today" y otro día la fecha', /^Today \d/.test(D.horaCorta('2026-10-12T15:00:00Z', Date.parse('2026-10-12T16:00:00Z'))) && /^Oct 1\d /.test(D.horaCorta('2026-10-10T15:00:00Z', Date.parse('2026-10-12T16:00:00Z'))));
 
+ok('nombreLibre: si ya hay Bedroom en el nivel, el siguiente es Bedroom 2 (y luego 3)', P.nombreLibre('Bedroom', ['Kitchen']) === 'Bedroom' && P.nombreLibre('Bedroom', ['bedroom']) === 'Bedroom 2' && P.nombreLibre('Bedroom', ['Bedroom', 'Bedroom 2']) === 'Bedroom 3');
+import fs from 'node:fs';
+const idx = fs.readFileSync(new URL('../docs/index.html', import.meta.url), 'utf8');
+const pc = idx.slice(idx.indexOf('id="pCuarto"'), idx.indexOf('</section>', idx.indexOf('id="pCuarto"')));
+ok('Add Room: primero el Level, luego Room Name, Room Type y Notes; Save Room y Done', pc.indexOf('id="cNivel"') < pc.indexOf('id="cNombre"') && pc.indexOf('id="cNombre"') < pc.indexOf('id="cTipos"') && pc.indexOf('id="cTipos"') < pc.indexOf('id="cNotas"') && /id="btnCuartoListo"/.test(pc) && /id="cHechos"/.test(pc));
 console.log(`\nproyecto: ${pass} ok, ${fail} fallas`);
 if(fail) process.exit(1);

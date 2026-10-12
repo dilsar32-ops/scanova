@@ -292,7 +292,24 @@ function abrirFormaCuarto(c, nivelId){
   $('#cNivel').innerHTML = NIVELES.map(n => `<option value="${esc(n.id)}">${esc(n.nombre)}</option>`).join('');
   $('#cNivel').value = c ? c.nivel_id : (nivelId || NIVEL_CUARTOS || (NIVELES[0] || {}).id || '');
   $('#cTipos').innerHTML = TIPOS_CUARTO.map(r => `<button type="button" class="chip${c && c.tipo === r ? ' on' : ''}" data-tipo-cuarto="${esc(r)}">${esc(r)}</button>`).join('');
+  $('#cuartoAviso').classList.remove('ok');
+  $('#btnCuartoListo').hidden = !!c;
+  pintarHechos();
   irA('pCuarto', 'pTrabajo');
+  if(!c) setTimeout(() => { const n = $('#cNombre'); if(n) n.focus(); }, 60);
+}
+// Los cuartos que ya tiene el nivel escogido (para ver lo que se lleva agregado sin salir de la página).
+function pintarHechos(){
+  const caja = $('#cHechos'); if(!caja) return;
+  const cs = cuartosDe($('#cNivel').value).filter(x => !EDIT_CUARTO || x.id !== EDIT_CUARTO.id);
+  caja.innerHTML = cs.length ? '<small>Already in this level:</small>' + cs.map(x => `<span class="c-hecho">${IC('check')}${esc(x.nombre)}</span>`).join('') : '<small>No rooms in this level yet.</small>';
+}
+// "Bedroom" ya existe en el nivel -> "Bedroom 2".
+export function nombreLibre(base, existentes){
+  const usados = new Set((existentes || []).map(x => String(x).trim().toLowerCase()));
+  if(!usados.has(base.toLowerCase())) return base;
+  for(let i = 2; i < 100; i++){ const n = base + ' ' + i; if(!usados.has(n.toLowerCase())) return n; }
+  return base;
 }
 async function guardarNivel(){
   const nombre = $('#nNombre').value.trim(), desc = $('#nDesc').value.trim(); const av = $('#nivelAviso');
@@ -314,6 +331,7 @@ async function guardarCuarto(){
   const chipOn = $('#cTipos .chip.on'); const tipo = chipOn ? chipOn.dataset.tipoCuarto : null;
   if(!nombre){ av.textContent = 'Write the room name or pick a type.'; return; }
   if(!nivel_id){ av.textContent = 'Add a level first.'; return; }
+  av.classList.remove('ok');
   const b = $('#btnCuartoGuardar'); b.disabled = true;
   try{
     const cuerpo = { nombre, nivel_id, tipo: tipo || null, notas: notas || null };
@@ -323,7 +341,15 @@ async function guardarCuarto(){
     if(!r.ok) throw new Error(r.status === 404 ? 'falta correr sql/fotos-04-niveles.sql' : 'HTTP ' + r.status + ' ' + (await r.text()).slice(0, 160));
     const fila = (await r.json())[0]; if(!fila) throw new Error('the database did not return the room');
     if(EDIT_CUARTO){ const i = CUARTOS.findIndex(x => x.id === fila.id); if(i >= 0) CUARTOS[i] = fila; } else CUARTOS.push(fila);
-    NIVEL_CUARTOS = fila.nivel_id; SUBTAB = 'cuartos'; atras(); irTab('cuartos');
+    NIVEL_CUARTOS = fila.nivel_id; SUBTAB = 'cuartos';
+    if(EDIT_CUARTO){ atras(); irTab('cuartos'); }
+    else {
+      // Se queda en la página: mismo nivel, campos limpios, para agregar el siguiente cuarto.
+      pintarTodo();
+      $('#cNombre').value = ''; $('#cNotas').value = ''; $$('#cTipos .chip').forEach(x => x.classList.remove('on'));
+      av.classList.add('ok'); av.textContent = '✓ ' + fila.nombre + ' added to ' + nombreNivel(fila.nivel_id) + '. Add another room, or tap Done.';
+      pintarHechos(); $('#cNombre').focus();
+    }
   }catch(e){ av.textContent = 'Could not save. ' + String(e && e.message || e); }
   b.disabled = false;
 }
@@ -470,7 +496,9 @@ export function conectar(){
   $('#btnNivelGuardar').addEventListener('click', guardarNivel);
   $('#btnCuartoGuardar').addEventListener('click', guardarCuarto);
   $('#nRapidos').addEventListener('click', (e) => { const b = e.target.closest('[data-rapido]'); if(!b) return; $('#nNombre').value = b.dataset.rapido; $$('#nRapidos .chip').forEach(x => x.classList.toggle('on', x === b)); });
-  $('#cTipos').addEventListener('click', (e) => { const b = e.target.closest('[data-tipo-cuarto]'); if(!b) return; const ya = b.classList.contains('on'); $$('#cTipos .chip').forEach(x => x.classList.remove('on')); if(!ya){ b.classList.add('on'); const n = $('#cNombre'); const tipos = new Set(TIPOS_CUARTO); if(!n.value.trim() || tipos.has(n.value.trim())) n.value = b.dataset.tipoCuarto === 'Other' ? '' : b.dataset.tipoCuarto; } });
+  $('#cTipos').addEventListener('click', (e) => { const b = e.target.closest('[data-tipo-cuarto]'); if(!b) return; const ya = b.classList.contains('on'); $$('#cTipos .chip').forEach(x => x.classList.remove('on')); if(!ya){ b.classList.add('on'); const n = $('#cNombre'); const tipos = new Set(TIPOS_CUARTO); if(!n.value.trim() || tipos.has(n.value.trim()) || /^(.+) \d+$/.test(n.value.trim()) && tipos.has(n.value.trim().replace(/ \d+$/, ''))) n.value = b.dataset.tipoCuarto === 'Other' ? '' : nombreLibre(b.dataset.tipoCuarto, cuartosDe($('#cNivel').value).filter(x => !EDIT_CUARTO || x.id !== EDIT_CUARTO.id).map(x => x.nombre)); } });
+  $('#cNivel').addEventListener('change', () => { pintarHechos(); $('#cuartoAviso').textContent = ''; });
+  $('#btnCuartoListo').addEventListener('click', () => { atras(); irTab('cuartos'); });
   document.addEventListener('click', async (e) => {
     if(!e.target.closest('#btnNotasGuardar') || !T) return;
     const txt = $('#pNotasTxt').value.trim(); const av = $('#notasAviso'); av.classList.remove('ok'); av.textContent = '';
