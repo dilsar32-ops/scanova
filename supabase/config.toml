@@ -1,0 +1,1 @@
+# Solo para desplegar funciones. fotos-subir exige la sesión del usuario (verify_jwt = true, el valor por defecto).

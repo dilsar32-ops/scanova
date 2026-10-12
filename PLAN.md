@@ -28,7 +28,7 @@ scanova/
     compartir.js  enlace para el cliente, reporte PDF
     sw.js + manifest.json   instalable en el teléfono, funciona sin señal para lo ya visto
   sql/            tablas, políticas y funciones (prefijo fotos_)
-  funciones/      funciones edge (prefijo fotos-): firmar subidas y lecturas de R2
+  supabase/functions/   funciones edge (prefijo fotos-): firmar subidas y lecturas de R2
   tests/          pruebas en Node, como en Field Reports
   notas/          este plan y las decisiones
 ```
