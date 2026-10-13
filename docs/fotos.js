@@ -2,8 +2,8 @@
 // por día y ver en grande. La página nunca ve las claves de R2: pide URLs firmadas a la función
 // fotos-subir, sube DIRECTO a R2 y luego confirma; la fila en fotos_fotos la escribe la función
 // solo cuando R2 ya tiene la foto completa (HEAD y tamaño).
-import { $, $$, authFetch, PERFIL, esManager } from './app.js?v=2026-10-14-1';
-import { esc, iniciales } from './trabajos.js?v=2026-10-14-1';
+import { $, $$, authFetch, PERFIL, esManager } from './app.js?v=2026-10-14-2';
+import { esc, iniciales } from './trabajos.js?v=2026-10-14-2';
 
 const FUNCION = '/functions/v1/fotos-subir';
 export const MAX_WEB = 1600, MAX_MINI = 320;

@@ -1,5 +1,5 @@
 // GENERADO por tools/extraer_plano.py desde Field Reports (no editar a mano: se vuelve a generar).
-// Dibuja el plano igual que Field Reports. 112 piezas.
+// Dibuja el plano igual que Field Reports. 107 piezas.
 /* eslint-disable */
 const document = (typeof globalThis !== "undefined" && globalThis.document) || undefined;
   const $ = (sel, el) => { const d = el || (typeof document !== 'undefined' ? document : null); return d && d.querySelector ? d.querySelector(sel) : null; };
@@ -22,11 +22,6 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
     if(i0 < 0) return 'Nivel ' + n;
     const i = i0 + (n - 1);
     return i < FP_PLANTAS.length ? FP_PLANTAS[i] : ('Nivel ' + n);
-  }
-  function fpPlantaSupuesta(data, lvl){
-    const n = Math.max(1, +lvl || 1);
-    if(data && data._nivelBase) return fpPlantaDeNivel(data, lvl);
-    return (n <= FP_PLANTAS.length - 1) ? FP_PLANTAS[n] : ('Nivel ' + n);
   }
   function floorplanDominantAngle(rooms){
     let sumX = 0, sumY = 0;
@@ -239,6 +234,181 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
     if(data) data._refinement = { snappedWalls, snappedOpenings };
     return { snappedWalls, snappedOpenings };
   }
+  function floorplanDetectSubAreas(data){
+    // Every door/passage on the plan (any room's copy, windows excluded):
+    // a U-shaped pocket with a DOOR inside it is a doorway vestibule you
+    // walk through, not a closet (field case: the bathroom's entry nook
+    // wore a "CLOSET" label right on top of the bathroom door).
+    const doorPts = [];
+    ((data && data.rooms) || []).forEach(r => {
+      if(r.deleted) return;
+      [].concat(r.doors||[], r.openings||[]).forEach(o => {
+        if(!o._removed && o.position) doorPts.push({ x: o.position.x, y: o.position.y, level: r.level || 1 });
+      });
+    });
+    ((data && data.rooms) || []).forEach(room => {
+      const poly = fpOrderedRoomPolygon(room);
+      const found = [];
+      if(poly && poly.length >= 5){
+        const roomArea = fpPolygonAreaSqFt(poly) || 1;
+        const n = poly.length;
+        for(let i = 0; i < n; i++){
+          const A = poly[i], B = poly[(i+1)%n], C = poly[(i+2)%n], D = poly[(i+3)%n];
+          const ab = {x: B.x-A.x, y: B.y-A.y}, bc = {x: C.x-B.x, y: C.y-B.y}, cd = {x: D.x-C.x, y: D.y-C.y};
+          const lab = Math.hypot(ab.x, ab.y), lbc = Math.hypot(bc.x, bc.y), lcd = Math.hypot(cd.x, cd.y);
+          if(lab < 1.2 || lbc < 1.8 || lcd < 1.2) continue;
+          // AB perpendicular to BC, CD perpendicular to BC, AB opposite CD.
+          const dotAbBc = (ab.x*bc.x + ab.y*bc.y)/(lab*lbc);
+          const dotAbCd = (ab.x*cd.x + ab.y*cd.y)/(lab*lcd);
+          if(Math.abs(dotAbBc) > 0.15 || dotAbCd > -0.85) continue;
+          const depth = Math.min(lab, lcd), width = lbc;
+          // Depth cap 5.5 (was 4.5): a real hallway closet in the field
+          // measured 4.64ft deep and silently missed its label.
+          if(depth < 1.2 || depth > 5.5 || width < 1.8 || width > 8) continue;
+          const areaSqFt = depth * width;
+          if(areaSqFt < 5 || areaSqFt > 32 || areaSqFt > roomArea * 0.3) continue;
+          // Pocket center: midpoint of BC pushed half the depth back
+          // toward the room body (the AB direction reversed).
+          const cx = (B.x + C.x)/2 - (ab.x/lab) * depth/2;
+          const cy = (B.y + C.y)/2 - (ab.y/lab) * depth/2;
+          // The pocket's center must sit INSIDE the room - a U that
+          // opens OUTWARD (the peninsula between two real alcoves
+          // matches the same corner pattern) would put a label on the
+          // building's exterior.
+          if(!fpPointInPolygon({x: cx, y: cy}, poly)) continue;
+          // The room's own label must not live inside this pocket (that
+          // would mean the "pocket" IS the room).
+          const anchor = floorplanLabelAnchor(room);
+          if(Math.hypot(anchor.x - cx, anchor.y - cy) < Math.max(depth, width)/2) continue;
+          // A door in or on the pocket = a doorway you pass through, not
+          // a closet. (Real closets detect as OPEN alcoves - a closet
+          // with a recorded door has a mouth wall and never forms the U.)
+          const bcux = bc.x/lbc, bcuy = bc.y/lbc;   // along the mouth
+          const abux = ab.x/lab, abuy = ab.y/lab;   // into the pocket
+          const roomLevel = room.level || 1;
+          // DÓNDE está la puerta decide (14-oct, su clóset real del Master Bedroom): una puerta en la BOCA
+          // del rincón (donde se une al cuarto) es la puerta del clóset -> sigue siendo clóset. Una puerta
+          // al FONDO o a un lado es un paso a otro cuarto -> vestíbulo, no clóset (el caso del baño).
+          let puertaEnLaBoca = false;
+          const hasDoor = doorPts.some(p => {
+            if(p.level !== roomLevel) return false; // a door two floors up is irrelevant
+            const rx = p.x - cx, ry = p.y - cy;
+            const along = Math.abs(rx*bcux + ry*bcuy);
+            const intoS = rx*abux + ry*abuy;            // + hacia el fondo, - hacia la boca
+            const into = Math.abs(intoS);
+            const dentro = along <= width/2 + 0.5 && into <= depth/2 + 0.5;
+            if(dentro && intoS <= -depth/2 + 0.6 && along <= width/2 - 0.3){ puertaEnLaBoca = true; return false; }
+            return dentro;
+          });
+          // The door veto exists to kill entry vestibules (you walk THROUGH
+          // a doorway; it is not a closet). But a real closet with its own
+          // door looks identical to it, and after a hand edit put a door at
+          // the mouth of a real Master Bedroom closet this veto silently
+          // deleted the pocket - and with it the name the tech had typed.
+          // A pocket a human already named is not a guess to be overruled.
+          const namedBefore = (room._subAreas||[]).some(q => q._renamed &&
+            Math.hypot(q.cx - cx, q.cy - cy) <= Math.max(1.5, Math.max(width, depth)/2));
+          if(hasDoor && !namedBefore) continue;
+          // Honest guess: Laundry if a washer/dryer sits in the pocket.
+          let name = 'Closet';
+          (room.objects||[]).forEach(o => {
+            if(o.category === 'washerDryer' && o.center && Math.hypot(o.center.x-cx, o.center.y-cy) <= Math.max(depth, width)) name = 'Laundry';
+          });
+          found.push({ name, cx: Math.round(cx*100)/100, cy: Math.round(cy*100)/100,
+                       w: Math.round(width*100)/100, d: Math.round(depth*100)/100, _suggested: true, conPuerta: puertaEnLaBoca || undefined });
+        }
+      }
+      // Dedupe overlapping detections (an alcove can match from both
+      // walk directions, and a wide alcove can ALSO match a sub-span of
+      // itself - a real bedroom closet drew "CLOSET" twice 2.2ft apart).
+      // Larger detections win; anything whose rectangle mostly sits
+      // inside an already-kept one is the same physical pocket.
+      found.sort((a, b) => (b.w*b.d) - (a.w*a.d));
+      const dedup = [];
+      found.forEach(p => {
+        const isDupOf = q => {
+          if(Math.hypot(q.cx-p.cx, q.cy-p.cy) <= 1.5) return true;
+          const ox = Math.max(0, Math.min(q.cx+q.w/2, p.cx+p.w/2) - Math.max(q.cx-q.w/2, p.cx-p.w/2));
+          const oy = Math.max(0, Math.min(q.cy+q.d/2, p.cy+p.d/2) - Math.max(q.cy-q.d/2, p.cy-p.d/2));
+          return (ox*oy) > 0.4 * Math.min(p.w*p.d, q.w*q.d);
+        };
+        if(!dedup.some(isDupOf)) dedup.push(p);
+      });
+      const prev = room._subAreas || [];
+      const carried = dedup.map(p => {
+        const old = prev.find(q => q._renamed && Math.hypot(q.cx-p.cx, q.cy-p.cy) <= 1.5);
+        // La posicion y el tamano que le dio la mano viajan con el nombre.
+        // Sin esto, mover el rotulo de un CLOSET duraba hasta el siguiente
+        // dibujo: la deteccion lo reemplaza en cada render.
+        return old ? Object.assign(p, { name: old.name, _renamed: true, _suggested: false,
+          _offFt: old._offFt, _labelScale: old._labelScale }) : p;
+      });
+      // This assignment used to be unconditional, and it runs on EVERY
+      // render - so the moment detection came back empty (a hand edit
+      // changing the outline is enough), a name the tech had typed was
+      // gone for good, with no warning and no undo entry, because this
+      // is a render path and not fpCommitEdit. A named pocket now
+      // survives its own detection failing.
+      prev.filter(q => q._renamed).forEach(q => {
+        if(!carried.some(p => Math.hypot(p.cx-q.cx, p.cy-q.cy) <= 1.5)) carried.push(q);
+      });
+      room._subAreas = carried;
+    });
+    fpReconocerClosets(data);
+  }
+  const FP_NOMBRE_GENERICO = /^\s*(|open space|space|espacio|room\s*\d*|cuarto\s*\d*|unknown|unnamed|area|área)\s*$/i;
+  const FP_ES_RECAMARA = /bed\s*room|recamara|recámara|habitaci|dormitorio|master|nursery|guest/i;
+  const FP_ES_PASILLO = /hall|pasillo|corridor|entry|foyer|entrada|landing/i;
+  function fpTipoPorMuebles(objs){
+    const cats = (objs || []).filter(o => o && !o._hidden).map(o => o.category);
+    if(cats.some(c => c === 'toilet' || c === 'bathtub')) return 'bath';
+    if(cats.includes('washerDryer')) return 'laundry';
+    return null;
+  }
+  function fpReconocerClosets(data){
+    if(!data || !Array.isArray(data.rooms)) return;
+    const vivos = data.rooms.filter(r => r && !r.deleted && (r.walls || []).length >= 3);
+    const poligonos = vivos.map(r => { try{ return fpOrderedRoomPolygon(r); }catch(e){ return null; } });
+    const distAlPoligono = (p, pg) => {
+      let m = Infinity;
+      for(let i = 0, j = pg.length - 1; i < pg.length; j = i++){
+        const a = pg[j], b = pg[i], dx = b.x - a.x, dy = b.y - a.y, L2 = dx*dx + dy*dy || 1;
+        const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2));
+        m = Math.min(m, Math.hypot(p.x - (a.x + t*dx), p.y - (a.y + t*dy)));
+      }
+      return m;
+    };
+    // vecinos de una figura (lista de puntos del borde): los cuartos que comparten al menos ~1.5 ft de pared
+    const vecinosDe = (borde, yo, nivel) => vivos.filter((r, i) => r !== yo && (r.level || 1) === nivel && poligonos[i] && poligonos[i].length >= 3
+      && borde.filter(p => distAlPoligono(p, poligonos[i]) <= 1.0).length >= 3);
+    const bordeDe = (pg) => { const out = []; for(let i = 0, j = pg.length - 1; i < pg.length; j = i++){ const a = pg[j], b = pg[i], L = Math.hypot(b.x - a.x, b.y - a.y); const n = Math.max(1, Math.round(L / 0.5)); for(let k = 0; k < n; k++) out.push({ x: a.x + (b.x - a.x) * k / n, y: a.y + (b.y - a.y) * k / n }); } return out; };
+    const decide = (area, minDim, tipoMuebles, vecinos) => {
+      if(tipoMuebles === 'bath') return vecinos.some(v => /master/i.test(v.roomName || '')) ? 'Master Bath' : 'Bathroom';
+      if(tipoMuebles === 'laundry') return 'Laundry';
+      if(!(area > 0)) return null;
+      const daARecamaraOPasillo = vecinos.some(v => FP_ES_RECAMARA.test(v.roomName || '') || FP_ES_PASILLO.test(v.roomName || ''));
+      if(area <= 45 && daARecamaraOPasillo) return 'Closet';
+      if(minDim > 0 && minDim <= 3.6 && area <= 60 && daARecamaraOPasillo) return 'Closet';
+      if(area <= 30) return 'Closet';
+      return null;
+    };
+    // 1) cuartos escaneados sin nombre (o "Room 3")
+    vivos.forEach((r, i) => {
+      if(!FP_NOMBRE_GENERICO.test(r.roomName || '') || r._namedByVoice) return;
+      const pg = poligonos[i]; if(!pg || pg.length < 3 || fpAiFragileOutline(r)) return;
+      const b = floorplanRoomBounds(r), area = fpRoomDisplayAreaSqFt(r);
+      const nombre = decide(area, Math.min(b.maxX - b.minX, b.maxY - b.minY), fpTipoPorMuebles(r.objects), vecinosDe(bordeDe(pg), r, r.level || 1));
+      if(nombre){ r.roomName = nombre; r._nombreAuto = nombre; r._suggestedConfidence = r._suggestedConfidence || 'Medium'; }
+    });
+    // 2) espacios con nombre genérico que se le pusieron al plano (el "Open Space" junto al pasillo)
+    (data._spaceLabels || []).forEach(sp => {
+      if(!sp || !FP_NOMBRE_GENERICO.test(sp.name || '') || !(sp.w > 0 && sp.d > 0)) return;
+      const pg = [{ x: sp.x - sp.w/2, y: sp.y - sp.d/2 }, { x: sp.x + sp.w/2, y: sp.y - sp.d/2 }, { x: sp.x + sp.w/2, y: sp.y + sp.d/2 }, { x: sp.x - sp.w/2, y: sp.y + sp.d/2 }];
+      const adentro = []; vivos.forEach(r => (r.objects || []).forEach(o => { if(o && o.center && Math.abs(o.center.x - sp.x) <= sp.w/2 && Math.abs(o.center.y - sp.y) <= sp.d/2) adentro.push(o); }));
+      const nombre = decide(sp.w * sp.d, Math.min(sp.w, sp.d), fpTipoPorMuebles(adentro), vecinosDe(bordeDe(pg), null, sp.level || 1));
+      if(nombre){ sp.name = nombre; sp._nombreAuto = nombre; }
+    });
+  }
   const FLOORPLAN_CATEGORY_ES = {
     storage: 'Storage', refrigerator: 'Refrigerator', stove: 'Stove', oven: 'Oven',
     dishwasher: 'Dishwasher', sink: 'Sink', washerDryer: 'Washer/Dryer',
@@ -256,8 +426,6 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
     return Array.from(set).sort((a,b) => a-b);
   }
   let floorplanSelectedLevel = 1;
-  let fpIdCounter = 0;
-  function fpNewId(){ return 'man-' + Date.now().toString(36) + '-' + (fpIdCounter++); }
   let fpMeasurePrefs = { interior: true, openings: true, roomArea: true, furniture: false, extents: true };
   const FP_MOVABLE_CATEGORIES = ['bed', 'sofa', 'chair', 'table', 'television'];
   function fpBuildNodes(wallRefs){
@@ -324,7 +492,6 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
     }
     return { total, text: `Hand edits on this plan: ${parts.join(', ')}. Dimensions marked * were set by hand, not measured by LiDAR. Areas are recalculated from the edited walls.` };
   }
-  const FP_QUANT = v => Math.round(v * 12) / 12; // nearest inch;
   let fpRenderMode = 'plan';
   let fpSheetExport = false;
   const FM_KINDS = {
@@ -346,266 +513,6 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
     smoke:  { color: 'rgba(127,140,141,0.45)',legend: 'SMOKE',         legendColor: '#7f8c8d' },
     damage: { color: 'rgba(192,57,43,0.4)',   legend: 'DAMAGE',        legendColor: '#c0392b' }
   };
-  let fpInspectionById = {};
-  const FP_STUD_UMBRAL = 0.6;
-  const FP_STUD_MIN_FOTOS = 2;
-  const FP_STUD_BORDE_FT = 1;      // un punto a menos de esto del contorno es una pared que el plano YA tiene;
-  const FP_STUD_LEJOS_FT = 2;      // un punto mucho más lejos que el más cercano pasó por el hueco entre studs;
-  const FP_STUD_ESCUADRA_DEG = 30; // el eje de los puntos tiene que quedar a escuadra con la vista;
-  function fpStudLineaPropuesta(data, roomIdx, puntos){
-    const room = ((data && data.rooms) || [])[roomIdx];
-    if(!room) return null;
-    const poly = fpOrderedRoomPolygon(room);
-    if(!poly || poly.length < 3) return null;
-    // Solo puntos BIEN ADENTRO del cuarto. Un punto en el contorno, o a un
-    // pie de él, es una pared que RoomPlan ya modeló (un flood cut en una
-    // pared existente, o la pared del vecino vista por una puerta): la
-    // pared que interesa es la que el plano NO tiene, y esa está en el
-    // interior del cuarto juntado.
-    let dentro = (puntos || []).filter(p => p && isFinite(p.x) && isFinite(p.y)
-      && fpPointInPolygon(p, poly) && fpDistToPolygon(p, poly) > FP_STUD_BORDE_FT);
-    if(!dentro.length) return null;
-    // Una foto que miró por el HUECO entre dos studs pegó en la pared del
-    // fondo, mucho más lejos de la cámara que las que pegaron en un stud.
-    // Se quedan las cercanas (a menos de 2 ft de la más cercana).
-    const conCamara = dentro.filter(p => isFinite(p.cx) && isFinite(p.cy));
-    if(conCamara.length >= 2){
-      const dist = p => Math.hypot(p.x - p.cx, p.y - p.cy);
-      const minD = Math.min(...conCamara.map(dist));
-      dentro = dentro.filter(p => !(isFinite(p.cx) && isFinite(p.cy)) || dist(p) <= minD + FP_STUD_LEJOS_FT);
-    }
-    const cx = dentro.reduce((s, p) => s + p.x, 0) / dentro.length;
-    const cy = dentro.reduce((s, p) => s + p.y, 0) / dentro.length;
-    let lejos = 0;
-    for(let i = 0; i < dentro.length; i++) for(let j = i + 1; j < dentro.length; j++)
-      lejos = Math.max(lejos, Math.hypot(dentro[i].x - dentro[j].x, dentro[i].y - dentro[j].y));
-    // Hacia dónde miraba (media circular). En el plano la vista es
-    // (sin yaw, cos yaw); la pared que se ve de frente corre perpendicular.
-    const vistas = dentro.filter(p => isFinite(p.yaw));
-    let vx = 0, vy = 0;
-    if(vistas.length){
-      vx = vistas.reduce((s, p) => s + Math.sin(p.yaw), 0); vy = vistas.reduce((s, p) => s + Math.cos(p.yaw), 0);
-      const L = Math.hypot(vx, vy); if(L < 1e-6){ vx = 0; vy = 0; } else { vx /= L; vy /= L; }
-    }
-    const hayVista = vx !== 0 || vy !== 0;
-    let ux, uy, base = null;
-    if(dentro.length >= 2 && lejos >= 1.5){
-      // El eje principal de los puntos (mínimos cuadrados ortogonales)...
-      let sxx = 0, syy = 0, sxy = 0;
-      dentro.forEach(p => { sxx += (p.x - cx) ** 2; syy += (p.y - cy) ** 2; sxy += (p.x - cx) * (p.y - cy); });
-      const ang = 0.5 * Math.atan2(2 * sxy, sxx - syy);
-      ux = Math.cos(ang); uy = Math.sin(ang); base = 'puntos';
-      // ...pero solo si queda A ESCUADRA con la vista: una pared se mira de
-      // frente, así que su eje es perpendicular a la vista. Si no, algún
-      // punto no es de esta pared y manda la vista.
-      if(hayVista){
-        const fueraDeEscuadra = Math.asin(Math.min(1, Math.abs(ux * vx + uy * vy))) * 180 / Math.PI;
-        if(fueraDeEscuadra > FP_STUD_ESCUADRA_DEG) base = null;
-      }
-    }
-    if(!base){
-      if(!hayVista) return null;
-      ux = vy; uy = -vx; base = 'vista';
-    }
-    const a = { x: cx - ux * 0.5, y: cy - uy * 0.5 }, b = { x: cx + ux * 0.5, y: cy + uy * 0.5 };
-    // La guía corta se estira de pared a pared y se endereza; y ANTES de
-    // ofrecerla pasa por los mismos candados que el corte a mano (son
-    // puros): un botón que siempre se niega no es una propuesta.
-    const corte = fpCutRoomByLine(room, a, b);
-    if(corte.error) return null;
-    const cand = fpStudSplitCandidates(data, roomIdx, a, b);
-    if(cand.error) return null;
-    const san = fpStudSplitSanity({ room, m: cand.m0 }, { room: cand.roomA, m: fpRoomMeasurements(cand.roomA) },
-                                  { room: cand.roomB, m: fpRoomMeasurements(cand.roomB) }, cand.cut.largo, cand.cut.cruces);
-    if(!san.ok) return null;
-    return { a, b, puntos: dentro.length, base, largo: corte.largo };
-  }
-  function fpStudIssues(data){
-    const salida = [];
-    const kfs = ((data && data.inspection && data.inspection.keyframes) || []).filter(k => k && typeof k.studScore === 'number');
-    if(!kfs.length) return salida;
-    ((data && data.rooms) || []).forEach((room, idx) => {
-      if(!room || room.deleted || room._studReviewed) return;
-      if((room.walls || []).some(w => w._studWall)) return;
-      const fotos = kfs.filter(k => k.roomIndex === idx && k.studScore >= FP_STUD_UMBRAL)
-        .sort((a, b) => b.studScore - a.studScore);
-      if(fotos.length < FP_STUD_MIN_FOTOS) return;
-      const roomName = room.roomName || `Room ${idx + 1}`;
-      // Dónde estaba: los puntos a los que la cámara les apuntaba en esas
-      // fotos, con la posición de la cámara (x, z del mundo = x, y del plano).
-      const propuesta = fpStudLineaPropuesta(data, idx, fotos.filter(k => isFinite(k.hitX) && isFinite(k.hitY))
-        .map(k => ({ x: k.hitX, y: k.hitY, yaw: k.yaw, cx: k.x, cy: k.z })));
-      salida.push({ kind: 'studs', room: idx, kfId: fotos[0].id, ack: '_studReviewed', fotos: fotos.length, propuesta,
-        text: `${esc(roomName)}: ${fotos.length} walkthrough photos show wall framing with the drywall off (studs). Was there a wall here that was torn out to the studs? `
-          + (propuesta
-              ? `The camera was pointing at that framing along a ${propuesta.largo.toFixed(1)} ft line across the room - tap "Propose the partition" to split the room there, or draw it yourself.`
-              : `If so, draw the partition and split the room.`) });
-    });
-    return salida;
-  }
-  function floorplanValidate(data){
-    const issues = [];
-    ((data && data.rooms) || []).forEach((room, idx) => {
-      if(room.deleted || !(room.walls||[]).length) return;
-      const roomName = room.roomName || `Room ${idx+1}`;
-      const lowConf = (room.walls||[]).filter(w => w.confidence === 'low').length;
-      if(lowConf && !room._lowConfReviewed) issues.push({ kind: 'lowconf', room: idx, ack: '_lowConfReviewed', text: `${esc(roomName)}: ${lowConf} low-confidence wall${lowConf>1?'s':''} (red dashed) - verify the measurement or rescan that side.` });
-      (room.openings||[]).forEach((op, oi) => {
-        if(op._kindOverride || op._reviewed || op._removed) return;
-        const w = floorplanOpeningEffectiveWidth(op) || 0;
-        if(w < 1.5) issues.push({ kind: 'opening', room: idx, openingIdx: oi, text: `${esc(roomName)}: a very narrow opening (${fpFeetInches(w)}) - is it real? Classify it:` });
-      });
-      // Editor honesty checks: added items still carrying their default
-      // size, and openings left dangling past the end of an edited wall.
-      const wallsById2 = {};
-      (room.walls||[]).forEach((w2, wi2) => { wallsById2[String(w2.id != null ? w2.id : wi2)] = w2; });
-      [['door', room.doors], ['window', room.windows]].forEach(([kindName, list]) => {
-        (list||[]).forEach(o => {
-          if(o._removed) return;
-          if(o._added && o._defaultSize){
-            issues.push({ kind: 'defaultsize', room: idx, text: `${esc(roomName)}: an added ${kindName} still has its default size (${fpFeetInches(o.widthFt||0)}) - measure it and enter the real width.` });
-          }
-          const w2 = o.wallId != null ? wallsById2[String(o.wallId)] : null;
-          if(w2 && o.position){
-            const vx = w2.end.x-w2.start.x, vy = w2.end.y-w2.start.y;
-            const len2 = vx*vx+vy*vy;
-            if(len2 > 1e-6){
-              const t = ((o.position.x-w2.start.x)*vx + (o.position.y-w2.start.y)*vy)/len2;
-              if(t < -0.05 || t > 1.05) issues.push({ kind: 'dangling', room: idx, text: `${esc(roomName)}: a ${kindName} sits past the end of its edited wall - move it or remove it.` });
-            }
-          }
-        });
-      });
-      const gapInfo = {};
-      fpOrderedRoomPolygon(room, gapInfo);
-      // A break another room's wall already covers is not a break - the
-      // building is closed there (same recovery test AI Fix uses).
-      const bigGapSegs = (gapInfo.bridgeSegs||[]).filter(g => g.d > 6 && !fpAiSegmentCoveredByOtherWalls(data, idx, g, room.level || 1));
-      if(bigGapSegs.length && !room._gapReviewed){
-        const biggest = bigGapSegs.reduce((m, g) => g.d > m.d ? g : m);
-        // Our own evidence, from the walked path - nobody walks through a
-        // wall. This never SILENCES the item (the honest direction is
-        // always to keep asking), it says what we independently know.
-        const walked = fpPathCrossesSegment(biggest, fpWalkedPath(data, room.level || 1), 4);
-        // The corner the tech could not reach: if the two walls that reach
-        // this break would meet at a square corner, offer THAT instead of
-        // a single straight wall across the opening.
-        const corner = walked ? null : fpInferCorner(room, biggest);
-        issues.push({ kind: 'gap', room: idx, ack: '_gapReviewed', seg: biggest, corner: corner,
-          text: `${esc(roomName)}: a ${fpFeetInches(biggest.d)} break in the room outline`
-            + (walked
-                ? ` - but you walked through it during the scan, so it is probably a doorway, not a missing wall.`
-                : corner
-                  ? (corner.kind === 'vertice'
-                      ? ` - the two walls that reach it would meet at a ${corner.angle}&deg; corner, so the scan just missed the last stretch into it. Add the corner, or rescan that side.`
-                      : ` - squaring off the two walls that reach it closes the room cleanly. That is what a corner blocked by furniture looks like. Add it, or rescan that side.`)
-                  : ` - a wall may be missing. Add the suggested wall, or rescan that side.`) });
-      }
-      // EL ASISTENTE DE ESQUINAS: lo que no se cerró solo se PROPONE aquí,
-      // con la cifra en el botón. Cada esquina tiene su propio "verificado"
-      // (por llave), para que callar una no calle las demás del cuarto.
-      const acks = room._cornerAcks || {};
-      fpCornerFindings(data, idx).filter(f => f.band === 'propose' && !acks[f.key]).forEach(f => {
-        const fi = fpFeetInches;
-        if(f.kind === 'corner'){
-          const lA = Math.hypot(f.wallA.end.x - f.wallA.start.x, f.wallA.end.y - f.wallA.start.y);
-          const lB = Math.hypot(f.wallB.end.x - f.wallB.start.x, f.wallB.end.y - f.wallB.start.y);
-          issues.push({ kind: 'corner', room: idx, ack: '_cornerAcks', ackKey: f.key, esquina: f,
-            text: `${esc(roomName)}: the corner between the ${fi(lA)} wall and the ${fi(lB)} wall did not close - the outline cuts it diagonally, shortening the perimeter by ${fi(f.perimDeltaFt)} (about ${f.floorDeltaSqFt} sq ft of floor). The two walls meet ${fi(f.legA)} + ${fi(f.legB)} further on.${f.fromScan ? ' Flagged on site; not rescanned.' : ''}` });
-        }else if(f.kind === 'skew'){
-          const lE = Math.hypot(f.wall.end.x - f.wall.start.x, f.wall.end.y - f.wall.start.y);
-          issues.push({ kind: 'skew', room: idx, ack: '_cornerAcks', ackKey: f.key, esquina: f,
-            text: `${esc(roomName)}: the ${fi(lE)} wall is ${f.skewDeg}&deg; out of square with the ${fi(f.vecinoLen)} wall it meets - the corner sits ${fi(f.lateralFt)} off the line, in a room that is otherwise square.` });
-        }else if(f.kind === 'overshoot'){
-          issues.push({ kind: 'overshoot', room: idx, ack: '_cornerAcks', ackKey: f.key, esquina: f,
-            text: `${esc(roomName)}: two walls cross ${fi(Math.max(f.sobraA, f.sobraB))} past their corner.` });
-        }
-      });
-    });
-    // OUR OWN CHECK, not Apple's: two rooms cannot both own the same
-    // floor. When their outlines overlap, the building total adds that
-    // floor twice. Found 51.0 sq ft of it on the real house - a sheet
-    // printing 677.5 where the honest figure is about 626.5.
-    //
-    // The total is NOT quietly corrected here. That number gets billed
-    // from, and the overlap means the OUTLINES are wrong; silently
-    // subtracting would hide the defect and leave the drawing wrong
-    // forever. He is shown the error and the honest figure, and fixes
-    // the outline.
-    const multiLv = floorplanLevels(data).length > 1;
-    const lvNow = floorplanSelectedLevel;
-    const onLv = r => !multiLv || (r.level||1) === lvNow;
-    if(!data._overlapReviewed){
-      const ov = fpRoomsOverlapSqFt(data, onLv);
-      if(ov.pairs.length){
-        const worst = ov.pairs.slice().sort((a,b) => b.sqFt - a.sqFt)[0];
-        const shown = fpDisplayTotalAreaSqFt(data);
-        issues.push({ kind: 'overlap', room: -1, ack: '_overlapReviewed',
-          text: `${esc(worst.a)} and ${esc(worst.b)} both claim ${worst.sqFt} sq ft of the same floor`
-            + (ov.pairs.length > 1 ? ` (${ov.pairs.length} pairs overlap, ${ov.sqFt} sq ft in all)` : '')
-            + ` - the total counts it twice. It prints ${shown.toFixed(1)}; the honest figure is about ${(shown - ov.sqFt).toFixed(1)}. Fix the outline of one of them.` });
-      }
-    }
-    // La puerta que un cuarto dibujo y el vecino no.
-    fpMirroredPortCheck(data, multiLv ? lvNow : null).slice(0, 3).forEach(m => {
-      issues.push({ kind: 'mirrored-port', room: m.missingIdx, mirror: m,
-        text: `${esc(m.fromRoom)} has a ${fpFeetInches(m.widthFt)} ${m.kind === 'doors' ? 'door' : 'passage'} on the wall it shares with ${esc(m.missingIn)}, but ${esc(m.missingIn)} shows solid wall there. It is the same opening seen from one side only.` });
-    });
-    // Same idea: a wall running through another room's OPEN floor is a
-    // contradiction - a shared wall lies on the boundary of both, never
-    // inside one. (The boundary distance test matters: without it this
-    // accused 11 perfectly good shared walls on the real house.)
-    // Nuestra evidencia fisica contra la geometria: nadie atraviesa una
-    // pared. Si el camino la cruza lejos de una puerta, o la pared no
-    // esta donde dice, o el rastreo se corrio en ese tramo.
-    fpPathCrossesWalls(data, multiLv ? lvNow : null).slice(0, 3).forEach(h => {
-      issues.push({ kind: 'walked-through', room: -1,
-        text: `${esc(h.room)}: the walk-through path goes straight through a ${fpFeetInches(h.lengthFt)} wall with no door there - that wall is in the wrong place, or tracking drifted. Check it in person.` });
-    });
-    fpWallsInsideOtherRooms(data, onLv).slice(0, 3).forEach(h => {
-      issues.push({ kind: 'wallinside', room: -1,
-        text: `${esc(h.room)}: a wall runs through ${esc(h.inside)}'s open floor - one of those two outlines is wrong.` });
-    });
-    // Coverage downgrades from the walkthrough inspection: elements the
-    // camera never got a good look at. Capped so a rushed scan doesn't
-    // flood the panel - the count still tells the honest story.
-    const coverageIssues = [];
-    Object.values(fpInspectionById).forEach(el => {
-      if(el.observed !== 'poor') return;
-      const room = ((data && data.rooms)||[])[el.roomIndex];
-      if(!room || room.deleted) return;
-      // "Check it in person" needs an end state - once the tech verifies
-      // the room on site, its coverage flags are answered (same ack
-      // pattern as low-confidence walls), and the quality badge becomes
-      // reachable instead of nagging forever.
-      if(room._coverageReviewed) return;
-      const roomName = room.roomName || `Room ${el.roomIndex+1}`;
-      const typeLabel = {wall:'wall', door:'door', window:'window', opening:'passage'}[el.type] || el.type;
-      // Say WHY, with the number that actually drove the verdict. The
-      // tier comes from how much of the element the camera covered, not
-      // from how many camera positions it turned up in - so the old
-      // wording ("not well observed... seen in 12 views") read as a
-      // contradiction on a document an adjuster sees, and taught the
-      // tech to distrust the whole review list.
-      const cov = (typeof el.coverage === 'number') ? Math.round(el.coverage * 100) : null;
-      const views = +el.views || 0;
-      let why;
-      if(views <= 1) why = `the camera only caught this ${typeLabel} from one spot`;
-      else if(cov != null) why = `the camera covered only about ${cov}% of this ${typeLabel}, even though it shows up in ${views} views`;
-      else why = `the camera never got a good look at this ${typeLabel}`;
-      coverageIssues.push({ kind: 'coverage', room: el.roomIndex, kfId: el.bestKeyframe || null, ack: '_coverageReviewed',
-        text: `${esc(roomName)}: ${why} - check it in person.` });
-    });
-    coverageIssues.slice(0, 6).forEach(it => issues.push(it));
-    if(coverageIssues.length > 6) issues.push({ kind: 'coverage-more', room: -1, text: `${coverageIssues.length - 6} more elements had poor camera coverage - a slower walkthrough with the camera pointed at the walls covers them.` });
-    fpStudIssues(data).forEach(it => issues.push(it));
-    ((data && data.rooms) || []).forEach((room, idx) => {
-      if(room && !room.deleted && room._studSplitNeedsMoistureReview)
-        issues.push({ kind: 'studmoisture', room: idx, ack: '_studSplitNeedsMoistureReview',
-          text: `${esc(room.roomName || `Room ${idx + 1}`)} was split along an open stud partition: the moisture map drawn before the split covers only this half. Check the moisture map on both halves.` });
-    });
-    return issues;
-  }
   function floorplanWallEffectiveLength(w){
     return w._lengthOverrideFt != null ? w._lengthOverrideFt : w.lengthFt;
   }
@@ -640,34 +547,6 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
       if((ux*vx + uy*vy)/(lu*lv) <= -0.98) return true;   // turns back on itself
     }
     return false;
-  }
-  function fpAiSegmentCoveredByOtherWalls(work, ownRi, seg, level){
-    const vx = seg.b.x - seg.a.x, vy = seg.b.y - seg.a.y;
-    const L = Math.hypot(vx, vy) || 1;
-    const ux = vx/L, uy = vy/L, nx = -uy, ny = ux;
-    const spans = [];
-    (work.rooms||[]).forEach((r, ri2) => {
-      if(r.deleted || (level != null && (r.level||1) !== level)) return;
-      (r.walls||[]).forEach(w => {
-        if(!w.start || !w.end || w._added) return;
-        const dx = w.end.x-w.start.x, dy = w.end.y-w.start.y;
-        const wl = Math.hypot(dx, dy) || 1;
-        if(Math.abs((dx/wl)*ux + (dy/wl)*uy) < 0.95) return;
-        const offA = (w.start.x-seg.a.x)*nx + (w.start.y-seg.a.y)*ny;
-        const offB = (w.end.x-seg.a.x)*nx + (w.end.y-seg.a.y)*ny;
-        if(Math.abs(offA) > 0.8 || Math.abs(offB) > 0.8) return;
-        const t0 = (w.start.x-seg.a.x)*ux + (w.start.y-seg.a.y)*uy;
-        const t1 = (w.end.x-seg.a.x)*ux + (w.end.y-seg.a.y)*uy;
-        const lo = Math.max(0, Math.min(t0,t1)), hi = Math.min(L, Math.max(t0,t1));
-        if(hi > lo) spans.push([lo, hi]);
-      });
-    });
-    spans.sort((a,b) => a[0]-b[0]);
-    let covered = 0, cursor = 0;
-    spans.forEach(([lo,hi]) => {
-      if(hi > cursor){ covered += hi - Math.max(lo, cursor); cursor = Math.max(cursor, hi); }
-    });
-    return covered >= L * 0.7;
   }
   function floorplanRoomBounds(room){
     let minX=Infinity, maxX=-Infinity, minY=Infinity, maxY=-Infinity;
@@ -922,212 +801,6 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
       guessedFt: (gi.bridgeSegs||[]).reduce((t, b) => t + (b && b.d > 1 ? b.d : 0), 0)
     };
   }
-  function fpLadoDeLinea(p, a, b){
-    const vx = b.x - a.x, vy = b.y - a.y, L = Math.hypot(vx, vy) || 1;
-    return ((p.x - a.x) * -vy + (p.y - a.y) * vx) / L;
-  }
-  function fpCutRoomByLine(room, a, b){
-    const poly = fpOrderedRoomPolygon(room);
-    if(!poly || poly.length < 3) return { error: 'el cuarto no tiene un contorno cerrado que partir' };
-    const EPS = 0.05;
-    const d = poly.map(p => fpLadoDeLinea(p, a, b));
-    // Los cruces de la recta con el contorno. Tienen que ser EXACTAMENTE dos:
-    // con dos, el cuarto queda en dos pedazos y nada más; con cuatro (una U)
-    // quedaría en tres y una cara se perdería. Es el candado 6.
-    const cruces = [];
-    for(let i = 0; i < poly.length; i++){
-      const j = (i + 1) % poly.length, di = d[i], dj = d[j];
-      if((di > EPS && dj < -EPS) || (di < -EPS && dj > EPS)){
-        const t = di / (di - dj);
-        cruces.push({ x: poly[i].x + (poly[j].x - poly[i].x) * t, y: poly[i].y + (poly[j].y - poly[i].y) * t });
-      }
-    }
-    if(cruces.length < 2) return { error: 'la línea no atraviesa el cuarto de lado a lado; muévela para que toque las dos paredes' };
-    if(cruces.length > 2) return { error: 'la línea cruza el contorno ' + cruces.length + ' veces y partiría el cuarto en más de dos; muévela a un tramo recto' };
-    // UNA PARED DE STUDS LLEGA A LAS PAREDES A 90°. Una guía de un pie
-    // dibujada con el dedo sale torcida casi siempre, y la recta infinita la
-    // volvería una diagonal de pared a pared que se COBRA. Se busca el tramo
-    // más largo del contorno que cruza y se gira la guía, sobre su punto
-    // medio, hasta la perpendicular exacta de ese tramo. A más de 40° no se
-    // adivina: se niega.
-    let enderezadaDeg = 0;
-    {
-      let tramo = null;
-      for(let i = 0; i < poly.length; i++){
-        const j = (i + 1) % poly.length, di = d[i], dj = d[j];
-        if((di > EPS && dj < -EPS) || (di < -EPS && dj > EPS)){
-          const L = Math.hypot(poly[j].x - poly[i].x, poly[j].y - poly[i].y);
-          if(!tramo || L > tramo.L) tramo = { L, ux: (poly[j].x - poly[i].x) / L, uy: (poly[j].y - poly[i].y) / L };
-        }
-      }
-      if(tramo){
-        const gx = b.x - a.x, gy = b.y - a.y, gL = Math.hypot(gx, gy) || 1;
-        const px = -tramo.uy, py = tramo.ux;
-        enderezadaDeg = Math.acos(Math.min(1, Math.abs((gx * px + gy * py) / gL))) * 180 / Math.PI;
-        if(enderezadaDeg > 40) return { error: 'la línea sale torcida (' + Math.round(enderezadaDeg) + '° fuera de escuadra); dibújela derecha o de pared a pared' };
-        if(enderezadaDeg > 0.01){
-          const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-          a = { x: mid.x - px, y: mid.y - py }; b = { x: mid.x + px, y: mid.y + py };
-          // Con la guía enderezada, los cruces se vuelven a calcular.
-          cruces.length = 0;
-          for(let i = 0; i < poly.length; i++){
-            const j = (i + 1) % poly.length;
-            const di = fpLadoDeLinea(poly[i], a, b), dj = fpLadoDeLinea(poly[j], a, b);
-            if((di > EPS && dj < -EPS) || (di < -EPS && dj > EPS)){
-              const t = di / (di - dj);
-              cruces.push({ x: poly[i].x + (poly[j].x - poly[i].x) * t, y: poly[i].y + (poly[j].y - poly[i].y) * t });
-            }
-          }
-          if(cruces.length !== 2) return { error: 'enderezada, la línea ya no parte el cuarto en dos; muévela' };
-        }
-      }
-    }
-    // Una partición YA PARTIDA (con pareja) que cruce la recta no se trunca:
-    // truncar una sola copia dejaría a la otra mitad con la copia entera y la
-    // pareja diría tres cuartos con un largo que no es. Se niega.
-    const cruzaPareja = (room.walls||[]).some(w => w._studWall && w._studPairId && w.start && w.end
-      && ((fpLadoDeLinea(w.start, a, b) > EPS && fpLadoDeLinea(w.end, a, b) < -EPS) || (fpLadoDeLinea(w.start, a, b) < -EPS && fpLadoDeLinea(w.end, a, b) > EPS)));
-    if(cruzaPareja) return { error: 'la línea cruza una partición que ya partió otro cuarto; muévela' };
-    // Una pared que ya esté SOBRE la línea no se duplica ni se borra callada.
-    const yaHay = (room.walls||[]).some(w => w.start && w.end && !w._studWall
-      && Math.abs(fpLadoDeLinea(w.start, a, b)) < 0.3 && Math.abs(fpLadoDeLinea(w.end, a, b)) < 0.3
-      && Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y) > 1);
-    if(yaHay) return { error: 'ya hay una pared dibujada sobre esa línea; bórrela o mueva la línea' };
-    const particion = { start: { x: FP_QUANT(cruces[0].x), y: FP_QUANT(cruces[0].y) },
-                        end:   { x: FP_QUANT(cruces[1].x), y: FP_QUANT(cruces[1].y) } };
-    const largo = Math.hypot(particion.end.x - particion.start.x, particion.end.y - particion.start.y);
-    if(largo < 1) return { error: 'la pared saldría de menos de un pie' };
-    // Cada pared a su lado (con la guía ya enderezada); la que cruza se trunca.
-    const A = [], B = [], renombradas = {};
-    (room.walls||[]).forEach(w => {
-      if(!w.start || !w.end) return;
-      // SOLO la guía sin partir se reemplaza por la partición. Una partición
-      // ya partida (con pareja) es una pared como cualquiera: si se saltara,
-      // partir dos veces borraría la primera de la mitad que toca.
-      if(w._studWall && !w._studPairId) return;
-      const ds = fpLadoDeLinea(w.start, a, b), de = fpLadoDeLinea(w.end, a, b);
-      if(ds >= -EPS && de >= -EPS){ A.push(w); return; }
-      if(ds <= EPS && de <= EPS){ B.push(w); return; }
-      const t = ds / (ds - de);
-      const c = { x: FP_QUANT(w.start.x + (w.end.x - w.start.x) * t), y: FP_QUANT(w.start.y + (w.end.y - w.start.y) * t) };
-      const mk = (s0, e0) => {
-        const x = Object.assign({}, w, { start: { x: s0.x, y: s0.y }, end: { x: e0.x, y: e0.y },
-          lengthFt: Math.round(Math.hypot(e0.x - s0.x, e0.y - s0.y) * 100) / 100, _studSplitTruncated: true });
-        // Una corrección de largo sobre una pared que ahora son dos no se
-        // puede repartir: se suelta, y se deja dicho.
-        if(x._lengthOverrideFt != null){ delete x._lengthOverrideFt; x._overrideDropped = true; }
-        return x;
-      };
-      const ladoA = mk(ds >= 0 ? w.start : w.end, c), ladoB = mk(ds >= 0 ? w.end : w.start, c);
-      // El pedazo más largo conserva el id: su entrada en el índice de
-      // inspección (cobertura, mejor foto) se va con él.
-      if(ladoB.lengthFt > ladoA.lengthFt) ladoA.id = fpNewId(); else ladoB.id = fpNewId();
-      // Quien apunte a la pared vieja (una puerta, por wallId) tiene que
-      // seguir a SU pedazo: aquí se anota a dónde fue cada uno.
-      renombradas[String(w.id)] = { idA: ladoA.id, idB: ladoB.id };
-      A.push(ladoA); B.push(ladoB);
-    });
-    return { A, B, particion, renombradas, largo: Math.round(largo * 100) / 100, cruces: cruces.length,
-             enderezadaDeg: Math.round(enderezadaDeg * 10) / 10, a, b };
-  }
-  function fpStudSplitCandidates(data, roomIdx, a, b){
-    const room = (data.rooms||[])[roomIdx];
-    if(!room) return { error: 'no hay cuarto' };
-    const cut = fpCutRoomByLine(room, a, b);
-    if(cut.error) return cut;
-    a = cut.a; b = cut.b;                       // la guía, ya enderezada
-    const m0 = fpRoomMeasurements(room);
-    const pairId = fpNewId();
-    // La partición, una copia por mitad, con la MISMA pareja. Nunca un valor
-    // nuevo en `confidence`: el dibujo solo entiende 'low'; la marca es una
-    // llave booleana propia, como `_added`.
-    const pared = () => {
-      const w = { id: fpNewId(), start: { x: cut.particion.start.x, y: cut.particion.start.y },
-                  end: { x: cut.particion.end.x, y: cut.particion.end.y }, lengthFt: cut.largo,
-                  _added: true, _studWall: true, _studPairId: pairId };
-      // El alto es el del cuarto, MEDIDO. Sin alto conocido no se escribe
-      // ninguno: así la hoja declara "sin altura" en vez de inventar un 8.
-      if(m0.heightKnown) w.heightFt = m0.wallHeightFt;
-      return w;
-    };
-    const pA = pared(), pB = pared();
-    const P0 = cut.particion.start, P1 = cut.particion.end;
-    // Una abertura que va a la partición se PROYECTA sobre ella: así queda a
-    // 0 pies del contorno de las dos mitades y las dos la descuentan, que es
-    // lo físico (la puerta está en esa pared).
-    const proyecta = pt => { const vx = P1.x - P0.x, vy = P1.y - P0.y, L2 = vx*vx + vy*vy || 1;
-      const t = Math.max(0, Math.min(1, ((pt.x - P0.x)*vx + (pt.y - P0.y)*vy) / L2));
-      return { x: FP_QUANT(P0.x + vx*t), y: FP_QUANT(P0.y + vy*t) }; };
-    const colineal = w => w && w.start && w.end && Math.abs(fpLadoDeLinea(w.start, a, b)) < 0.3 && Math.abs(fpLadoDeLinea(w.end, a, b)) < 0.3;
-    const reparte = (lista, key) => {
-      const ra = [], rb = [];
-      (lista||[]).forEach(o => {
-        const pt = o && o[key];
-        if(!pt){ ra.push(o); return; }
-        const lado = fpLadoDeLinea(pt, a, b);
-        if(key !== 'position'){ (lado >= 0 ? ra : rb).push(o); return; }
-        // Una abertura va a las DOS mitades solo si está EN la pared de la
-        // línea (la guía o una colineal), no por estar cerca: la puerta de
-        // una pared perpendicular a medio pie de la línea es de UN lado.
-        const wOf = o.wallId != null ? (room.walls||[]).find(w => String(w.id) === String(o.wallId)) : null;
-        const enLaLinea = wOf ? ((wOf._studWall && !wOf._studPairId) || colineal(wOf)) : Math.abs(lado) < 0.25;
-        if(enLaLinea){
-          const pid = fpNewId(), pos = proyecta(pt);
-          ra.push(Object.assign({}, o, { _pairId: pid, wallId: pA.id, position: { x: pos.x, y: pos.y } }));
-          rb.push(Object.assign({}, o, { id: fpNewId(), _pairId: pid, wallId: pB.id, position: { x: pos.x, y: pos.y } }));
-          return;
-        }
-        // Su pared se truncó: sigue al pedazo de su lado, con el id nuevo.
-        const ren = wOf && cut.renombradas[String(wOf.id)];
-        if(ren){ (lado >= 0 ? ra : rb).push(Object.assign({}, o, { wallId: lado >= 0 ? ren.idA : ren.idB })); return; }
-        // Su pared quedó entera de un lado: va con ella, no por su propia distancia.
-        if(wOf && wOf.start && wOf.end){
-          const mid = fpLadoDeLinea({ x: (wOf.start.x + wOf.end.x)/2, y: (wOf.start.y + wOf.end.y)/2 }, a, b);
-          (mid >= 0 ? ra : rb).push(o); return;
-        }
-        (lado >= 0 ? ra : rb).push(o);
-      });
-      return [ra, rb];
-    };
-    const [dA, dB] = reparte(room.doors, 'position');
-    const [wA, wB] = reparte(room.windows, 'position');
-    const [oA, oB] = reparte(room.openings, 'position');
-    const [obA, obB] = reparte(room.objects, 'center');
-    const roomA = Object.assign({}, room, { walls: cut.A.concat([pA]), doors: dA, windows: wA, openings: oA,
-      objects: obA });
-    delete roomA._subAreas;          // se vuelven a detectar sobre la mitad
-    // La mitad nueva: sin equipo (copiarlo imprimiría los air movers dos
-    // veces), sin nombre todavía, y con la marca de dónde salió.
-    const roomB = { roomName: '', level: room.level || 1, walls: cut.B.concat([pB]), doors: dB, windows: wB,
-      openings: oB, objects: obB, summary: {}, _studSplitFrom: roomIdx };
-    return { roomA, roomB, cut, m0 };
-  }
-  function fpStudSplitSanity(antes, A, B, largo, cruces){
-    const fail = [];
-    const corto = r => { const bb = floorplanRoomBounds(r); return Math.min(bb.maxX - bb.minX, bb.maxY - bb.minY); };
-    const forma = m => m.floorSqFt > 0 ? m.perimeterFt / Math.sqrt(m.floorSqFt) : Infinity;
-    const n1 = v => (Math.round(v * 10) / 10).toFixed(1);
-    if(cruces !== 2) fail.push('la línea tiene que cruzar el contorno exactamente dos veces');
-    if(!A.m.outlineOk || !B.m.outlineOk) fail.push('una de las mitades no cierra');
-    if(!(A.m.floorSqFt >= 5 && B.m.floorSqFt >= 5)) fail.push('una mitad quedaría de menos de 5 pies cuadrados');
-    if(!(corto(A.room) >= 1.8 && corto(B.room) >= 1.8)) fail.push('una mitad quedaría más angosta que 1 pie 10 pulgadas');
-    // Los 10 cuartos reales del repo van de 4.0 a 6.1; un corte malo mide 24.
-    if(forma(A.m) > 8 || forma(B.m) > 8) fail.push('una mitad quedaría con una forma que no es de cuarto (muy larga y angosta)');
-    // LEY DE CONSERVACIÓN 1: el piso no puede cambiar.
-    const piso = antes.m.floorSqFt, pisoDespues = A.m.floorSqFt + B.m.floorSqFt;
-    if(Math.abs(pisoDespues - piso) > Math.max(0.5, piso * 0.03))
-      fail.push('el piso no se conserva (' + n1(piso) + ' antes, ' + n1(pisoDespues) + ' después)');
-    // LEY DE CONSERVACIÓN 2: la partición tiene exactamente dos caras. Si sale
-    // menos, una mitad cerró su anillo antes de tiempo y solo se cobra UNA
-    // cara — el corte que dos jueces midieron sobre la casa real.
-    const perim = antes.m.perimeterFt + 2 * largo, perimDespues = A.m.perimeterFt + B.m.perimeterFt;
-    if(Math.abs(perimDespues - perim) > 0.5)
-      fail.push('el perímetro no cuadra: las dos caras de la partición no salen enteras (' + n1(perimDespues) + ' en vez de ' + n1(perim) + ')');
-    // CANDADO 7: el corte no puede dejar un tramo que la app cierre sola.
-    if((A.m.guessedFt||0) + (B.m.guessedFt||0) > (antes.m.guessedFt||0) + 0.5)
-      fail.push('una mitad quedaría con un tramo que la app cerraría sola, no medido');
-    return { ok: !fail.length, fail };
-  }
   function fpPlanMeasurements(data, onLevel){
     const t = { rooms: 0, floorSqFt: 0, ceilingSqFt: 0, perimeterFt: 0, baseboardFt: 0,
                 grossWallSqFt: 0, openingSqFt: 0, netWallSqFt: 0, guessedFt: 0, guessedRooms: 0,
@@ -1268,7 +941,10 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
     const k = Math.max(0.6, Math.min(2.4, meta._labelScale || 1));
     const sx = X(cx + (off.dx||0)), sy = Y(cy + (off.dy||0));
     const dim = (w > 0 && d > 0)
-      ? `<text x="${sx}" y="${sy + 11*k}" font-size="${(15*k).toFixed(1)}" font-weight="700" font-family="'IBM Plex Mono',monospace" fill="#5a6472" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="4">${fpFeetInches(w)} x ${fpFeetInches(d)}</text>`
+      ? (fpVista()
+        ? `<text x="${sx}" y="${sy + 11*k}" font-size="${(14*k).toFixed(1)}" font-weight="600" font-family="'IBM Plex Sans',sans-serif" fill="#1C2530" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="4">${fpPiesPulg(w)} x ${fpPiesPulg(d)}</text>`
+          + `<text x="${sx}" y="${sy + 28*k}" font-size="${(14*k).toFixed(1)}" font-weight="400" font-family="'IBM Plex Sans',sans-serif" fill="#2c3642" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="4">${(w*d).toFixed(1)} sq ft</text>`
+        : `<text x="${sx}" y="${sy + 11*k}" font-size="${(15*k).toFixed(1)}" font-weight="700" font-family="'IBM Plex Mono',monospace" fill="#5a6472" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="4">${fpFeetInches(w)} x ${fpFeetInches(d)}</text>`)
       : '';
     return `<g class="${cls}" ${attrs} style="cursor:grab;">`
       + `<text x="${sx}" y="${sy - 9*k}" font-size="${(17*k).toFixed(1)}" font-weight="700" letter-spacing="0.4" font-family="'IBM Plex Sans',sans-serif" fill="#3A4552" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="4">${esc(name).toUpperCase()}</text>`
@@ -1297,6 +973,9 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
       + `<rect width="6" height="6" fill="#e3e5e9"/><line x1="0" y1="0" x2="0" y2="6" stroke="#b7bcc4" stroke-width="1.4"/>`
       + `</pattern></defs>`;
   }
+  let fpEstiloVista = true;
+  function fpVista(){ return fpEstiloVista && !fpSheetExport && fpRenderMode !== 'moisture'; }
+  function fpPiesPulg(ft){ const t = Math.round((+ft || 0) * 12); return `${Math.floor(t / 12)}' ${t % 12}"`; }
   function fpFeetInches(decimalFeet){
     const totalInches = Math.round(decimalFeet * 12);
     const feet = Math.floor(totalInches / 12);
@@ -1505,8 +1184,11 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
     // Heavier outline + mullion so the window bar reads as a solid part
     // of the wall run, not a thin break in it (field feedback: window
     // sections looked like the wall got thinner there).
-    return `<polygon points="${c1} ${c2} ${c3} ${c4}" fill="#ffffff" stroke="#1C2530" stroke-width="2.2"/>`
-      + `<line x1="${cx-dxPx}" y1="${cy-dyPx}" x2="${cx+dxPx}" y2="${cy+dyPx}" stroke="#1C2530" stroke-width="1.6"/>`;
+    // Su diseño (14-oct): el vidrio son DOS líneas finas dentro del corte de la pared.
+    const q = 0.3;
+    return `<polygon points="${c1} ${c2} ${c3} ${c4}" fill="#ffffff" stroke="#1C2530" stroke-width="1.8"/>`
+      + `<line x1="${cx-dxPx+p.x*t*q}" y1="${cy-dyPx+p.y*t*q}" x2="${cx+dxPx+p.x*t*q}" y2="${cy+dyPx+p.y*t*q}" stroke="#1C2530" stroke-width="1.2"/>`
+      + `<line x1="${cx-dxPx-p.x*t*q}" y1="${cy-dyPx-p.y*t*q}" x2="${cx+dxPx-p.x*t*q}" y2="${cy+dyPx-p.y*t*q}" stroke="#1C2530" stroke-width="1.2"/>`;
   }
   function fpObjectIcon(category, ow, od){
     const hw = ow/2, hd = od/2, m = Math.min(hw,hd);
@@ -1566,57 +1248,6 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
       if(g > 1){ rooms++; ft += g; }
     });
     return { rooms, ft };
-  }
-  function fpMirroredPortCheck(data, level){
-    const rooms = ((data && data.rooms) || []).filter(r => !r.deleted);
-    const ports = [];
-    rooms.forEach((r, ri) => {
-      if(level != null && (r.level||1) !== level) return;
-      ['doors','openings'].forEach(kind => (r[kind]||[]).forEach((o, oi) => {
-        if(!o || !o.position || o._removed) return;
-        ports.push({ ri, roomName: r.roomName || `Room ${ri+1}`, kind, oi,
-                     id: o.id, w: +o.widthFt || 0, p: o.position, lvl: r.level||1 });
-      }));
-    });
-    // El MISMO objeto visto desde los dos lados. 1.0 ft es lo mas
-    // estrecho que sigue emparejando los 3 pares reales de su casa.
-    const paired = new Set();
-    for(let i=0; i<ports.length; i++) for(let j=i+1; j<ports.length; j++){
-      if(ports[i].ri === ports[j].ri || ports[i].lvl !== ports[j].lvl) continue;
-      if(Math.hypot(ports[i].p.x-ports[j].p.x, ports[i].p.y-ports[j].p.y) <= 1.0){
-        paired.add(i); paired.add(j);
-      }
-    }
-    const out = [];
-    ports.forEach((pt, i) => {
-      if(paired.has(i)) return;
-      // Un "paso" de media pulgada es ruido de RoomPlan, no una puerta.
-      // Sin esta reja, el escaneo anterior daba 2 falsos positivos, los
-      // dos de un opening de 0.04 ft. Con ella: 1 acierto, 0 falsos, en
-      // los dos escaneos guardados.
-      if(pt.w < 1.5) return;
-      let best = null;
-      rooms.forEach((r2, rj) => {
-        if(rj === pt.ri || (r2.level||1) !== pt.lvl) return;
-        (r2.walls||[]).forEach(w => {
-          if(!w.start || !w.end) return;
-          const dx = w.end.x-w.start.x, dy = w.end.y-w.start.y, L2 = dx*dx+dy*dy;
-          if(L2 < 1e-6) return;
-          const t = ((pt.p.x-w.start.x)*dx + (pt.p.y-w.start.y)*dy)/L2;
-          // Dentro del segmento, no en la punta: una punta es una esquina,
-          // y toda esquina tiene paredes de otros cuartos cerca.
-          if(t < 0.05 || t > 0.95) return;
-          const d = Math.hypot(pt.p.x-(w.start.x+dx*t), pt.p.y-(w.start.y+dy*t));
-          if(d > 0.5) return;
-          if(!best || d < best.d) best = { d, rj, roomName: r2.roomName || `Room ${rj+1}`, wallId: w.id };
-        });
-      });
-      if(best) out.push({ fromRoom: pt.roomName, fromIdx: pt.ri, kind: pt.kind, oi: pt.oi,
-                          widthFt: pt.w, x: pt.p.x, y: pt.p.y,
-                          missingIn: best.roomName, missingIdx: best.rj,
-                          wallId: best.wallId, distFt: Math.round(best.d*10000)/10000 });
-    });
-    return out;
   }
   function fpInferCorner(room, seg){
     if(!room || !seg || !seg.a || !seg.b) return null;
@@ -1973,40 +1604,6 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
                       trimmed: antes.trimmed + cuenta.trimmed, maxMoveFt: Math.max(antes.maxMoveFt || 0, cuenta.maxMoveFt) };
     return cuenta;
   }
-  function fpReopenCorners(data){
-    let n = 0;
-    ((data && data.rooms) || []).forEach((room, ri) => {
-      let nRoom = 0;
-      const cerca = (a, b) => Math.hypot(a.x - b.x, a.y - b.y) <= 0.05;
-      const squares = [];
-      (room.walls || []).forEach(w => { if(w._cornerSquared) squares.push(w._cornerSquared); });
-      squares.forEach(sq => {
-        (room.walls || []).forEach(w => {
-          ['start', 'end'].forEach(punta => {
-            if(w[punta] && cerca(w[punta], sq.to)) w[punta] = { x: sq.from.x, y: sq.from.y };
-          });
-        });
-      });
-      (room.walls || []).forEach(w => {
-        if(!w.start || !w.end) return;
-        ['_cornerClosed', '_cornerTrimmed'].forEach(k => {
-          const m = w[k];
-          if(!m || !m.from || !m.end) return;
-          w[m.end] = { x: m.from.x, y: m.from.y };
-          delete w[k]; n++; nRoom++;
-        });
-        if(w._cornerSquared){ delete w._cornerSquared; n++; nRoom++; }
-        if(w._cornerNodeMoved){ delete w._cornerNodeMoved; n++; nRoom++; }
-        w.lengthFt = Math.round(Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y) * 100) / 100;
-      });
-      if(nRoom){
-        room._cornerAcks = room._cornerAcks || {};
-        fpCornerFindings(data, ri).forEach(f => { room._cornerAcks[f.key] = true; });
-      }
-    });
-    if(data) data._corners = { closed: 0, squared: 0, trimmed: 0, maxMoveFt: 0, reopened: n };
-    return n;
-  }
   function fpWalkedPath(data, level){
     const raw = data && data.inspection && data.inspection.path;
     if(!Array.isArray(raw)) return [];
@@ -2029,109 +1626,6 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
     }
     return false;
   }
-  function fpPathCrossesWalls(data, level){
-    const path = fpWalkedPath(data, level);
-    if(path.length < 2) return [];
-    const hits = [];
-    ((data && data.rooms) || []).forEach(r => {
-      if(r.deleted) return;
-      if(level != null && (r.level||1) !== level) return;
-      const gaps = [];
-      ['doors','windows','openings'].forEach(k => (r[k]||[]).forEach(o => {
-        if(o && o.position && !o._removed) gaps.push(o);
-      }));
-      (r.walls||[]).forEach((w, wi) => {
-        if(!w.start || !w.end) return;
-        const L = Math.hypot(w.end.x-w.start.x, w.end.y-w.start.y);
-        if(L < 2) return;
-        // acorta la pared por las puntas: las esquinas siempre tienen ruido
-        const ux = (w.end.x-w.start.x)/L, uy = (w.end.y-w.start.y)/L;
-        const trim = Math.min(1.0, L*0.2);
-        const seg = { a:{x:w.start.x+ux*trim, y:w.start.y+uy*trim},
-                      b:{x:w.end.x-ux*trim,   y:w.end.y-uy*trim} };
-        if(!fpPathCrossesSegment(seg, path, 3)) return;
-        // ¿habia una puerta o un paso justo ahi? entonces no es contradiccion
-        const near = gaps.some(o => {
-          const dx = w.end.x-w.start.x, dy = w.end.y-w.start.y, L2 = dx*dx+dy*dy || 1;
-          let t = ((o.position.x-w.start.x)*dx + (o.position.y-w.start.y)*dy)/L2;
-          t = Math.max(0, Math.min(1, t));
-          return Math.hypot(o.position.x-(w.start.x+dx*t), o.position.y-(w.start.y+dy*t)) <= 1.5;
-        });
-        if(!near) hits.push({ room: r.roomName || 'Room', wall: wi, lengthFt: L });
-      });
-    });
-    return hits;
-  }
-  function fpRoomsOverlapSqFt(data, onLevel){
-    const rooms = ((data && data.rooms) || []).filter(r =>
-      !r.deleted && (r.walls||[]).length && (!onLevel || onLevel(r)));
-    if(rooms.length < 2) return { pairs: [], sqFt: 0 };
-    const polys = rooms.map(r => fpOrderedRoomPolygon(r));
-    const boxes = polys.map(p => {
-      if(!p || p.length < 3) return null;
-      const xs = p.map(q => q.x), ys = p.map(q => q.y);
-      return { x0:Math.min(...xs), x1:Math.max(...xs), y0:Math.min(...ys), y1:Math.max(...ys) };
-    });
-    const CELL = 0.5;
-    const pairs = [];
-    let total = 0;
-    for(let i=0; i<rooms.length; i++) for(let j=i+1; j<rooms.length; j++){
-      const A = polys[i], B = polys[j], ba = boxes[i], bb = boxes[j];
-      if(!A || !B || !ba || !bb) continue;
-      const x0 = Math.max(ba.x0, bb.x0), x1 = Math.min(ba.x1, bb.x1);
-      const y0 = Math.max(ba.y0, bb.y0), y1 = Math.min(ba.y1, bb.y1);
-      if(x1 - x0 < CELL || y1 - y0 < CELL) continue;      // ni se tocan
-      let n = 0;
-      for(let x = x0; x < x1; x += CELL) for(let y = y0; y < y1; y += CELL){
-        const pt = { x: x + CELL/2, y: y + CELL/2 };
-        if(fpPointInPolygon(pt, A) && fpPointInPolygon(pt, B)) n++;
-      }
-      const sq = n * CELL * CELL;
-      // Un pelo de traslape es el grosor de una pared compartida, no un
-      // error. 4 sq ft es mas o menos 2 ft de pared: por debajo de eso no
-      // vale la pena molestarlo.
-      if(sq >= 4){
-        pairs.push({ a: rooms[i].roomName || `Room ${i+1}`, b: rooms[j].roomName || `Room ${j+1}`, sqFt: Math.round(sq*10)/10 });
-        total += sq;
-      }
-    }
-    return { pairs, sqFt: Math.round(total*10)/10 };
-  }
-  function fpWallsInsideOtherRooms(data, onLevel){
-    const rooms = ((data && data.rooms) || []).filter(r =>
-      !r.deleted && (r.walls||[]).length && (!onLevel || onLevel(r)));
-    const polys = rooms.map(r => fpOrderedRoomPolygon(r));
-    const edgeDist = (p, poly) => {
-      let m = Infinity;
-      for(let i=0;i<poly.length;i++){
-        const a = poly[i], b = poly[(i+1)%poly.length];
-        const dx = b.x-a.x, dy = b.y-a.y, L2 = dx*dx+dy*dy || 1e-9;
-        let t = ((p.x-a.x)*dx + (p.y-a.y)*dy)/L2; t = Math.max(0, Math.min(1, t));
-        m = Math.min(m, Math.hypot(p.x-(a.x+dx*t), p.y-(a.y+dy*t)));
-      }
-      return m;
-    };
-    const hits = [];
-    rooms.forEach((r, ri) => (r.walls||[]).forEach((w, wi) => {
-      if(!w.start || !w.end) return;
-      if(Math.hypot(w.end.x-w.start.x, w.end.y-w.start.y) < 1) return;
-      rooms.forEach((r2, ri2) => {
-        if(ri2 === ri) return;
-        const P = polys[ri2];
-        if(!P || P.length < 3) return;
-        let inside = 0, n = 0;
-        for(let t = 0.15; t <= 0.85; t += 0.1){
-          n++;
-          const p = { x: w.start.x + (w.end.x-w.start.x)*t, y: w.start.y + (w.end.y-w.start.y)*t };
-          if(fpPointInPolygon(p, P) && edgeDist(p, P) > 0.8) inside++;
-        }
-        if(n && inside/n > 0.8){
-          hits.push({ room: r.roomName || `Room ${ri+1}`, wall: wi, inside: r2.roomName || `Room ${ri2+1}` });
-        }
-      });
-    }));
-    return hits;
-  }
   function fpRoomFloorFill(room, X, Y){
     if(!room || (room.walls||[]).length < 3) return '';
     const gap = {};
@@ -2148,7 +1642,7 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
     // this floor", which is the truth, and floorplanValidate's "break in
     // the outline" item already carries the message with a one-tap fix.
     if(fpAiFragileOutline(room)) return '';
-    let out = `<polygon points="${fpPts(pts)}" fill="${FLOORPLAN_FLOOR_FILL}"/>`;
+    let out = `<polygon points="${fpPts(pts)}" fill="${fpVista() ? '#ffffff' : FLOORPLAN_FLOOR_FILL}"/>`;
     // Where the outline had to be BRIDGED, that run of the boundary is a
     // guess. Put the doubt on the segment that is actually doubtful
     // instead of over the whole room: measured on the real plan, only the
@@ -2170,7 +1664,18 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
     });
     return out;
   }
-  function buildFloorplanRoomContent(room, roomIdx, X, Y, scale, allRooms, buildingCentroid, overlays, drawnObjectKeys, skipFloorFill){
+  let fpRecorteN = 0;
+  function fpRecorteDelCuarto(room, roomIdx, X, Y){
+    try{
+      if(!room || (room.walls || []).length < 3 || fpAiFragileOutline(room)) return null;
+      const gap = {}; const poly = fpOrderedRoomPolygon(room, gap);
+      if(!poly || poly.length < 3) return null;
+      if((gap.bridgeSegs || []).some(b => b && b.d > 4)) return null;
+      const id = 'fpcm' + roomIdx + '_' + (++fpRecorteN);
+      return { id, defs: `<clipPath id="${id}"><polygon points="${fpPts(poly.map(p => ({ x: X(p.x), y: Y(p.y) })))}"/></clipPath>` };
+    }catch(e){ return null; }
+  }
+  function buildFloorplanRoomContent(room, roomIdx, X, Y, scale, allRooms, buildingCentroid, overlays, drawnObjectKeys, skipFloorFill, capaMuebles){
     const centroid = floorplanRoomCentroid(room);
     const dimCentroid = buildingCentroid || centroid;
     const wallsById = {};
@@ -2183,6 +1688,7 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
     // fill drawn here buried the previous room's walls, doors and
     // furniture (measured: 27 of 77 Hallway wall samples were overpainted).
     if(!skipFloorFill) s += fpRoomFloorFill(room, X, Y);
+    const iTrasPiso = s.length;   // aquí van los muebles: DEBAJO de las paredes (ver más abajo)
 
     // Walls as filled, properly-thick, hatched rectangles (the real
     // difference between a wireframe and an architectural drawing) -
@@ -2245,6 +1751,21 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
         const poly = fpWallPolygonScreen(seg, X, Y);
         s += `<polygon class="fp-wall" data-room-idx="${roomIdx}" data-wall-id="${wallId}" points="${poly}" fill="#1C2530" stroke="${stud ? '#8a6d1a' : lowConf ? '#c0392b' : '#1C2530'}" stroke-width="${(stud || lowConf) ? 2.2 : 0.75}"${stud ? ' stroke-dasharray="8,5"' : lowConf ? ' stroke-dasharray="6,4"' : ''} style="cursor:pointer;"/>`;
       });
+      // PAREDES UNIDAS (su diseño, 14-oct): cada pared es un rectángulo sobre su línea central, así que en
+      // una esquina quedaba un mordisco de media pared por fuera. Un cuadro del grueso de la pared en cada
+      // punta llena la esquina. Solo en una punta que de verdad lleva pared (si ahí empieza una puerta, el
+      // hueco de la puerta se queda limpio).
+      if(!stud){
+        const wdx0 = wall.end.x - wall.start.x, wdy0 = wall.end.y - wall.start.y, wl0 = Math.hypot(wdx0, wdy0);
+        if(wl0 > 0.05){
+          const ux0 = wdx0 / wl0, uy0 = wdy0 / wl0, hh = FLOORPLAN_WALL_THICKNESS_FT / 2;
+          [wall.start, wall.end].forEach(pt => {
+            if(!segments.some(sg => Math.hypot(sg.start.x - pt.x, sg.start.y - pt.y) < 0.02 || Math.hypot(sg.end.x - pt.x, sg.end.y - pt.y) < 0.02)) return;
+            const q4 = [[1,1],[1,-1],[-1,-1],[-1,1]].map(([a, b]) => ({ x: X(pt.x + ux0*hh*a - uy0*hh*b), y: Y(pt.y + uy0*hh*a + ux0*hh*b) }));
+            s += `<polygon points="${fpPts(q4)}" fill="#1C2530" style="pointer-events:none;"/>`;
+          });
+        }
+      }
       // If an opening spans the wall's whole length there's no solid
       // segment left to tap - a thin invisible line along the centerline
       // keeps the wall reachable for a length correction either way.
@@ -2283,7 +1804,7 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
       const midX = (wall.start.x+wall.end.x)/2, midY = (wall.start.y+wall.end.y)/2;
       // A genuinely zero-length wall exists in the real scan (Hallway
       // wall 4, start === end) and printed "0'-0"" on the plan.
-      if(!FP_VISTA_LIMPIA && effLen >= 0.25 && !seenNear('dim', midX, midY)){
+      if(!fpVista() && effLen >= 0.25 && !seenNear('dim', midX, midY)){
         if(floorplanIsExteriorWall(wall, room, allRooms)){
           dims.push(fpDimensionLine(wall, dimCentroid, X, Y, dimTxt));
         } else if(effLen >= 2 && fpMeasurePrefs.interior){
@@ -2309,11 +1830,14 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
     (room.doors||[]).forEach((d, di) => {
       if(d._removed) return;
       if(seenNear('doorway', d.position.x, d.position.y)) return;
-      s += fpDoorSwingMarkup(d, wallsById[d.wallId], centroid, X, Y);
+      // La puerta de un clóset se dibuja corrediza (su pedido, 14-oct: "se ve más limpio" que el arco). Solo
+      // cuando nadie escogió el tipo a mano (_doorStyle).
+      const dDib = (!d._doorStyle && fpEsPuertaDeCloset(d, room, allRooms)) ? Object.assign({}, d, { _doorStyle: 'sliding' }) : d;
+      s += fpDoorSwingMarkup(dDib, wallsById[d.wallId], centroid, X, Y);
       const cx = X(d.position.x), cy = Y(d.position.y);
       const dId = esc(String(d.id != null ? d.id : di));
       s += fpOpeningHitTarget('fp-door', roomIdx, dId, d, wallsById[d.wallId], X, Y);
-      if(fpMeasurePrefs.openings && !FP_VISTA_LIMPIA){
+      if(fpMeasurePrefs.openings && !fpVista()){
         const dw = floorplanOpeningEffectiveWidth(d);
         if(dw >= 1){
           // dimCentroid, not centroid: fpDimensionLine offsets its text
@@ -2336,7 +1860,7 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
       const winId = esc(String(win.id != null ? win.id : wi2));
       const ww = floorplanOpeningEffectiveWidth(win), wh = floorplanOpeningEffectiveHeight(win);
       s += fpOpeningHitTarget('fp-window', roomIdx, winId, win, wallsById[win.wallId], X, Y);
-      if(fpMeasurePrefs.openings && !FP_VISTA_LIMPIA){
+      if(fpMeasurePrefs.openings && !fpVista()){
         const winLabel = fpOpeningLabelPos(wallsById[win.wallId], dimCentroid, win.position, X, Y);
         s += `<text x="${winLabel.x}" y="${winLabel.y}" font-size="19" font-weight="700" fill="#39699e" text-anchor="middle" dominant-baseline="middle" paint-order="stroke" stroke="#fff" stroke-width="5">${fpFeetInches(ww)} x ${fpFeetInches(wh)}${(!fpSheetExport && win._added) ? '*' : ''}</text>`;
       }
@@ -2366,9 +1890,16 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
       const w = floorplanOpeningEffectiveWidth(op) || 3;
       const a = { x: op.position.x - ux*w/2, y: op.position.y - uy*w/2 };
       const b = { x: op.position.x + ux*w/2, y: op.position.y + uy*w/2 };
-      s += `<line x1="${X(a.x)}" y1="${Y(a.y)}" x2="${X(b.x)}" y2="${Y(b.y)}" stroke="#9aa3ad" stroke-width="2" stroke-dasharray="6,4"/>`;
+      s += fpVista()
+        ? `<line x1="${X(a.x)}" y1="${Y(a.y)}" x2="${X(b.x)}" y2="${Y(b.y)}" stroke="#5b6573" stroke-width="1.4"/>`   // su diseño: línea fina donde un cuarto pasa al otro
+        : `<line x1="${X(a.x)}" y1="${Y(a.y)}" x2="${X(b.x)}" y2="${Y(b.y)}" stroke="#9aa3ad" stroke-width="2" stroke-dasharray="6,4"/>`;
     });
 
+    // LOS MUEBLES NUNCA TAPAN UNA PARED (su pedido, 14-oct, con el plano real marcado): se dibujaban al
+    // final, encima de todo, y un mueble pegado a la pared (gabinetes, la tina, una caja junto a la sala)
+    // la cortaba o la hacía ver delgada. Ahora van debajo de las paredes, y recortados a su cuarto para que
+    // ninguno se asome por fuera del edificio.
+    const sAntesMuebles = s; s = '';
     (room.objects||[]).forEach((o, idx) => {
       if(o._hidden) return;
       // Movable furniture stays OFF the drawing unless the Measure menu
@@ -2406,6 +1937,15 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
         + (showLabel ? `<text x="${cx}" y="${cy+od/2+20}" font-size="18" font-weight="600" fill="#3A4552" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="5">${label}</text>` : '')
         + `</g>`;
     });
+    {
+      let muebles = s; s = sAntesMuebles;
+      if(muebles){
+        const recorte = fpRecorteDelCuarto(room, roomIdx, X, Y);
+        if(recorte) muebles = recorte.defs + `<g clip-path="url(#${recorte.id})">` + muebles + `</g>`;
+        if(capaMuebles) capaMuebles.push(muebles);
+        else s = s.slice(0, iTrasPiso) + muebles + s.slice(iTrasPiso);
+      }
+    }
     // Dimension lines paint LAST within this room's own markup (above
     // its furniture) - and in the merged view they're lifted out
     // entirely, above every room's content.
@@ -2490,6 +2030,260 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
     s += `</g>`;
     return s;
   }
+  function fpHuecoDelNombre(room, c, todos){
+    try{
+      const sp = fpRoomSpanAt(fpOrderedRoomPolygon(room), c) || {};
+      // Las paredes de los OTROS cuartos también cuentan: en el plano real una pared del cuarto de al lado
+      // cruzaba el hueco del Hallway y el nombre quedaba encima de ella.
+      // Se mide toda la franja que ocupa el nombre (su alto, ~1 ft arriba y abajo), no una sola línea: en el
+      // plano real la pared terminaba justo arriba de la línea y las letras le quedaban encima.
+      const franja = [-1.0, -0.5, 0, 0.5, 1.0].map(k => c.y + k);
+      (todos || []).forEach(r2 => (r2.walls || []).forEach(w => {
+        if(!w || !w.start || !w.end) return;
+        const ax = w.start.x, ay = w.start.y, bx = w.end.x, by = w.end.y;
+        franja.forEach(yy => {
+          if((ay - yy) * (by - yy) <= 0 && Math.abs(by - ay) > 1e-6){
+            const x = ax + (yy - ay) * (bx - ax) / (by - ay);
+            if(sp.h){ if(x < c.x && x > sp.h[0]) sp.h[0] = x; if(x > c.x && x < sp.h[1]) sp.h[1] = x; }
+          }
+        });
+        if((ax - c.x) * (bx - c.x) <= 0 && Math.abs(bx - ax) > 1e-6){
+          const y = ay + (c.x - ax) * (by - ay) / (bx - ax);
+          if(sp.v){ if(y < c.y && y > sp.v[0]) sp.v[0] = y; if(y > c.y && y < sp.v[1]) sp.v[1] = y; }
+        }
+      }));
+      if(!sp.h && !sp.v) return null;
+      const T = FLOORPLAN_WALL_THICKNESS_FT;
+      const w = sp.h ? 2 * Math.min(c.x - sp.h[0], sp.h[1] - c.x) - T : 0;
+      const h = sp.v ? 2 * Math.min(c.y - sp.v[0], sp.v[1] - c.y) - T : 0;
+      // Si en el punto del nombre no cabe, se corre al centro del hueco de pared a pared en esa misma
+      // altura (sigue adentro del cuarto): wC es ese hueco entero.
+      const wC = sp.h ? (sp.h[1] - sp.h[0]) - T : 0, xC = sp.h ? (sp.h[0] + sp.h[1]) / 2 : c.x;
+      return { w: w > 0.5 ? w : 0, h: h > 0.5 ? h : 0, wC: wC > 0.5 ? wC : 0, xC };
+    }catch(e){ return null; }
+  }
+  let fpEspaciosDelPlano = [];
+  function fpEsPuertaDeCloset(d, room, todos){
+    if(!d || !d.position) return false;
+    const esCloset = n => /closet|closset|clóset/.test(String(n || '').toLowerCase());
+    if(esCloset(room && room.roomName)) return true;
+    const p = d.position;
+    for(const r of (todos || [])){
+      if(r === room || r.deleted) continue;
+      if(esCloset(r.roomName)){
+        const pg = fpOrderedRoomPolygon(r);
+        if(pg && pg.length >= 3){
+          if(fpPointInPolygon(p, pg)) return true;
+          for(let i = 0, j = pg.length - 1; i < pg.length; j = i++){
+            const a = pg[j], b = pg[i], dx = b.x - a.x, dy = b.y - a.y, L2 = dx*dx + dy*dy || 1;
+            const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2));
+            if(Math.hypot(p.x - (a.x + t*dx), p.y - (a.y + t*dy)) <= 0.9) return true;
+          }
+        }
+      }
+    }
+    // los espacios con nombre que se le pusieron al plano (un clóset que no se escaneó como cuarto aparte)
+    for(const sp of (fpEspaciosDelPlano || [])){
+      if(!esCloset(sp.name) || !(sp.w > 0)) continue;
+      if(Math.abs(p.x - sp.x) <= sp.w / 2 + 0.9 && Math.abs(p.y - sp.y) <= sp.d / 2 + 0.9) return true;
+    }
+    for(const r of [room].concat(todos || [])){
+      for(const sa of ((r && r._subAreas) || [])){
+        if(!esCloset(sa.name) || !(sa.w > 0)) continue;
+        if(Math.abs(p.x - sa.cx) <= sa.w / 2 + 0.9 && Math.abs(p.y - sa.cy) <= sa.d / 2 + 0.9) return true;
+      }
+    }
+    return false;
+  }
+  function fpNombreClave(n){ return String(n || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim(); }
+  function fpSpanEnLinea(room, P, todos, banda){
+    const sp = fpRoomSpanAt(fpOrderedRoomPolygon(room), P) || {};
+    let h = sp.h ? sp.h.slice() : null, v = sp.v ? sp.v.slice() : null;
+    const ys = [P.y]; if(banda) for(let k = 0.5; k <= banda + 1e-9; k += 0.5){ ys.push(P.y - k, P.y + k); }
+    (todos || []).forEach(r2 => (r2.walls || []).forEach(w => {
+      if(!w || !w.start || !w.end) return;
+      const ax = w.start.x, ay = w.start.y, bx = w.end.x, by = w.end.y;
+      if(h) ys.forEach(yy => { if((ay - yy) * (by - yy) <= 0 && Math.abs(by - ay) > 1e-6){
+        const x = ax + (yy - ay) * (bx - ax) / (by - ay);
+        if(x < P.x - 0.05 && x > h[0]) h[0] = x; if(x > P.x + 0.05 && x < h[1]) h[1] = x;
+      } });
+      if(v && (ax - P.x) * (bx - P.x) <= 0 && Math.abs(bx - ax) > 1e-6){
+        const y = ay + (P.x - ax) * (by - ay) / (bx - ax);
+        if(y < P.y - 0.05 && y > v[0]) v[0] = y; if(y > P.y + 0.05 && y < v[1]) v[1] = y;
+      }
+    }));
+    return { h, v };
+  }
+  function fpBloqueVista(room, label, areaTxt, rb, scale, X, Y, labelX, labelY, escala, libre, todos, minX, minY, movidoAMano){
+    const T = FLOORPLAN_WALL_THICKNESS_FT;
+    const letras = Math.max(4, String(label).replace(/&[a-z#0-9]+;/g, 'x').length);
+    // 1. CENTRADO (su pedido): el bloque va al medio del cuarto, de pared a pared a lo largo y luego a lo ancho,
+    // por la línea que pasa por el punto del nombre (siempre adentro del cuarto, aunque sea en L). Se compara
+    // con el punto de siempre y gana donde el bloque se lee más grande sin tocar pared (en un cuarto raro, el
+    // centro puede caer en un pasillo angosto). Un nombre que alguien movió a mano se queda donde lo dejó.
+    // Todos los cuartos con la MISMA letra (su diseño): un tope parejo, y un cuarto chico (baño, clóset) más
+    // chico en proporción — antes el tope dependía solo de lo que cabía y el baño salía más grande que la sala.
+    const areaR = fpRoomDisplayAreaSqFt(room) || ((rb.maxX - rb.minX) * (rb.maxY - rb.minY));
+    const tope = 0.56 * scale * (areaR > 0 && areaR < 80 ? Math.max(0.62, Math.sqrt(areaR / 80)) : 1);
+    const evalua = (P) => {
+      const sp = fpSpanEnLinea(room, P, todos);
+      const largo = sp.h ? sp.h[1] - sp.h[0] : (rb.maxX - rb.minX), ancho = sp.v ? sp.v[1] - sp.v[0] : (rb.maxY - rb.minY);
+      const dimTxt = `${fpPiesPulg(largo)} x ${fpPiesPulg(ancho)}`;
+      // lo que cabe ALREDEDOR del punto (el doble de la distancia a la pared más cercana), no todo el tramo
+      const sb = fpSpanEnLinea(room, P, todos, 1.0);   // el bloque mide ~2 ft de alto
+      const libreW = Math.max(1, ((sb.h ? 2 * Math.min(P.x - sb.h[0], sb.h[1] - P.x) : largo) - T) * scale);
+      const libreH = Math.max(1, ((sp.v ? 2 * Math.min(P.y - sp.v[0], sp.v[1] - P.y) : ancho) - T) * scale);
+      const fit = Math.min(tope, (libreW * 0.84) / (0.66 * letras), (libreW * 0.84) / (0.6 * 0.74 * dimTxt.length), libreH * 0.2);
+      return { P, sp, dimTxt, libreW, libreH, fit };
+    };
+    const P0 = { x: labelX / scale + minX, y: labelY / scale + minY };
+    let mejor = evalua(P0);
+    if(!movidoAMano){
+      const Pc = { x: P0.x, y: P0.y };
+      for(let i = 0; i < 2; i++){
+        const a1 = fpSpanEnLinea(room, Pc, todos); if(a1.h) Pc.x = (a1.h[0] + a1.h[1]) / 2;
+        const a2 = fpSpanEnLinea(room, Pc, todos); if(a2.v) Pc.y = (a2.v[0] + a2.v[1]) / 2;
+      }
+      const c2 = evalua(Pc);
+      if(c2.fit >= mejor.fit * 0.95) mejor = c2;
+    }
+    const { P, sp, dimTxt, libreW, libreH } = mejor;
+    const px = X(P.x); labelY = Y(P.y);
+    // 2. tamaño: que quepan las tres líneas adentro, de pared a pared
+    let fs = Math.max(0.34 * scale, mejor.fit) * Math.max(0.6, Math.min(2.2, escala || 1));
+    const f2 = fs * 0.74, y0 = labelY - fs * 0.6;
+    const t = (y, size, peso, color, txt, ls) => `<text x="${px.toFixed(1)}" y="${y.toFixed(1)}" font-size="${size.toFixed(1)}" font-weight="${peso}"${ls ? ` letter-spacing="${ls}"` : ''} font-family="'IBM Plex Sans',sans-serif" fill="${color}" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="${(size * 0.16).toFixed(1)}">${txt}</text>`;
+    const svg = t(y0, fs, 700, '#1C2530', label, '0.6') + t(y0 + fs * 1.02, f2, 600, '#1C2530', dimTxt) + t(y0 + fs * 1.92, f2, 400, '#2c3642', areaTxt);
+    // 4. puntitas de flecha, solo si hay lugar entre el bloque y la pared
+    const a = Math.max(9, Math.min(15, 0.26 * scale)), dentro = T / 2 + 0.12;
+    const tri = (x, y, dir) => {
+      const pts = dir === 'l' ? `${x},${y} ${x + a},${y - a * 0.5} ${x + a},${y + a * 0.5}`
+        : dir === 'r' ? `${x},${y} ${x - a},${y - a * 0.5} ${x - a},${y + a * 0.5}`
+        : dir === 'u' ? `${x},${y} ${x - a * 0.5},${y + a} ${x + a * 0.5},${y + a}`
+        : `${x},${y} ${x - a * 0.5},${y - a} ${x + a * 0.5},${y - a}`;
+      return `<polygon points="${pts}" fill="#1C2530"/>`;
+    };
+    const anchoTxt = Math.max(0.66 * letras * fs, 0.6 * dimTxt.length * f2);
+    let flechas = '';
+    // la flecha va en la pared; solo hace falta que entre el bloque y la pared quede aire
+    if(sp.h && Math.min(px - X(sp.h[0] + dentro), X(sp.h[1] - dentro) - px) > anchoTxt / 2 + a + 10) flechas += tri(X(sp.h[0] + dentro), labelY, 'l') + tri(X(sp.h[1] - dentro), labelY, 'r');
+    if(sp.v && Math.min(labelY - Y(sp.v[0] + dentro), Y(sp.v[1] - dentro) - labelY) > fs * 1.6 + a + 10) flechas += tri(px, Y(sp.v[0] + dentro), 'u') + tri(px, Y(sp.v[1] - dentro), 'd');
+    return { svg, flechas };
+  }
+  function fpCadenasCotas(rooms, b, centro, X, Y, scale){
+    const T = FLOORPLAN_WALL_THICKNESS_FT;
+    const lados = { top: [], bottom: [], left: [], right: [] };
+    let sueltas = '';
+    const vistas = new Set();
+    rooms.forEach(room => (room.walls || []).forEach(w => {
+      if(!w || !w.start || !w.end) return;
+      const dx = w.end.x - w.start.x, dy = w.end.y - w.start.y, L = Math.hypot(dx, dy);
+      if(L < 0.4 || !floorplanIsExteriorWall(w, room, rooms)) return;
+      const mx = (w.start.x + w.end.x) / 2, my = (w.start.y + w.end.y) / 2;
+      if(Math.abs(dy) <= L * 0.035){
+        (my < centro.y ? lados.top : lados.bottom).push([Math.min(w.start.x, w.end.x), Math.max(w.start.x, w.end.x)]);
+      } else if(Math.abs(dx) <= L * 0.035){
+        (mx < centro.x ? lados.left : lados.right).push([Math.min(w.start.y, w.end.y), Math.max(w.start.y, w.end.y)]);
+      } else {
+        const k = mx.toFixed(1) + ',' + my.toFixed(1);
+        if(!vistas.has(k)){ vistas.add(k); sueltas += fpDimensionLine(w, centro, X, Y, fpPiesPulg(floorplanWallEffectiveLength(w))); }
+      }
+    }));
+    const fs = Math.max(20, Math.min(34, 0.52 * scale));
+    const tic = 0.32 * scale;
+    let out = '<g class="fp-cadenas" style="pointer-events:none;" font-family="\'IBM Plex Sans\',sans-serif">';
+    Object.keys(lados).forEach(lado => {
+      const iv = lados[lado]; if(!iv.length) return;
+      // Cortes: todas las puntas; un tramo se mide si alguna pared lo cubre.
+      const pts = []; iv.forEach(([a, c]) => { pts.push(a, c); });
+      pts.sort((p, q) => p - q);
+      const cortes = []; pts.forEach(v => { if(!cortes.length || v - cortes[cortes.length - 1] > 0.15) cortes.push(v); });
+      const tramos = [];
+      for(let i = 0; i + 1 < cortes.length; i++){
+        const a = cortes[i], c = cortes[i + 1], m = (a + c) / 2;
+        if(c - a >= 0.4 && iv.some(([p, q]) => m >= p - 0.05 && m <= q + 0.05)) tramos.push([a, c]);
+      }
+      // Un pedacito de menos de 9" (la punta de una pared que asoma) no se mide solo: se suma al tramo de
+      // al lado si están pegados, y si está suelto se deja (con sus de 5" el lado se llenaba de basura).
+      for(let i = 0; i < tramos.length; i++){
+        const [a, c] = tramos[i]; if(c - a >= 0.75) continue;
+        const prev = tramos[i - 1], next = tramos[i + 1];
+        if(prev && Math.abs(prev[1] - a) < 0.05 && (!next || Math.abs(next[0] - c) >= 0.05 || prev[1] - prev[0] <= next[1] - next[0])){ prev[1] = c; tramos.splice(i--, 1); }
+        else if(next && Math.abs(next[0] - c) < 0.05){ next[0] = a; tramos.splice(i--, 1); }
+        else { tramos.splice(i--, 1); }
+      }
+      if(!tramos.length) return;
+      const horiz = lado === 'top' || lado === 'bottom';
+      const fuera = 1.25 + T / 2;
+      const linea = lado === 'top' ? b.minY - fuera : lado === 'bottom' ? b.maxY + fuera : lado === 'left' ? b.minX - fuera : b.maxX + fuera;
+      const P = v => horiz ? { x: X(v), y: Y(linea) } : { x: X(linea), y: Y(v) };
+      // Línea por cada tramo seguido (un hueco entre tramos deja la línea cortada, como su diseño).
+      let ini = tramos[0][0], fin = tramos[0][1];
+      const corridas = [];
+      tramos.slice(1).forEach(([a, c]) => { if(a - fin < 0.05) fin = c; else { corridas.push([ini, fin]); ini = a; fin = c; } });
+      corridas.push([ini, fin]);
+      corridas.forEach(([a, c]) => { const A = P(a), C = P(c); out += `<line x1="${A.x.toFixed(1)}" y1="${A.y.toFixed(1)}" x2="${C.x.toFixed(1)}" y2="${C.y.toFixed(1)}" stroke="#1C2530" stroke-width="1.4"/>`; });
+      const rayas = new Set(); tramos.forEach(([a, c]) => { rayas.add(a.toFixed(3)); rayas.add(c.toFixed(3)); });
+      rayas.forEach(v => { const Q = P(+v); out += horiz
+        ? `<line x1="${Q.x.toFixed(1)}" y1="${(Q.y - tic / 2).toFixed(1)}" x2="${Q.x.toFixed(1)}" y2="${(Q.y + tic / 2).toFixed(1)}" stroke="#1C2530" stroke-width="1.4"/>`
+        : `<line x1="${(Q.x - tic / 2).toFixed(1)}" y1="${Q.y.toFixed(1)}" x2="${(Q.x + tic / 2).toFixed(1)}" y2="${Q.y.toFixed(1)}" stroke="#1C2530" stroke-width="1.4"/>`; });
+      // Números afuera de la línea; si no caben en su tramo, se suben a una segunda fila (nunca encimados).
+      let finFila = [-Infinity, -Infinity];
+      tramos.forEach(([a, c]) => {
+        const txt = fpPiesPulg(c - a), M = P((a + c) / 2);
+        const largo = horiz ? txt.length * fs * 0.55 : fs * 1.05;
+        const ini2 = (horiz ? M.x : M.y) - largo / 2;
+        let fila = ini2 >= finFila[0] + 6 ? 0 : 1;
+        finFila[fila] = ini2 + largo;
+        const sep = fs * 0.45 + fila * fs * (horiz ? 1.15 : 3.4);
+        if(lado === 'top') out += `<text x="${M.x.toFixed(1)}" y="${(M.y - sep).toFixed(1)}" font-size="${fs.toFixed(1)}" font-weight="600" fill="#1C2530" text-anchor="middle">${txt}</text>`;
+        else if(lado === 'bottom') out += `<text x="${M.x.toFixed(1)}" y="${(M.y + sep + fs * 0.75).toFixed(1)}" font-size="${fs.toFixed(1)}" font-weight="600" fill="#1C2530" text-anchor="middle">${txt}</text>`;
+        else if(lado === 'left') out += `<text x="${(M.x - sep).toFixed(1)}" y="${(M.y + fs * 0.35).toFixed(1)}" font-size="${fs.toFixed(1)}" font-weight="600" fill="#1C2530" text-anchor="end">${txt}</text>`;
+        else out += `<text x="${(M.x + sep).toFixed(1)}" y="${(M.y + fs * 0.35).toFixed(1)}" font-size="${fs.toFixed(1)}" font-weight="600" fill="#1C2530" text-anchor="start">${txt}</text>`;
+      });
+    });
+    return out + '</g>' + sueltas;
+  }
+  function fpMarcoVista(svgW, svgH, u, data, floorNum){
+    const company = esc(($('#companyName') && $('#companyName').value) || 'Scanova360');
+    const job = (data && data.job) || fpJobInfo();
+    const quien = esc([job.client, job.address].filter(Boolean).join(' · '));
+    const m = Math.round(u * 0.6), hH = u * 3.6, hF = u * 3.2;
+    const lv = floorplanLevels(data);
+    const iNivel = Math.max(0, lv.indexOf(floorNum));
+    const nombreNivel = (data && data._nivelBase) ? (fpPlantaDeNivel(data, floorNum) || ('Floor ' + floorNum)) : ('Floor ' + floorNum);
+    const hayDudosas = (data.rooms || []).some(r => !r.deleted && (r.level || 1) === floorNum && (r.walls || []).some(w => w.confidence === 'low'));
+    let o = `<g class="fp-marco" style="pointer-events:none;" font-family="'IBM Plex Sans',sans-serif">`;
+    o += `<rect x="${m}" y="${m}" width="${svgW - 2*m}" height="${svgH - 2*m}" fill="none" stroke="#8d96a2" stroke-width="1.5"/>`;
+    // encabezado
+    o += `<text x="${m + u}" y="${m + u * 1.55}" font-size="${(u * 1.05).toFixed(1)}" font-weight="700" letter-spacing="1.2" fill="#1C2530">${company.toUpperCase()}</text>`;
+    if(quien) o += `<text x="${m + u}" y="${m + u * 2.75}" font-size="${(u * 0.78).toFixed(1)}" font-weight="500" fill="#4a5462">${quien}</text>`;
+    o += `<text x="${svgW - m - u}" y="${m + u * 1.75}" font-size="${(u * 0.95).toFixed(1)}" font-weight="700" letter-spacing="1" fill="#8d96a2" text-anchor="end">DRAFT • FOR REVIEW</text>`;
+    o += `<line x1="${m + u * 0.6}" y1="${m + hH}" x2="${svgW - m - u * 0.6}" y2="${m + hH}" stroke="#8d96a2" stroke-width="1.2"/>`;
+    // pie: cinco casillas
+    const yT = svgH - m - hF, yTxt = yT + hF * 0.56, ancho = svgW - 2*m;
+    o += `<line x1="${m + u * 0.6}" y1="${yT}" x2="${svgW - m - u * 0.6}" y2="${yT}" stroke="#8d96a2" stroke-width="1.2"/>`;
+    const cols = [0.2, 0.2, 0.2, 0.28, 0.12];
+    const celdas = [
+      `<tspan fill="#4a5462">Level:</tspan> <tspan font-weight="700">${esc(nombreNivel)}</tspan>`,
+      `<tspan fill="#4a5462">Units:</tspan> <tspan font-weight="700">ft / in</tspan>`,
+      `<tspan fill="#4a5462">Scale:</tspan> <tspan font-weight="700">Not to scale</tspan>`,
+      null,
+      `Page <tspan font-weight="700">${iNivel + 1}</tspan> of <tspan font-weight="700">${Math.max(1, lv.length)}</tspan>`,
+    ];
+    let x = m;
+    cols.forEach((c, i) => {
+      const w = ancho * c;
+      if(i) o += `<line x1="${x}" y1="${yT + hF * 0.22}" x2="${x}" y2="${yT + hF * 0.82}" stroke="#8d96a2" stroke-width="1"/>`;
+      if(celdas[i]) o += `<text x="${x + u * 0.9}" y="${yTxt}" font-size="${(u * 0.82).toFixed(1)}" fill="#1C2530">${celdas[i]}</text>`;
+      else {
+        o += `<text x="${x + u * 0.7}" y="${yT + hF * 0.42}" font-size="${(u * 0.62).toFixed(1)}" fill="#3a4452">Measurements from the LiDAR scan; verify before final export.</text>`;
+        o += `<text x="${x + u * 0.7}" y="${yT + hF * 0.74}" font-size="${(u * 0.62).toFixed(1)}" fill="#3a4452">${hayDudosas ? 'Red dashed wall = verify measurement.' : 'Dimensions are wall-to-wall at the wall center.'}</text>`;
+      }
+      x += w;
+    });
+    return o + '</g>';
+  }
   function buildFloorplanSvgMerged(data, level){
     const onLevel = r => level == null || (r.level||1) === level;
     // Voice-deleted rooms (room.deleted, the native soft flag) are
@@ -2511,12 +2305,24 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
     // clipped, which on an insurance document reads as missing
     // measurements. 3ft leaves the full dimension string comfortably
     // inside the sheet on every side.
-    const pad = FP_VISTA_LIMPIA ? 1.0 : 3.0;
-    minX-=pad; minY-=pad; maxX+=pad; maxY+=pad;
+    const pad = 3.0;
+    // Vista (su diseño, 14-oct): más margen a los lados para las cadenas de medidas, y arriba/abajo el alto
+    // del encabezado y del pie del marco. Va dentro del margen en pies, así X()/Y() no cambian y el editor
+    // sigue tocando donde debe.
+    const vista = fpVista();
+    const bEdif = { minX, minY, maxX, maxY };
+    let padL = pad, padR = pad, padT = pad, padB = pad, vu = 0;
+    if(vista){
+      vu = Math.max(16, Math.min(34, (maxX - minX + 9) * FLOORPLAN_SVG_SCALE / 90));
+      padL = padR = 4.6;
+      padT = 3.3 + (vu * 3.6) / FLOORPLAN_SVG_SCALE;
+      padB = 2.8 + (vu * 3.2) / FLOORPLAN_SVG_SCALE;
+    }
+    minX-=padL; minY-=padT; maxX+=padR; maxY+=padB;
     const w = Math.max(1, maxX-minX), h = Math.max(1, maxY-minY);
     const scale = FLOORPLAN_SVG_SCALE;
     const svgW = w*scale, svgH = h*scale;
-    const totalSvgH = svgH + (fpSheetExport ? 0 : FLOORPLAN_STAMP_HEIGHT);
+    const totalSvgH = svgH + ((fpSheetExport || vista) ? 0 : FLOORPLAN_STAMP_HEIGHT);
     const X = x => (x-minX)*scale;
     const Y = y => (y-minY)*scale;
 
@@ -2529,7 +2335,7 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
     // shrinking it until the numbers disappear.
     let s = `<svg viewBox="0 0 ${svgW} ${totalSvgH}" width="${svgW}" height="${totalSvgH}" data-fp-minx="${minX}" data-fp-miny="${minY}" data-fp-scale="${scale}" style="display:block; background:#fff;" xmlns="http://www.w3.org/2000/svg">`;
     s += fpDefs();
-    if(!fpSheetExport) s += `<rect x="1" y="1" width="${svgW-2}" height="${totalSvgH-2}" fill="none" stroke="#dfe4ea" stroke-width="1"/>`;
+    if(!fpSheetExport && !vista) s += `<rect x="1" y="1" width="${svgW-2}" height="${totalSvgH-2}" fill="none" stroke="#dfe4ea" stroke-width="1"/>`;
     const buildingCentroid = floorplanBuildingCentroid(rooms);
     // Top layer, painted after EVERY room's content: dimension lines and
     // room labels can never be covered by another room's furniture.
@@ -2544,9 +2350,14 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
       if(!(room.walls||[]).length || !onLevel(room) || room.deleted) return;
       s += fpRoomFloorFill(room, X, Y);
     });
+    // Muebles de TODOS los cuartos primero y luego las paredes de todos: así el mueble de un cuarto tampoco
+    // tapa la pared del cuarto de al lado (los cuartos se dibujan uno tras otro).
+    const capaMuebles = [];
+    let paredes = '';
+    fpEspaciosDelPlano = (data._spaceLabels || []).filter(sp => level == null || (sp.level || 1) === level);
     (data.rooms||[]).forEach((room, idx) => {
       if(!(room.walls||[]).length || !onLevel(room) || room.deleted) return;
-      s += buildFloorplanRoomContent(room, idx, X, Y, scale, rooms, buildingCentroid, overlays, drawnObjectKeys, true);
+      paredes += buildFloorplanRoomContent(room, idx, X, Y, scale, rooms, buildingCentroid, overlays, drawnObjectKeys, true, capaMuebles);
       // A manually-positioned label anchors at the PLAIN geometric
       // center plus its own saved offset - the learned bias only steers
       // rooms with no manual override (applying it under an override
@@ -2555,8 +2366,11 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
       // the guaranteed-inside geometric center, nudged by the pattern
       // of past manual corrections. Wrapped in one draggable <g> so the
       // whole name/area/dimensions stack moves together.
-      const c = room._labelOffsetPx ? floorplanLabelAnchor(room) : floorplanSmartLabelAnchor(room);
-      const labelOff = room._labelOffsetPx || {dx:0, dy:0};
+      // Vista (su pedido, 14-oct): un nombre que se movió a mano con el dibujo de ANTES quedaba en una
+      // esquina (el Master Bedroom real). En la vista solo cuenta lo que se movió en la vista misma.
+      const offVale = room._labelOffsetPx && (!vista || room._labelVista);
+      const c = offVale ? floorplanLabelAnchor(room) : floorplanSmartLabelAnchor(room);
+      const labelOff = offVale ? room._labelOffsetPx : {dx:0, dy:0};
       const labelX = X(c.x) + labelOff.dx, labelY = Y(c.y) + labelOff.dy;
       const label = esc((room.roomName || `Room ${idx+1}`).toUpperCase());
       // "approx." after the unit, not inside the number - a room whose
@@ -2578,7 +2392,7 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
       const kAuto = areaNum > 0 && areaNum < 45 ? Math.max(0.55, Math.sqrt(areaNum/45)) : 1;
       // Per-room label scale (A-/A+ in the room panel) rides ON TOP of the
       // automatic small-room shrink, so "make it bigger" works everywhere.
-      const k = FP_VISTA_LIMPIA ? fpKVista(label, dimTxt, rb, X, Y, labelX, labelY) : kAuto * (room._labelScale || 1);
+      const k = kAuto * (room._labelScale || 1);
       const f = v => (v*k).toFixed(1);
       // Room span markers (Measure toggle): ONLY small triangles, one
       // pointing at each wall the room runs to - no connecting lines
@@ -2586,7 +2400,7 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
       // lines"). Each sits just INSIDE the room, clear of the black wall
       // body, so it reads plainly on the white floor. Viewer only; never
       // on the exported sheet, which stays a clean professional document.
-      if(!fpSheetExport && fpMeasurePrefs.extents !== false && areaNum >= 20){
+      if(!fpSheetExport && !vista && fpMeasurePrefs.extents !== false && areaNum >= 20){
         const span = fpRoomSpanAt(fpOrderedRoomPolygon(room), c);
         // Span crossings land on wall CENTERLINES - pull each marker in
         // by half the wall thickness plus a gap so it floats visibly on
@@ -2614,25 +2428,37 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
       // Stack order per explicit instruction: room name, then the room's
       // DIMENSIONS, then the square footage under them. Pushed to the
       // overlay layer so no later room's furniture can paint over it.
-      const labelLines = fpMeasurePrefs.roomArea
-        ? `<text x="${labelX}" y="${labelY-(FP_VISTA_LIMPIA ? 32 : 48)*k}" font-size="${f(30)}" font-weight="700" letter-spacing="0.5" font-family="'IBM Plex Sans',sans-serif" fill="#1C2530" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="${f(6)}">${label}</text>`
-          + `<text x="${labelX}" y="${labelY+(FP_VISTA_LIMPIA ? 2 : -14)*k}" font-size="${f(23)}" font-weight="700" font-family="'IBM Plex Mono',monospace" fill="#3A4552" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="${f(6)}">${dimTxt}</text>`
-          + (FP_VISTA_LIMPIA ? '' : `<text x="${labelX}" y="${labelY+18*k}" font-size="${f(23)}" font-weight="700" font-family="'IBM Plex Mono',monospace" fill="#3A4552" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="${f(6)}">${areaTxt}</text>`)
+      const hueco = vista ? fpHuecoDelNombre(room, c, rooms) : null;
+      if(hueco){ hueco.correr = !offVale; hueco.xPx = X(hueco.xC); }   // un nombre movido a mano no se corre
+      const bloque = vista ? fpBloqueVista(room, label, areaTxt, rb, scale, X, Y, labelX, labelY, room._labelScale || 1, hueco, rooms, minX, minY, offVale) : null;
+      if(bloque && bloque.flechas) overlays.push(`<g class="fp-extent" style="pointer-events:none;">${bloque.flechas}</g>`);
+      const labelLines = vista ? bloque.svg : fpMeasurePrefs.roomArea
+        ? `<text x="${labelX}" y="${labelY-48*k}" font-size="${f(30)}" font-weight="700" letter-spacing="0.5" font-family="'IBM Plex Sans',sans-serif" fill="#1C2530" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="${f(6)}">${label}</text>`
+          + `<text x="${labelX}" y="${labelY-14*k}" font-size="${f(23)}" font-weight="700" font-family="'IBM Plex Mono',monospace" fill="#3A4552" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="${f(6)}">${dimTxt}</text>`
+          + `<text x="${labelX}" y="${labelY+18*k}" font-size="${f(23)}" font-weight="700" font-family="'IBM Plex Mono',monospace" fill="#3A4552" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="${f(6)}">${areaTxt}</text>`
         : `<text x="${labelX}" y="${labelY}" font-size="${f(30)}" font-weight="700" letter-spacing="0.5" font-family="'IBM Plex Sans',sans-serif" fill="#1C2530" text-anchor="middle" paint-order="stroke" stroke="#fff" stroke-width="${f(6)}">${label}</text>`;
       overlays.push(`<g class="fp-roomlabel" data-room-idx="${idx}" style="cursor:grab;">${labelLines}</g>`);
       // Auto-detected sub-areas (closet/laundry alcoves): name + own
       // dimensions, the way a pro plan annotates them. Tappable to
       // rename in Edit Plan.
+      // Sin nombres repetidos (su pedido, 14-oct): un rincón detectado con el MISMO nombre que su cuarto (un
+      // cuarto que el personal llamó "Closet" con un rincón que la app también llamó closet) no se escribe dos veces.
+      const nomCuarto = fpNombreClave(room.roomName);
       (room._subAreas||[]).forEach((sa, si) => {
+        if(nomCuarto && fpNombreClave(sa.name) === nomCuarto) return;
         overlays.push(fpAnnotationLabelSvg(X, Y, 'fp-subarea',
           `data-room-idx="${idx}" data-sub-idx="${si}"`, sa, sa.cx, sa.cy, sa.name, sa.w, sa.d));
       });
     });
+    s += capaMuebles.join('') + paredes;
     // Hand-named open spaces (AI Fix asks, the human answers): a label
     // with dimensions on an area no scanned room claims - annotation
     // only, honest that no geometry was invented there.
     (data._spaceLabels||[]).forEach((sp, si) => {
       if(level != null && (sp.level||1) !== level) return;
+      // Un "espacio sin cuarto" que cae ADENTRO de un cuarto escaneado no es un espacio aparte: es un rótulo
+      // suelto encima del nombre de ese cuarto (en el plano real, "LAUNDRY ROOM" encima del Master Bedroom).
+      if(rooms.some(r => { const pg = fpOrderedRoomPolygon(r); return pg && pg.length >= 3 && !fpAiFragileOutline(r) && fpPointInPolygon({ x: sp.x, y: sp.y }, pg); })) return;
       overlays.push(fpAnnotationLabelSvg(X, Y, 'fp-spacelabel',
         `data-space-idx="${si}"`, sp, sp.x, sp.y, sp.name, sp.w, sp.d));
     });
@@ -2678,11 +2504,12 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
       legendKinds = [...new Set(waterMarks.map(m => m.kind || 'water'))];
     }
     s += overlays.join('');
+    if(vista) s += fpCadenasCotas(rooms, bEdif, buildingCentroid, X, Y, scale);
     if(!fpSheetExport){
       // One legend line per kind actually used on this floor.
       legendKinds.forEach((k, ki) => {
         const kd = legendDefs[k] || Object.values(legendDefs)[0];
-        const ly = svgH - 88 - ki*22;
+        const ly = (vista ? Y(bEdif.maxY) + 1.6*scale + 30 : svgH - 88) - ki*22;
         s += `<g><rect x="16" y="${ly}" width="26" height="12" rx="6" fill="${kd.color}"/>`
           + `<text x="50" y="${ly+11}" font-size="15" font-weight="600" fill="${kd.legendColor}">${kd.legend} (drawn by hand)</text></g>`;
       });
@@ -2698,10 +2525,14 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
       // ve en la pantalla — el papel lleva el suyo en la banda —, pero decia
       // "FLOOR 1" encima del dibujo de un sotano, que es la misma mentira.
       const sello = ((data && data._nivelBase) ? (fpPlantaDeNivel(data, floorNum) || '') : '') || ('FLOOR ' + floorNum);
-      s += `<text x="16" y="${svgH-64}" font-size="24" font-weight="700" letter-spacing="1" font-family="'IBM Plex Sans',sans-serif" fill="#1C2530">${esc(sello.toUpperCase())}</text>`;
-      s += fpTitleBlock(svgW, svgH, data);
+      if(vista){
+        s += fpMarcoVista(svgW, svgH, vu, data, floorNum);
+      } else {
+        s += `<text x="16" y="${svgH-64}" font-size="24" font-weight="700" letter-spacing="1" font-family="'IBM Plex Sans',sans-serif" fill="#1C2530">${esc(sello.toUpperCase())}</text>`;
+        s += fpTitleBlock(svgW, svgH, data);
+      }
     }
-    if(!FP_VISTA_LIMPIA) s += fpCompassAndScale(svgW, svgH, scale);
+    if(!vista) s += fpCompassAndScale(svgW, svgH, scale);
     s += `</svg>`;
     return s;
   }
@@ -2718,7 +2549,7 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
         return;
       }
       const b = floorplanRoomBounds(room);
-      const pad = FP_VISTA_LIMPIA ? 1.0 : 3.0; // same clipped-dimension-text fix as the merged view
+      const pad = 3.0; // same clipped-dimension-text fix as the merged view
       const minX = b.minX-pad, minY = b.minY-pad, maxX = b.maxX+pad, maxY = b.maxY+pad;
       const w = Math.max(1, maxX-minX), h = Math.max(1, maxY-minY);
       const scale = 60;
@@ -2729,7 +2560,7 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
       out += `<div style="margin-bottom:14px;"><div style="font-weight:600; margin-bottom:4px;">${label} — ${areaTxt} sq ft</div>`;
       out += `<svg viewBox="0 0 ${svgW} ${svgH}" width="${svgW}" height="${svgH}" data-fp-minx="${minX}" data-fp-miny="${minY}" data-fp-scale="${scale}" data-fp-room-idx="${idx}" style="display:block; background:#fff;" xmlns="http://www.w3.org/2000/svg">`;
       out += fpDefs();
-      if(!FP_VISTA_LIMPIA) out += `<rect x="1" y="1" width="${svgW-2}" height="${svgH-2}" fill="none" stroke="#dfe4ea" stroke-width="1"/>`;
+      out += `<rect x="1" y="1" width="${svgW-2}" height="${svgH-2}" fill="none" stroke="#dfe4ea" stroke-width="1"/>`;
       out += buildFloorplanRoomContent(room, idx, X, Y, scale);
       (room._subAreas||[]).forEach((sa, si) => {
         const sx = X(sa.cx), sy = Y(sa.cy);
@@ -2761,7 +2592,7 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
         });
       }
       out += '</g>';
-      if(!FP_VISTA_LIMPIA) out += fpCompassAndScale(svgW, svgH, scale);
+      out += fpCompassAndScale(svgW, svgH, scale);
       out += `</svg></div>`;
     });
     return out;
@@ -2769,8 +2600,5 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
   function buildFloorplanSvg(data, level){
     return data.merged ? buildFloorplanSvgMerged(data, level) : buildFloorplanSvgUnmerged(data, level);
   }
-  const two = n => String(n).padStart(2,'0');
-  let FP_VISTA_LIMPIA = false;
-  function fpKVista(label, dimTxt, rb, X, Y, lx, ly){ const w = 2 * Math.min(lx - X(rb.minX), X(rb.maxX) - lx) * 0.88, h = 2 * Math.min(ly - Y(rb.minY), Y(rb.maxY) - ly) * 0.8; const ancho = Math.max(0.64 * 30 * String(label).replace(/&[a-z#0-9]+;/g, 'x').length, 0.6 * 23 * String(dimTxt).length); return Math.max(0.5, Math.min(2.4, w / ancho, h / 70)); }
-  export function ponerVista(limpia){ FP_VISTA_LIMPIA = !!limpia; fpSheetExport = !!limpia; }
-export { buildFloorplanSvg, buildFloorplanSvgUnmerged, floorplanLevels, fpRoomDisplayAreaSqFt, fpDisplayTotalAreaSqFt, fpOrderedRoomPolygon, fpPolygonAreaSqFt, fpFeetInches, fpPlanMeasurements, fpRoomMeasurements, floorplanIsExteriorWall, floorplanAlignRooms, floorplanRectifyWalls, floorplanRefineGeometry, floorplanCloseCorners };
+  export function ponerVista(limpia){ fpEstiloVista = !!limpia; fpSheetExport = false; }
+export { buildFloorplanSvg, buildFloorplanSvgUnmerged, floorplanLevels, fpRoomDisplayAreaSqFt, fpDisplayTotalAreaSqFt, fpOrderedRoomPolygon, fpPolygonAreaSqFt, fpFeetInches, fpPlanMeasurements, fpRoomMeasurements, floorplanIsExteriorWall, floorplanAlignRooms, floorplanRectifyWalls, floorplanRefineGeometry, floorplanCloseCorners, floorplanDetectSubAreas, fpReconocerClosets };

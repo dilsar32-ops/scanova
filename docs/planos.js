@@ -2,8 +2,8 @@
 // (el mismo escáner de Field Reports, que ya viene dentro de la app: plugin RoomScan) y se dibuja con el
 // mismo código de Field Reports (plano.js, copiado por tools/extraer_plano.py). Un escaneo por piso;
 // un escaneo nuevo no borra el anterior (queda de historial), se ve el más reciente.
-import * as plano from './plano.js?v=2026-10-14-1';
-import { authFetch, esAparato } from './app.js?v=2026-10-14-1';
+import * as plano from './plano.js?v=2026-10-14-2';
+import { authFetch, esAparato } from './app.js?v=2026-10-14-2';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
@@ -46,11 +46,14 @@ export function prepararPlano(data){
   // 14-oct). Un nombre puesto después a mano (roomName) siempre gana.
   // "Nuevo cuarto"/"Otro cuarto" es la orden de pasar al siguiente, no un nombre: el iPhone lo guardaba como
   // nombre (ya arreglado en el aparato) y esos cuartos se quedan como Room N hasta que les pongan uno.
-  (d.rooms || []).forEach(r => { const v = String(r && r.voiceName || '').trim(); if(r && !String(r.roomName || '').trim() && v && !esOrdenDeCuarto(v)){ r.roomName = v; r._namedByVoice = true; } });
+  (d.rooms || []).forEach(r => { const v = String(r && r.voiceName || '').trim(); if(r && !String(r.roomName || '').trim() && v && !esOrdenDeCuarto(v)){ r.roomName = v; r._namedByVoice = true; delete r._labelOffsetPx; } });
+  // Clósets, baños chicos y lavandería: los nombra fpReconocerClosets (el mismo código de Field Reports), más abajo.
   try{
     plano.floorplanAlignRooms(d);
     if(!d._handEdited){ plano.floorplanRectifyWalls(d); plano.floorplanRefineGeometry(d); plano.floorplanCloseCorners(d); }
   }catch(e){ console.warn('enderezar plano', e); }
+  // Clósets y rincones (su pedido, 14-oct): la app los reconoce y los nombra igual que Field Reports.
+  try{ plano.floorplanDetectSubAreas(d); }catch(e){ console.warn('closets', e); }
   LISTOS.set(data, d); return d;
 }
 // limpia = la vista de la pantalla (solo el plano, su pedido del 13-oct); sin limpia = la hoja completa del PDF/exportar.

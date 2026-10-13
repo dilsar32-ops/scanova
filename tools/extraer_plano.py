@@ -9,7 +9,9 @@ ROOTS = ['buildFloorplanSvg', 'buildFloorplanSvgUnmerged', 'floorplanLevels', 'f
          'fpDisplayTotalAreaSqFt', 'fpOrderedRoomPolygon', 'fpPolygonAreaSqFt', 'fpFeetInches',
          'fpPlanMeasurements', 'fpRoomMeasurements', 'floorplanIsExteriorWall',
          # lo que Field Reports le hace a cada escaneo al recibirlo: enderezarlo, escuadrarlo, cerrar esquinas
-         'floorplanAlignRooms', 'floorplanRectifyWalls', 'floorplanRefineGeometry', 'floorplanCloseCorners']
+         'floorplanAlignRooms', 'floorplanRectifyWalls', 'floorplanRefineGeometry', 'floorplanCloseCorners',
+         # reconocer clósets/rincones (su pedido del 14-oct): la misma detección de Field Reports
+         'floorplanDetectSubAreas', 'fpReconocerClosets']
 ROOTS += [r for r in (sys.argv[2].split(',') if len(sys.argv) > 2 else []) if r]
 defs = {}   # nombre -> (orden, texto)
 SIG = re.compile(r'\n  (?=[A-Za-z_$/])')
@@ -28,7 +30,8 @@ while cola:
     n = cola.pop()
     if n in need or n not in defs: continue
     need.add(n)
-    for t in set(ident.findall(defs[n][1])):
+    # Los comentarios no son código: un nombre mencionado en un comentario arrastraba medio Field Reports.
+    for t in set(ident.findall(re.sub(r'(?<![:\'"])//[^\n]*', '', defs[n][1]))):
         if t in defs and t not in need: cola.append(t)
 falta = [r for r in ROOTS if r not in defs]
 if falta: raise SystemExit('no encontré: ' + ', '.join(falta))
@@ -48,28 +51,11 @@ cab = ('// GENERADO por tools/extraer_plano.py desde Field Reports (no editar a 
        '/* eslint-disable */\nconst document = (typeof globalThis !== "undefined" && globalThis.document) || undefined;\n')
 out = cab + '\n'.join(t.rstrip() + ('' if t.rstrip().endswith((';', '}')) else ';') for _, n, t in partes)
 out += '\nexport { ' + ', '.join(ROOTS) + ' };\n'
-# VISTA LIMPIA (su pedido del 13-oct): en la pantalla se ve SOLO el plano, lo más grande posible —
-# paredes, puertas, ventanas y el nombre + medida de cada cuarto. Las medidas de cada pared, el sello,
-# la leyenda, la brújula y el margen ancho son de la hoja del PDF/exportar, que no cambia.
-VISTA = [
-  ("const pad = 3.0;", "const pad = FP_VISTA_LIMPIA ? 1.0 : 3.0;", 2),
-  ("if(effLen >= 0.25 && !seenNear('dim', midX, midY)){", "if(!FP_VISTA_LIMPIA && effLen >= 0.25 && !seenNear('dim', midX, midY)){", 1),
-  ("s += fpCompassAndScale(svgW, svgH, scale);", "if(!FP_VISTA_LIMPIA) s += fpCompassAndScale(svgW, svgH, scale);", 1),
-  ("out += fpCompassAndScale(svgW, svgH, scale);", "if(!FP_VISTA_LIMPIA) out += fpCompassAndScale(svgW, svgH, scale);", 1),
-  ('out += `<rect x="1" y="1" width="${svgW-2}" height="${svgH-2}"', 'if(!FP_VISTA_LIMPIA) out += `<rect x="1" y="1" width="${svgW-2}" height="${svgH-2}"', 1),
-  ("if(fpMeasurePrefs.openings){", "if(fpMeasurePrefs.openings && !FP_VISTA_LIMPIA){", 2),
-  ('y="${labelY-48*k}"', 'y="${labelY-(FP_VISTA_LIMPIA ? 32 : 48)*k}"', 1),
-  ('y="${labelY-14*k}"', 'y="${labelY+(FP_VISTA_LIMPIA ? 2 : -14)*k}"', 1),
-  ('+ `<text x="${labelX}" y="${labelY+18*k}"', '+ (FP_VISTA_LIMPIA ? \'\' : `<text x="${labelX}" y="${labelY+18*k}"', 1),
-  ('${areaTxt}</text>`', '${areaTxt}</text>`)', 1),
-  # En la vista limpia el plano entra entero en la pantalla del teléfono: el nombre del cuarto crece
-  # hasta donde quepa DENTRO de su cuarto (nunca se sale), para que se pueda leer sin acercar.
-  ("const k = kAuto * (room._labelScale || 1);", "const k = FP_VISTA_LIMPIA ? fpKVista(label, dimTxt, rb, X, Y, labelX, labelY) : kAuto * (room._labelScale || 1);", 1),
-]
-for a, b, n in VISTA:
-    assert out.count(a) == n, ('vista limpia: esperaba %d de %r, hay %d' % (n, a, out.count(a)))
-    out = out.replace(a, b)
-out = out.replace('\nexport { ', "\n  let FP_VISTA_LIMPIA = false;\n  function fpKVista(label, dimTxt, rb, X, Y, lx, ly){ const w = 2 * Math.min(lx - X(rb.minX), X(rb.maxX) - lx) * 0.88, h = 2 * Math.min(ly - Y(rb.minY), Y(rb.maxY) - ly) * 0.8; const ancho = Math.max(0.64 * 30 * String(label).replace(/&[a-z#0-9]+;/g, 'x').length, 0.6 * 23 * String(dimTxt).length); return Math.max(0.5, Math.min(2.4, w / ancho, h / 70)); }\n  export function ponerVista(limpia){ FP_VISTA_LIMPIA = !!limpia; fpSheetExport = !!limpia; }\nexport { ", 1)
+# VISTA (su diseño del 14-oct): el estilo de la pantalla ya vive en Field Reports (fpEstiloVista / fpVista):
+# paredes unidas, ventanas de doble línea, nombre + sq ft, cadenas de medidas por fuera y el marco con
+# encabezado y pie. Scanova solo lo prende para la pantalla y lo apaga para la hoja que se exporta.
+assert 'let fpEstiloVista' in out and 'function fpVista()' in out, 'falta el estilo de la vista en Field Reports'
+out = out.replace('\nexport { ', "\n  export function ponerVista(limpia){ fpEstiloVista = !!limpia; fpSheetExport = false; }\nexport { ", 1)
 # Scanova no dice el nombre de la otra empresa en el sello del plano.
 out = out.replace("'Restoration Doctor'", "'Scanova360'")
 assert 'Restoration Doctor' not in out and 'RESTORATION DOCTOR' not in out, 'quedo el nombre de la otra empresa'
