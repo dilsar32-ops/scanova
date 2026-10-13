@@ -4,6 +4,8 @@ import ARKit
 import simd
 import Speech
 import AVFoundation
+import SceneKit
+import Vision
 
 enum RoomScanOutcome {
     case cancelled
@@ -87,6 +89,7 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
     ]
     // Como se llama el nivel N en esta casa.
     private func nombreDelNivel(_ n: Int) -> String {
+        if let propio = nombresDeNivel[n] { return Self.nombreVisible(propio) }
         guard let i0 = Self.plantaDelValor[nivelBase] else {
             // Un nivel con nombre propio del proyecto (Scanova): el primero se
             // llama como él; los de arriba, por número.
@@ -95,7 +98,13 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         let i = min(i0 + max(0, n - 1), Self.plantas.count - 1)
         return Self.plantas[i]
     }
+    private func nombrePlantaEstandar(_ n: Int) -> String? {
+        guard let i0 = Self.plantaDelValor[nivelBase] else { return n == 1 ? nivelBase : nil }
+        return Self.plantaValores[min(i0 + max(0, n - 1), Self.plantaValores.count - 1)]
+    }
+
     private func nombreHablado(_ n: Int) -> String {
+        if nombresDeNivel[n] != nil { return nombreDelNivel(n) }
         guard let i0 = Self.plantaDelValor[nivelBase] else { return nombreDelNivel(n) }
         return Self.plantasHabladas[min(i0 + max(0, n - 1), Self.plantasHabladas.count - 1)]
     }
@@ -367,6 +376,59 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
     private var posicionTimer: Timer?
     private var posicionCamara: CGPoint?
     private var terminarAlAcabarCuarto = false
+    private var campoTimer: Timer?
+    private var instruccionActual: String?
+    private var micTocadoEn: Date?
+    private var descartarCapturaActual = false
+    private var ignorarCampo = false
+    private var validacionGen = 0
+    private var instruccionApple: String?
+    private var instruccionCalidad: String?
+    private var enFlujoFinal = false
+    private var revisandoTodo = false
+    private var nombresDeNivel: [Int: String] = [:]
+    private var problemasFinales: [Problema] = []
+    private var segundoCerebro: [String: Any] = [:]
+    struct Problema { let grupo: Int; let tipo: String; let ft: Double; let a: CGPoint; let b: CGPoint }
+    private var siguienteAlAcabarCuarto = false
+    // COMPLETAR UN CUARTO (su "escanear solo lo que falta y unirlo", 13-oct).
+    // RoomPlan no deja reabrir un cuarto entregado, así que la parte que falta
+    // se escanea como una captura aparte (un "parche") y al terminar se une
+    // a su cuarto: las paredes que el cuarto ya tenía no se repiten.
+    private var completandoIndice: Int?
+    private var indicesParche = Set<Int>()
+    private var parcheDe: [Int: Int] = [:]
+    private var incompletos = Set<Int>()
+    private var huecosPorGrupo: [Int: [(CGPoint, CGPoint)]] = [:]
+    private struct Aviso { let grupo: Int; let titulo: String; let terminar: Bool }
+    private var aviso: Aviso?
+    private var enRevisionFinal = false
+    private var excluidosDelMerge: Set<Int> { deletedRoomIndices.union(indicesParche) }
+    private func parches(de g: Int) -> [Int] { parcheDe.filter { $0.value == g }.map { $0.key }.sorted() }
+    private func grupoDe(_ i: Int) -> Int { parcheDe[i] ?? i }
+    // El aviso ámbar y la revisión final, dentro de la misma bandeja.
+    private let avisoCaja = UIView()
+    private let avisoTitulo = UILabel()
+    private let avisoSub = UILabel()
+    private let completarButton = UIButton(type: .system)
+    private let continuarIgualButton = UIButton(type: .system)
+    private let avisoNota = UILabel()
+    private let avisoBadge = UILabel()
+    private let revisionCaja = UIStackView()
+    private let revisionSelector = UISegmentedControl(items: ["2D", "3D"])
+    private let revisionVisor = UIView()
+    private let planoGrande = MinimapaVista()
+    private let vista3D = SCNView()
+    private var tresDCargado = false
+    private let revisionDatos = UILabel()
+    private let guardarButton = UIButton(type: .system)
+    private let seguirButton = UIButton(type: .system)
+    private let otroNivelButton = UIButton(type: .system)
+    // La barra con el cuarto ya escogido (su diseño del 13-oct): "Kitchen ·
+    // First Floor", el campo, y "Siguiente cuarto" | "Terminar".
+    private let filaSiguiente = UIStackView()
+    private let siguienteButton = UIButton(type: .system)
+    private let terminarButton = UIButton(type: .system)
     // EL CUARTO EN VIVO (su "sí, dibujarlo en vivo" del 13-oct): se escucha
     // al escáner por un intermediario que le pasa TODO primero al dueño
     // original (la pantalla de Apple) y solo después nos da una copia, como
@@ -447,7 +509,7 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         // binary) exactly which build a field scan ran on - a scan came
         // back with a payload only an older build could emit, and this
         // removes that ambiguity permanently. Bump per deploy.
-        NSLog("[RoomScan] build tag: 2026-10-13-CAMARA-3 (bandeja plateada, minimapa en vivo, sonda)")
+        NSLog("[RoomScan] build tag: 2026-10-16 (segundo cerebro, un solo asistente)")
         view.backgroundColor = .black
         captureView.delegate = self
         // Sin el modelito 3D de Apple abajo: el plano en vivo ya está en el
@@ -480,7 +542,7 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         scanAnotherButton.setTitle("Escanear otro cuarto", for: .normal)
         nextLevelButton.setTitle("Otro nivel (ej. piso de arriba)", for: .normal)
         finishButton.setTitle("Terminar y unir plano", for: .normal)
-        cancelButton.addTarget(self, action: #selector(cancelTapped), for: .touchUpInside)
+        cancelButton.addTarget(self, action: #selector(cancelarBandejaTapped), for: .touchUpInside)
         doneButton.addTarget(self, action: #selector(doneTapped), for: .touchUpInside)
         // The app has been telling the tech "puedes escanearlo otra vez"
         // for months without giving him anywhere to do it - his only route
@@ -549,7 +611,8 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         // control. Muting fully tears down the audio engine (not just
         // ignores results) so it's honest about when the mic is live.
         micToggleButton.translatesAutoresizingMaskIntoConstraints = false
-        micToggleButton.addTarget(self, action: #selector(micToggleTapped), for: .touchUpInside)
+        micToggleButton.addTarget(self, action: #selector(micCampoTapped), for: .touchUpInside)
+        micToggleButton.addGestureRecognizer(UILongPressGestureRecognizer(target: self, action: #selector(micLargoTapped(_:))))
 
         // Brief confirmation caption ("Sala ✓") whenever a name is heard
         // or tapped while a room is actively being scanned - the room-done
@@ -630,8 +693,8 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         // de inicio del iPhone (nunca debajo de ella).
         let pieDeBandeja = sheetStack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -6)
         pieDeBandeja.priority = .defaultHigh
-        planCardW = planCard.widthAnchor.constraint(equalToConstant: 128)
-        planCardH = planCard.heightAnchor.constraint(equalToConstant: 116)
+        planCardW = planCard.widthAnchor.constraint(equalToConstant: 136)
+        planCardH = planCard.heightAnchor.constraint(equalToConstant: 124)
 
         NSLayoutConstraint.activate([
             floorPlanPanelView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
@@ -778,6 +841,8 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
             v.layer.shadowOffset = .zero
         }
 
+        // El letrero flotante del diseño viejo no sale nunca (todos sus caminos).
+        voiceCaptionLabel.alpha = 0
         // --- Linterna (arriba a la izquierda, con su nombre debajo)
         torchButton.translatesAutoresizingMaskIntoConstraints = false
         torchButton.backgroundColor = UIColor.white.withAlphaComponent(0.42)
@@ -868,8 +933,9 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         campo.autocorrectionType = .no
         campo.returnKeyType = .done
         campo.clearButtonMode = .never
-        campo.addTarget(self, action: #selector(campoListo), for: .editingDidEndOnExit)
+        campo.addTarget(self, action: #selector(campoReturn), for: .editingDidEndOnExit)
         campo.addTarget(self, action: #selector(campoCambio), for: .editingChanged)
+        campo.addTarget(self, action: #selector(campoListo), for: .editingDidEnd)
         micToggleButton.translatesAutoresizingMaskIntoConstraints = false
         micToggleButton.setTitle(nil, for: .normal)
         micToggleButton.layer.cornerRadius = 20
@@ -908,6 +974,18 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
             $0.widthAnchor.constraint(greaterThanOrEqualToConstant: 130).isActive = true
         }
 
+        Self.capsula(siguienteButton, titulo: "Siguiente cuarto", azul: true)
+        Self.capsula(terminarButton, titulo: "Terminar", azul: false)
+        siguienteButton.addTarget(self, action: #selector(siguienteTapped), for: .touchUpInside)
+        terminarButton.addTarget(self, action: #selector(terminarTapped), for: .touchUpInside)
+        siguienteButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        filaSiguiente.axis = .horizontal
+        filaSiguiente.spacing = 12
+        filaSiguiente.addArrangedSubview(siguienteButton)
+        filaSiguiente.addArrangedSubview(terminarButton)
+        siguienteButton.heightAnchor.constraint(equalToConstant: 52).isActive = true
+        terminarButton.heightAnchor.constraint(equalToConstant: 52).isActive = true
+        terminarButton.widthAnchor.constraint(equalTo: siguienteButton.widthAnchor, multiplier: 0.58).isActive = true
         terminarLink.setTitle("Terminar", for: .normal)
         terminarLink.setTitleColor(.systemBlue, for: .normal)
         terminarLink.titleLabel?.font = .systemFont(ofSize: 17, weight: .medium)
@@ -947,8 +1025,10 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         [relleno1, sheetStatusSpinner, sheetStatusLabel, relleno2].forEach { sheetStatusRow.addArrangedSubview($0) }
         relleno1.widthAnchor.constraint(equalTo: relleno2.widthAnchor).isActive = true
 
-        [sheetTitle, sheetSubRow, roomSummaryLabel, campoCaja, nivelesCaption, chipsScroll,
-         roomSplitButtonsStack, sheetDivider, buttonRow, promptStack, sheetStatusRow].forEach {
+        armarAvisoYRevision()
+        [sheetTitle, sheetSubRow, roomSummaryLabel, avisoCaja, completarButton, continuarIgualButton, avisoNota,
+         revisionCaja, campoCaja, nivelesCaption, chipsScroll,
+         roomSplitButtonsStack, sheetDivider, buttonRow, filaSiguiente, terminarLink, promptStack, sheetStatusRow].forEach {
             sheetStack.addArrangedSubview($0)
         }
         sheetStack.setCustomSpacing(2, after: sheetTitle)
@@ -981,21 +1061,40 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
 
     // Lo escrito o dictado -> uno de los niveles del proyecto. Primero por su
     // nombre tal cual; después por las palabras de siempre (en los dos idiomas).
+    // Lo escrito o dictado -> uno de los niveles del proyecto. Por PALABRAS
+    // enteras ("espérame un segundo" ya no es Second Floor) y solo frases
+    // cortas; un número solo cuenta si viene casi solo ("2", "piso 2").
     private func nivelDeTexto(_ texto: String) -> String? {
         let t = Self.sinAcentos(texto)
         guard !t.isEmpty else { return nil }
+        let tokens = t.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
+        guard !tokens.isEmpty, tokens.count <= 3 else { return nil }
         for v in nivelesDelProyecto {
             let a = Self.sinAcentos(v), b = Self.sinAcentos(Self.nombreVisible(v))
-            if t == a || t == b || t.contains(b) || t.contains(a) { return v }
+            if t == a || t == b { return v }
         }
-        let claves: [(String, [String])] = [
-            ("Basement", ["sotano", "basement"]),
-            ("Attic", ["atico", "attic", "tico"]),
-            ("3rd Floor", ["tercer", "third", "3"]),
-            ("2nd Floor", ["segund", "second", "2"]),
-            ("1st Floor", ["primer", "first", "planta baja", "1"])
+        for v in nivelesDelProyecto {
+            let a = Self.sinAcentos(v), b = Self.sinAcentos(Self.nombreVisible(v))
+            if (a.count >= 4 && t.contains(a)) || (b.count >= 4 && t.contains(b)) { return v }
+        }
+        let pisoWords: Set<String> = ["piso", "floor", "nivel", "planta", "level"]
+        let soloOConPiso = tokens.count == 1 || (tokens.count <= 3 && tokens.contains(where: { pisoWords.contains($0) }))
+        // Sótano y ático se reconocen solos; los ordinales ("segundo",
+        // "primero", "2") solo si van solos o con piso/nivel/floor/planta:
+        // "espérame un segundo" ya no es Second Floor.
+        let tiene: (String) -> Bool = { w in
+            let esLugar = ["sotano", "basement", "atico", "attic"].contains(w)
+            return tokens.contains(w) && (esLugar || soloOConPiso)
+        }
+        let numeroSolo = soloOConPiso
+        let claves: [(String, [String], String)] = [
+            ("Basement", ["sotano", "basement"], ""),
+            ("Attic", ["atico", "attic"], ""),
+            ("3rd Floor", ["tercer", "tercero", "third"], "3"),
+            ("2nd Floor", ["segundo", "second"], "2"),
+            ("1st Floor", ["primer", "primero", "first"], "1")
         ]
-        for (valor, palabras) in claves where palabras.contains(where: { t.contains($0) }) {
+        for (valor, palabras, digito) in claves where palabras.contains(where: tiene) || (numeroSolo && !digito.isEmpty && tokens.contains(digito)) {
             if let v = nivelesDelProyecto.first(where: { $0 == valor || Self.sinAcentos(Self.nombreVisible($0)) == Self.sinAcentos(Self.nombreVisible(valor)) }) {
                 return v
             }
@@ -1013,13 +1112,32 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
     // hasta Terminar. La bandeja cambia a "Seleccionar cuarto".
     @objc private func continuarTapped() {
         guard let v = nivelSeleccionado, !v.isEmpty else { return }
-        campo.resignFirstResponder()
+        cerrarCampoSinAplicar()
         let primeraVez = eligiendoNivel && capturedRooms.isEmpty && !cambiandoNivel
         if capturedRooms.isEmpty {
             nivelBase = v
-        } else if let i0 = Self.plantaValores.firstIndex(of: nivelBase),
+            nombresDeNivel = Self.plantaValores.contains(v) ? [:] : [1: v]
+            currentLevel = 1
+        } else if nombresDeNivel.isEmpty, let i0 = Self.plantaValores.firstIndex(of: nivelBase),
                   let i1 = Self.plantaValores.firstIndex(of: v), i1 - i0 + 1 >= 1 {
             currentLevel = i1 - i0 + 1
+        } else if !nombresDeNivel.isEmpty || Self.plantaDelValor[nivelBase] == nil || Self.plantaDelValor[v] == nil {
+            // Al mezclar niveles con nombre propio, TODOS van por nombre: se
+            // anotan primero los que ya se usaron, para que nunca dos niveles
+            // distintos compartan número.
+            if nombresDeNivel.isEmpty {
+                for lvl in Set(roomLevels + [currentLevel]) { nombresDeNivel[lvl] = nombrePlantaEstandar(lvl) ?? nivelBase }
+            }
+            // Niveles con nombre propio (los del trabajo en Scanova): cada uno
+            // con su número, por el nombre; el mismo nombre vuelve al mismo nivel.
+            if nombresDeNivel.isEmpty { nombresDeNivel[1] = nivelBase }
+            if let k = nombresDeNivel.first(where: { $0.value == v })?.key {
+                currentLevel = k
+            } else {
+                let k = (Array(nombresDeNivel.keys) + roomLevels + [currentLevel]).max()! + 1
+                nombresDeNivel[k] = v
+                currentLevel = k
+            }
         } else if v != nivelBase {
             // Un plano guarda los niveles contados desde el primero que se
             // escaneó; uno de abajo no cabe en el mismo plano.
@@ -1068,21 +1186,67 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
     // MARK: Campo, chips y botones
 
     @objc private func campoCambio() {
-        guard eligiendoNivel else { return }
         let t = (campo.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        nivelSeleccionado = nivelDeTexto(t) ?? (t.isEmpty ? nil : t)
-        pintarBandeja()
+        if eligiendoNivel {
+            nivelSeleccionado = nivelDeTexto(t) ?? (t.isEmpty ? nil : t)
+            pintarBandeja()
+        }
+        // Lo escrito (o dictado con el teclado) se guarda solo al dejar de
+        // escribir: ya no hay que tocar un botón de abajo para que cuente.
+        campoTimer?.invalidate()
+        campoTimer = Timer.scheduledTimer(withTimeInterval: 1.4, repeats: false) { [weak self] _ in
+            self?.aplicarCampo(final: false)
+        }
+    }
+
+    private func aplicarCampo(final: Bool) {
+        campoTimer?.invalidate()
+        campoTimer = nil
+        let t = (campo.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        if eligiendoNivel {
+            // Solo pasa solo si es uno de los niveles del proyecto; un nombre
+            // propio espera a que toque Continuar.
+            if let v = nivelDeTexto(t) {
+                seleccionarNivel(v)
+                let exacto = Self.sinAcentos(t) == Self.sinAcentos(v) || Self.sinAcentos(t) == Self.sinAcentos(Self.nombreVisible(v))
+                if final || exacto { continuarTapped() }
+            }
+            return
+        }
+        guard state == .scanningRoom || state == .roomDonePrompt, aviso == nil, !enRevisionFinal, !revisandoTodo else { return }
+        let crudo = nombreActual() ?? ""
+        guard Self.sinAcentos(t) != Self.sinAcentos(crudo), Self.sinAcentos(t) != Self.sinAcentos(Self.enIngles(crudo)) else {
+            if final { animarBandeja() }
+            return
+        }
+        applyHeardOrTappedName(t, viaButton: true)
+        if final { animarBandeja() }
+    }
+
+    @objc private func campoReturn() {}
+
+    // Cerrar el teclado SIN que cuente lo escrito (Cancelar, o un botón que
+    // ya decidió otra cosa).
+    private func cerrarCampoSinAplicar() {
+        campoTimer?.invalidate()
+        campoTimer = nil
+        ignorarCampo = true
+        campo.resignFirstResponder()
+        ignorarCampo = false
     }
 
     @objc private func campoListo() {
+        if ignorarCampo { return }
         let t = (campo.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if eligiendoNivel {
             if !t.isEmpty { nivelSeleccionado = nivelDeTexto(t) ?? t }
             pintarBandeja()
+            aplicarCampo(final: true)
             return
         }
         guard !t.isEmpty else { pintarNombre(); return }
-        applyHeardOrTappedName(t, viaButton: true)
+        aplicarCampo(final: true)
     }
 
     private func nombresDeCuarto() -> [String] {
@@ -1176,9 +1340,9 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
             campo.placeholder = "Escribe o dicta el nivel"
             if !campo.isEditing { campo.text = nivelSeleccionado.map { Self.nombreVisible($0) } }
         } else {
-            let n = state == .roomDonePrompt ? capturedRooms.count : capturedRooms.count + 1
+            let n = state == .roomDonePrompt ? max(numeroSiguiente - 1, 1) : numeroSiguiente
             campo.placeholder = "Cuarto \(n) · escribe o dicta"
-            if !campo.isEditing { campo.text = nombreActual() }
+            if !campo.isEditing { campo.text = nombreActual().map { Self.enIngles($0) } }
         }
         pintarBandeja()
         refrescarMinimapa()
@@ -1192,16 +1356,507 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         micToggleButton.tintColor = .white
     }
 
+    private func armarAvisoYRevision() {
+        // El aviso ámbar: "Falta un lado del cuarto / Puedes completarlo o continuar."
+        avisoCaja.backgroundColor = UIColor(red: 1.0, green: 0.93, blue: 0.80, alpha: 0.92)
+        avisoCaja.layer.cornerRadius = 22
+        avisoCaja.layer.cornerCurve = .continuous
+        avisoCaja.layer.borderWidth = 1
+        avisoCaja.layer.borderColor = UIColor.white.withAlphaComponent(0.8).cgColor
+        let icono = UIImageView(image: UIImage(systemName: "exclamationmark.triangle.fill",
+                                               withConfiguration: UIImage.SymbolConfiguration(pointSize: 24, weight: .semibold)))
+        icono.tintColor = .systemOrange
+        icono.contentMode = .scaleAspectFit
+        icono.translatesAutoresizingMaskIntoConstraints = false
+        icono.setContentHuggingPriority(.required, for: .horizontal)
+        avisoTitulo.font = .systemFont(ofSize: 18, weight: .semibold)
+        avisoTitulo.textColor = UIColor(red: 0.55, green: 0.33, blue: 0.0, alpha: 1)
+        avisoSub.font = .systemFont(ofSize: 15)
+        avisoSub.textColor = Self.tintaSuave
+        avisoSub.text = "Puedes completarlo o continuar."
+        let textos = UIStackView(arrangedSubviews: [avisoTitulo, avisoSub])
+        textos.axis = .vertical
+        textos.spacing = 2
+        textos.translatesAutoresizingMaskIntoConstraints = false
+        avisoCaja.addSubview(icono)
+        avisoCaja.addSubview(textos)
+        NSLayoutConstraint.activate([
+            icono.leadingAnchor.constraint(equalTo: avisoCaja.leadingAnchor, constant: 22),
+            icono.centerYAnchor.constraint(equalTo: avisoCaja.centerYAnchor),
+            icono.widthAnchor.constraint(equalToConstant: 30),
+            icono.heightAnchor.constraint(equalToConstant: 28),
+            textos.leadingAnchor.constraint(equalTo: icono.trailingAnchor, constant: 16),
+            textos.trailingAnchor.constraint(equalTo: avisoCaja.trailingAnchor, constant: -16),
+            textos.topAnchor.constraint(equalTo: avisoCaja.topAnchor, constant: 14),
+            textos.bottomAnchor.constraint(equalTo: avisoCaja.bottomAnchor, constant: -14)
+        ])
+        Self.capsula(completarButton, titulo: "Completar escaneo", azul: true)
+        Self.capsula(continuarIgualButton, titulo: "Continuar de todos modos", azul: false)
+        for b in [completarButton, continuarIgualButton] {
+            b.heightAnchor.constraint(equalToConstant: 52).isActive = true
+            b.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        }
+        completarButton.addTarget(self, action: #selector(completarTapped), for: .touchUpInside)
+        continuarIgualButton.addTarget(self, action: #selector(continuarIgualTapped), for: .touchUpInside)
+        avisoNota.text = "Se guardará como escaneo incompleto."
+        avisoNota.font = .systemFont(ofSize: 14)
+        avisoNota.textColor = Self.tintaSuave
+        avisoNota.textAlignment = .center
+        // El "!" junto al minimapa.
+        avisoBadge.translatesAutoresizingMaskIntoConstraints = false
+        avisoBadge.text = "!"
+        avisoBadge.textAlignment = .center
+        avisoBadge.textColor = .white
+        avisoBadge.font = .systemFont(ofSize: 15, weight: .heavy)
+        avisoBadge.backgroundColor = .systemOrange
+        avisoBadge.layer.cornerRadius = 12
+        avisoBadge.layer.masksToBounds = true
+        avisoBadge.isHidden = true
+        view.addSubview(avisoBadge)
+        NSLayoutConstraint.activate([
+            avisoBadge.widthAnchor.constraint(equalToConstant: 24),
+            avisoBadge.heightAnchor.constraint(equalToConstant: 24),
+            avisoBadge.centerXAnchor.constraint(equalTo: planCard.trailingAnchor),
+            avisoBadge.centerYAnchor.constraint(equalTo: planCard.centerYAnchor, constant: 8)
+        ])
+
+        // La revisión final: 2D / 3D, los datos, y Guardar · Seguir escaneando · Otro nivel.
+        revisionCaja.axis = .vertical
+        revisionCaja.spacing = 12
+        revisionSelector.selectedSegmentIndex = 0
+        revisionSelector.selectedSegmentTintColor = .systemBlue
+        revisionSelector.setTitleTextAttributes([.foregroundColor: UIColor.white, .font: UIFont.systemFont(ofSize: 15, weight: .semibold)], for: .selected)
+        revisionSelector.setTitleTextAttributes([.foregroundColor: Self.tinta, .font: UIFont.systemFont(ofSize: 15)], for: .normal)
+        revisionSelector.addTarget(self, action: #selector(revisionSelectorCambio), for: .valueChanged)
+        revisionVisor.backgroundColor = UIColor.white.withAlphaComponent(0.55)
+        revisionVisor.layer.cornerRadius = 20
+        revisionVisor.layer.cornerCurve = .continuous
+        revisionVisor.layer.borderWidth = 1
+        revisionVisor.layer.borderColor = Self.bordePlata.cgColor
+        revisionVisor.clipsToBounds = true
+        revisionVisor.heightAnchor.constraint(equalToConstant: min(320, UIScreen.main.bounds.height * 0.36)).isActive = true
+        for v in [planoGrande, vista3D] as [UIView] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            revisionVisor.addSubview(v)
+            NSLayoutConstraint.activate([
+                v.topAnchor.constraint(equalTo: revisionVisor.topAnchor, constant: 8),
+                v.leadingAnchor.constraint(equalTo: revisionVisor.leadingAnchor, constant: 8),
+                v.trailingAnchor.constraint(equalTo: revisionVisor.trailingAnchor, constant: -8),
+                v.bottomAnchor.constraint(equalTo: revisionVisor.bottomAnchor, constant: -8)
+            ])
+        }
+        vista3D.backgroundColor = .clear
+        vista3D.allowsCameraControl = true
+        vista3D.autoenablesDefaultLighting = true
+        vista3D.isHidden = true
+        revisionDatos.font = .systemFont(ofSize: 15)
+        revisionDatos.textColor = Self.tintaSuave
+        revisionDatos.numberOfLines = 2
+        Self.capsula(guardarButton, titulo: "Guardar", azul: true)
+        Self.capsula(seguirButton, titulo: "Seguir escaneando", azul: false, tam: 16)
+        Self.capsula(otroNivelButton, titulo: "Otro nivel", azul: false, tam: 16)
+        for b in [seguirButton, otroNivelButton] {
+            var c = b.configuration
+            c?.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 8)
+            b.configuration = c
+        }
+        for b in [guardarButton, seguirButton, otroNivelButton] {
+            b.heightAnchor.constraint(equalToConstant: 50).isActive = true
+            b.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        }
+        guardarButton.addTarget(self, action: #selector(guardarTapped), for: .touchUpInside)
+        seguirButton.addTarget(self, action: #selector(seguirTapped), for: .touchUpInside)
+        otroNivelButton.addTarget(self, action: #selector(otroNivelTapped), for: .touchUpInside)
+        let fila = UIStackView(arrangedSubviews: [seguirButton, otroNivelButton])
+        fila.axis = .horizontal
+        fila.spacing = 12
+        fila.distribution = .fillEqually
+        [revisionSelector, revisionVisor, revisionDatos, guardarButton, fila].forEach { revisionCaja.addArrangedSubview($0) }
+        revisionCaja.isHidden = true
+        [avisoCaja, completarButton, continuarIgualButton, avisoNota].forEach { $0.isHidden = true }
+    }
+
+    // MARK: Aviso, completar y revisión final
+
+    // Los cuartos se numeran sin contar los parches.
+    private func numeroDeCuarto(_ g: Int) -> Int { capturedRooms.indices.filter { $0 <= g && !indicesParche.contains($0) }.count }
+    private var numeroSiguiente: Int { capturedRooms.indices.filter { !indicesParche.contains($0) }.count + 1 }
+
+    private func nombreDelGrupo(_ g: Int) -> String {
+        let n = (g < voiceNames.count ? voiceNames[g] : nil) ?? (g < capturedRooms.count ? suggestedRoomName(for: capturedRooms[g]) : nil)
+        return n.map { Self.enIngles($0) } ?? "Room \(numeroDeCuarto(g))"
+    }
+
+    private func mostrarAviso(grupo g: Int, terminar: Bool) {
+        let mios = problemasFinales.filter { $0.grupo == g }
+        let otros = Set(problemasFinales.map { $0.grupo }).subtracting([g]).count
+        let lados = mios.filter { $0.tipo == "lado" }.count
+        var titulo = lados > 0
+            ? (lados == 1 ? "Falta un lado del cuarto" : "Faltan \(lados) lados del cuarto")
+            : "Una esquina del cuarto no cerró"
+        if otros > 0 { titulo += " (y \(otros) cuarto\(otros == 1 ? "" : "s") más)" }
+        aviso = Aviso(grupo: g, titulo: titulo, terminar: terminar)
+        avisoTitulo.text = titulo
+        huecosPorGrupo[g] = mios.map { ($0.a, $0.b) }
+        refrescarMinimapa()
+        updateUI()
+        speak("\(titulo). Puedes completarlo o continuar.") {}
+    }
+
+    @objc private func completarTapped() {
+        guard let a = aviso, state == .roomDonePrompt else { return }
+        aviso = nil
+        completandoIndice = a.grupo
+        pendingRoomNameAfterGap = nil
+        // El parche se escanea en el nivel de SU cuarto.
+        if a.grupo < roomLevels.count { currentLevel = roomLevels[a.grupo] }
+        let nombre = a.grupo < voiceNames.count ? voiceNames[a.grupo] : nil
+        startCapturingRoom()
+        if let nombre = nombre { pendingCurrentRoomName = nombre }
+        bandejaRecogida = true
+        updateUI()
+        speak("Escanea solo la parte que falta. Lo que ya está se conserva.") {}
+    }
+
+    @objc private func continuarIgualTapped() {
+        guard let a = aviso, state == .roomDonePrompt else { return }
+        aviso = nil
+        // Todo lo que quedó pendiente se guarda como incompleto, y a revisar.
+        for p in problemasFinales { incompletos.insert(p.grupo) }
+        incompletos.insert(a.grupo)
+        problemasFinales = []
+        if a.terminar {
+            abrirRevisionFinal()
+        } else {
+            scanAnotherTapped()
+        }
+    }
+
+    private func gruposDelNivel(_ nivel: Int?) -> [Int] {
+        capturedRooms.indices.filter { i in
+            !excluidosDelMerge.contains(i) && (nivel == nil || (i < roomLevels.count ? roomLevels[i] : 1) == nivel!)
+        }
+    }
+
+    private func miniGrupo(_ g: Int) -> MiniCuarto {
+        let base = miniCuarto(capturedRooms[g], nombre: nombreDelGrupo(g))
+        var paredes = base.paredes, ab = base.aberturas
+        for p in parches(de: g) {
+            let m = miniCuarto(capturedRooms[p], nombre: nil)
+            paredes += m.paredes
+            ab += m.aberturas
+        }
+        return MiniCuarto(nombre: base.nombre, paredes: paredes, aberturas: ab)
+    }
+
+    private func abrirRevisionFinal() {
+        enFlujoFinal = false
+        enRevisionFinal = true
+        tresDCargado = false
+        vista3D.scene = nil
+        revisionSelector.selectedSegmentIndex = 0
+        planoGrande.isHidden = false
+        vista3D.isHidden = true
+        let grupos = gruposDelNivel(currentLevel)
+        planoGrande.pintar(guardados: grupos.map { miniGrupo($0) }, actual: nil, punto: nil)
+        let total = gruposDelNivel(nil).count
+        let niveles = Set(gruposDelNivel(nil).map { $0 < roomLevels.count ? roomLevels[$0] : 1 }).count
+        var datos = "\(total) cuarto\(total == 1 ? "" : "s")" + (niveles > 1 ? " · \(niveles) niveles" : "") + " · se ve \(nombreDelNivel(currentLevel))"
+        if !incompletos.isEmpty { datos += "\n\(incompletos.count) guardado\(incompletos.count == 1 ? "" : "s") como incompleto" }
+        revisionDatos.text = datos
+        updateUI()
+        speak("Listo. Revisa el plano y toca guardar.") {}
+    }
+
+    @objc private func revisionSelectorCambio() {
+        let tres = revisionSelector.selectedSegmentIndex == 1
+        planoGrande.isHidden = tres
+        vista3D.isHidden = !tres
+        if tres && !tresDCargado { cargar3D() }
+    }
+
+    // El 3D: cada cuarto exportado por RoomPlan (cajas limpias) y puestos
+    // juntos; vienen en las mismas coordenadas, así que encajan solos.
+    private func cargar3D() {
+        tresDCargado = true
+        let cuartos = capturedRooms.enumerated().filter { !deletedRoomIndices.contains($0.offset) }.map { $0.element }
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let dir = FileManager.default.temporaryDirectory.appendingPathComponent("revision3d-\(UUID().uuidString)")
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            var urls: [URL] = []
+            for (i, r) in cuartos.enumerated() {
+                let u = dir.appendingPathComponent("cuarto\(i).usdz")
+                if (try? r.export(to: u, exportOptions: .parametric)) != nil { urls.append(u) }
+            }
+            DispatchQueue.main.async {
+                guard let self = self, self.enRevisionFinal else { return }
+                let escena = SCNScene()
+                for u in urls {
+                    if let s = try? SCNScene(url: u, options: nil) {
+                        for c in s.rootNode.childNodes { escena.rootNode.addChildNode(c) }
+                    }
+                }
+                self.vista3D.scene = escena
+            }
+        }
+    }
+
+    @objc private func guardarTapped() {
+        guard enRevisionFinal else { return }
+        enRevisionFinal = false
+        finishTapped()
+    }
+
+    @objc private func seguirTapped() {
+        guard enRevisionFinal else { return }
+        enRevisionFinal = false
+        enFlujoFinal = false
+        scanAnotherTapped()
+    }
+
+    @objc private func otroNivelTapped() {
+        guard enRevisionFinal else { return }
+        enRevisionFinal = false
+        if let i0 = Self.plantaValores.firstIndex(of: nivelBase) {
+            // Se arranca el escáner y la bandeja pide el nivel, con el de
+            // arriba ya marcado.
+            let siguiente = min(i0 + currentLevel, Self.plantaValores.count - 1)
+            startCapturingRoom()
+            cambiandoNivel = true
+            eligiendoNivel = true
+            bandejaRecogida = false
+            nivelSeleccionado = Self.plantaValores[siguiente]
+            updateUI()
+        } else {
+            // Niveles con nombre propio: la bandeja los ofrece, sin adivinar.
+            startCapturingRoom()
+            cambiandoNivel = true
+            eligiendoNivel = true
+            bandejaRecogida = false
+            nivelSeleccionado = nil
+            updateUI()
+        }
+    }
+
+    // EL SEGUNDO CEREBRO, AL TERMINAR (13-oct). Revisa el nivel completo y
+    // solo avisa lo que de verdad falta. Un hueco en el contorno de un cuarto
+    // NO es pared faltante si:
+    //   1) lo cubre la pared de OTRO cuarto (el hallway que se escaneó después),
+    //   2) hay una puerta, ventana o paso de cualquier cuarto ahí,
+    //   3) la cámara pasó por ahí (nadie atraviesa una pared), o
+    //   4) las fotos que apuntaban a ese lugar se ven como puerta o ventana
+    //      (el reconocedor de imágenes del iPhone, sin internet).
+    // Mientras tanto la bandeja dice "Revisando el plano completo…".
+    private func validarAlTerminar() {
+        enFlujoFinal = true
+        revisandoTodo = true
+        aviso = nil
+        validacionGen += 1
+        let gen = validacionGen
+        updateUI()
+        struct G { let g: Int; let nivel: Int; let paredes: [(CGPoint, CGPoint)]; let pasos: [(CGPoint, Double)] }
+        let f = FloorPlanEncoder.metersToFeet
+        var grupos: [G] = []
+        for g in gruposDelNivel(nil) {
+            let miembros = [g] + parches(de: g)
+            let paredes = miembros.flatMap { roomSketch(for: capturedRooms[$0], name: nil).walls }
+            let pasos: [(CGPoint, Double)] = miembros.flatMap { i -> [(CGPoint, Double)] in
+                let r = capturedRooms[i]
+                return (r.doors + r.windows + r.openings).map { o in
+                    (CGPoint(x: Double(o.transform.columns.3.x) * f, y: Double(o.transform.columns.3.z) * f), Double(o.dimensions.x) * f)
+                }
+            }
+            grupos.append(G(g: g, nivel: g < roomLevels.count ? roomLevels[g] : 1, paredes: paredes, pasos: pasos))
+        }
+        let rec = keyframeRecorder
+        let alTerminar: ([ScanKeyframeRecorder.PoseRecord], [ScanKeyframeRecorder.KeyframeMeta]) -> Void = { [weak self] poses, fotos in
+            DispatchQueue.global(qos: .userInitiated).async {
+                var problemas: [Problema] = []
+                var cuenta = ["revisados": 0, "otroCuarto": 0, "puerta": 0, "camino": 0, "foto": 0]
+                let empezo = Date()
+                for G0 in grupos {
+                    let otras = grupos.filter { $0.g != G0.g && $0.nivel == G0.nivel }.flatMap { $0.paredes }
+                    let pasos = grupos.filter { $0.nivel == G0.nivel }.flatMap { $0.pasos }
+                    let camino: [CGPoint] = poses.filter { $0.level == G0.nivel }.map {
+                        CGPoint(x: Double($0.transform.columns.3.x) * f, y: Double($0.transform.columns.3.z) * f)
+                    }
+                    let huecos = FloorPlanEncoder.outlineGaps(wallsFt: G0.paredes)
+                        .filter { $0.ft > FloorPlanEncoder.outlineGapWarnFt && !FloorPlanEncoder.gapCoveredByWalls($0, walls: G0.paredes) }
+                    for h in huecos {
+                        cuenta["revisados", default: 0] += 1
+                        if !otras.isEmpty, FloorPlanEncoder.gapCoveredByWalls(h, walls: otras) { cuenta["otroCuarto", default: 0] += 1; continue }
+                        // Puerta, camino y fotos solo perdonan huecos del tamaño de
+                        // un paso: una pared faltante de 12 ft con una puerta en
+                        // ese lado sigue siendo pared faltante.
+                        if pasos.contains(where: { Self.distSegmento($0.0, h.a, h.b) < 1.0 && $0.1 >= h.ft - 1.5 }) { cuenta["puerta", default: 0] += 1; continue }
+                        if h.ft <= 6, Self.caminoCruza(camino, h.a, h.b) { cuenta["camino", default: 0] += 1; continue }
+                        if h.ft <= 8, Date().timeIntervalSince(empezo) < 2.5,
+                           Self.fotosVenPaso(fotos, nivel: G0.nivel, a: h.a, b: h.b) { cuenta["foto", default: 0] += 1; continue }
+                        problemas.append(Problema(grupo: G0.g, tipo: "lado", ft: h.ft, a: h.a, b: h.b))
+                    }
+                    let esquinas = FloorPlanEncoder.cornerFindings(wallsFt: G0.paredes, portsFt: pasos.map { (center: $0.0, widthFt: $0.1) })
+                        .filter { $0.d >= 2 }
+                    for e in esquinas {
+                        cuenta["revisados", default: 0] += 1
+                        if otras.contains(where: { Self.distSegmento(e.vertex, $0.0, $0.1) < 1.2 }) { cuenta["otroCuarto", default: 0] += 1; continue }
+                        if Self.caminoCruza(camino, e.a, e.vertex) || Self.caminoCruza(camino, e.vertex, e.b) { cuenta["camino", default: 0] += 1; continue }
+                        problemas.append(Problema(grupo: G0.g, tipo: "esquina", ft: e.d, a: e.a, b: e.b))
+                    }
+                }
+                DispatchQueue.main.async {
+                    guard let self = self, self.revisandoTodo, !self.sessionDelivered, self.validacionGen == gen else { return }
+                    self.revisandoTodo = false
+                    self.segundoCerebro = ["revisados": cuenta["revisados"] ?? 0,
+                                           "resueltosPorOtroCuarto": cuenta["otroCuarto"] ?? 0,
+                                           "resueltosPorPuerta": cuenta["puerta"] ?? 0,
+                                           "resueltosPorCamino": cuenta["camino"] ?? 0,
+                                           "resueltosPorFoto": cuenta["foto"] ?? 0,
+                                           "pendientes": problemas.count]
+                    NSLog("[RoomScan] segundo cerebro: %@", String(describing: self.segundoCerebro))
+                    // Lo que ya se marcó como incompleto no se vuelve a preguntar.
+                    self.problemasFinales = problemas.filter { !self.incompletos.contains($0.grupo) }
+                    if let primero = self.problemasFinales.first {
+                        self.mostrarAviso(grupo: primero.grupo, terminar: true)
+                    } else {
+                        self.abrirRevisionFinal()
+                    }
+                }
+            }
+        }
+        // Solo una respuesta cuenta: la del recorder, o a los 4 s la que revisa
+        // solo con paredes y puertas (la cola del recorder ya se ha trabado en
+        // el campo; aquí no se puede quedar "Revisando…" para siempre).
+        let lock = NSLock()
+        var listo = false
+        let una: ([ScanKeyframeRecorder.PoseRecord], [ScanKeyframeRecorder.KeyframeMeta]) -> Void = { p, k in
+            lock.lock(); let ya = listo; listo = true; lock.unlock()
+            if !ya { alTerminar(p, k) }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) { una([], []) }
+        guard let r = rec else { una([], []); return }
+        r.snapshotPoses { poses in r.snapshotKeyframes { fotos in una(poses, fotos) } }
+    }
+
+    // ¿El camino de la cámara cruzó el segmento AB? (pasos cortos: un salto
+    // largo es el rastreo perdiéndose, no una persona caminando).
+    static func caminoCruza(_ camino: [CGPoint], _ a: CGPoint, _ b: CGPoint) -> Bool {
+        guard camino.count > 1 else { return false }
+        func lado(_ p: CGPoint, _ q: CGPoint, _ r: CGPoint) -> Double { (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x) }
+        for i in 1..<camino.count {
+            let p = camino[i - 1], q = camino[i]
+            guard hypot(q.x - p.x, q.y - p.y) < 3 else { continue }
+            if lado(a, b, p) * lado(a, b, q) < 0 && lado(p, q, a) * lado(p, q, b) < 0 { return true }
+        }
+        return false
+    }
+
+    // ¿Las fotos que apuntaban a ese hueco se ven como puerta o ventana?
+    static func fotosVenPaso(_ fotos: [ScanKeyframeRecorder.KeyframeMeta], nivel: Int, a: CGPoint, b: CGPoint) -> Bool {
+        let f = FloorPlanEncoder.metersToFeet
+        let cerca = fotos.filter { k in
+            guard k.level == nivel, let h = k.hit else { return false }
+            return distSegmento(CGPoint(x: Double(h.x) * f, y: Double(h.z) * f), a, b) < 2.0
+        }.prefix(3)
+        for k in cerca {
+            let req = VNClassifyImageRequest()
+            guard (try? VNImageRequestHandler(url: k.file, options: [:]).perform([req])) != nil,
+                  let res = req.results else { continue }
+            if res.contains(where: { ($0.identifier == "door" || $0.identifier == "window") && $0.confidence >= 0.3 }) { return true }
+        }
+        return false
+    }
+
+    @objc private func siguienteTapped() {
+        guard state == .scanningRoom, !eligiendoNivel else { return }
+        campo.resignFirstResponder()
+        siguienteAlAcabarCuarto = true
+        doneTapped()
+    }
+
+    // Los nombres se ENSEÑAN en inglés (en el plano salen así). La misma
+    // tabla que usa la web de Field Reports para el seguro; lo que no está
+    // se enseña como lo dijeron.
+    private static let cuartosEnIngles: [String: String] = [
+        "recamara principal": "Master Bedroom", "cuarto principal": "Master Bedroom",
+        "recamara": "Bedroom", "dormitorio": "Bedroom", "habitacion": "Bedroom", "alcoba": "Bedroom",
+        "bano principal": "Master Bathroom", "bano": "Bathroom", "sanitario": "Bathroom",
+        "medio bano": "Half Bathroom", "cocina": "Kitchen", "sala": "Living Room",
+        "sala familiar": "Family Room", "cuarto familiar": "Family Room", "comedor": "Dining Room",
+        "pasillo": "Hallway", "corredor": "Hallway", "sotano": "Basement", "atico": "Attic",
+        "closet": "Closet", "ropero": "Closet", "armario": "Closet",
+        "lavanderia": "Laundry Room", "cuarto de lavado": "Laundry Room", "lavado": "Laundry Room",
+        "garaje": "Garage", "cochera": "Garage", "oficina": "Office", "estudio": "Office",
+        "cuarto de los ninos": "Kids Bedroom", "cuarto de ninos": "Kids Bedroom",
+        "recamara de los ninos": "Kids Bedroom", "recamara de ninos": "Kids Bedroom",
+        "cuarto de visitas": "Guest Bedroom", "cuarto de huespedes": "Guest Bedroom",
+        "recamara de visitas": "Guest Bedroom", "recamara de huespedes": "Guest Bedroom",
+        "bano de visitas": "Guest Bathroom", "bano de huespedes": "Guest Bathroom",
+        "cuarto de tv": "TV Room", "sala de tv": "TV Room", "cuarto de television": "TV Room",
+        "bodega": "Storage Room", "cuarto de bodega": "Storage Room",
+        "cuarto de maquinas": "Utility Room", "cuarto de servicio": "Utility Room",
+        "escaleras": "Stairs", "escalera": "Stairs", "gimnasio": "Gym", "despensa": "Pantry",
+        "cuarto de juegos": "Game Room", "sala de juegos": "Game Room", "entrada": "Entry",
+        "recibidor": "Foyer", "vestibulo": "Foyer", "vestidor": "Walk-in Closet",
+        "bano de la recamara": "Master Bathroom", "cocineta": "Kitchenette", "patio": "Patio",
+        "terraza": "Deck", "porche": "Porch", "balcon": "Balcony", "cuarto": "Room",
+        "sala comedor": "Living / Dining Room"
+    ]
+    static func enIngles(_ nombre: String) -> String {
+        let crudo = nombre.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !crudo.isEmpty else { return crudo }
+        var base = sinAcentos(crudo)
+        var num = ""
+        if let r = base.range(of: #"\s*(\d+)$"#, options: .regularExpression) {
+            num = " " + base[r].trimmingCharacters(in: .whitespaces)
+            base = String(base[..<r.lowerBound])
+        }
+        if let en = cuartosEnIngles[base] { return en + num }
+        return crudo.prefix(1).uppercased() + crudo.dropFirst()
+    }
+
     // Terminar: el cuarto que va se cierra igual que con "Cuarto listo" y,
     // si no regresó con un aviso, el plano se termina como con el botón de
     // siempre. Son los mismos dos pasos de antes, uno detrás del otro.
     @objc private func terminarTapped() {
+        campo.resignFirstResponder()
         if state == .scanningRoom && !eligiendoNivel {
+            // Lo que se empezó después del último cuarto, sin nombre y casi sin
+            // paredes, no se guarda como cuarto (era un duplicado del anterior).
+            // Se decide al llegar el cuarto (didPresent), con sus paredes reales.
+            if pendingCurrentRoomName == nil && pendingCurrentEquipment.isEmpty && completandoIndice == nil
+                && !gruposDelNivel(nil).isEmpty { descartarCapturaActual = true }
             terminarAlAcabarCuarto = true
             doneTapped()
-        } else if state == .roomDonePrompt {
-            finishTapped()
+        } else if state == .roomDonePrompt && aviso == nil && !enRevisionFinal && !revisandoTodo {
+            validarAlTerminar()
         }
+    }
+
+    // Cancelar desde la bandeja: nunca tira todo de un toque.
+    @objc private func cancelarBandejaTapped() {
+        cerrarCampoSinAplicar()
+        if eligiendoNivel && cambiandoNivel {
+            // Solo se deja de cambiar el nivel; se sigue en el mismo.
+            eligiendoNivel = false
+            cambiandoNivel = false
+            campo.text = nil
+            updateUI()
+            return
+        }
+        if state == .scanningRoom, pendingCurrentRoomName != nil, !bandejaRecogida {
+            // Estaba corrigiendo el nombre: se vuelve a la barra de antes.
+            bandejaRecogida = true
+            animarBandeja()
+            return
+        }
+        let n = gruposDelNivel(nil).count
+        guard n > 0 else { cancelTapped(); return }
+        let a = UIAlertController(title: "¿Cancelar todo el escaneo?",
+                                  message: "Se pierden \(n == 1 ? "el cuarto escaneado" : "los \(n) cuartos escaneados"). Para terminar y guardar, toque Terminar.",
+                                  preferredStyle: .alert)
+        a.addAction(UIAlertAction(title: "Seguir escaneando", style: .cancel))
+        a.addAction(UIAlertAction(title: "Sí, cancelar todo", style: .destructive) { [weak self] _ in self?.cancelTapped() })
+        present(a, animated: true)
     }
 
     // MARK: Minimapa
@@ -1209,8 +1864,8 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
     @objc private func planCardExpandTapped() {
         planCardGrande.toggle()
         let ancho = view.bounds.width - 28
-        planCardW?.constant = planCardGrande ? ancho : 128
-        planCardH?.constant = planCardGrande ? min(ancho * 0.85, view.bounds.height * 0.42) : 116
+        planCardW?.constant = planCardGrande ? ancho : 136
+        planCardH?.constant = planCardGrande ? min(ancho * 0.85, view.bounds.height * 0.42) : 124
         planCardExpand.setImage(UIImage(systemName: planCardGrande ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
                                         withConfiguration: UIImage.SymbolConfiguration(pointSize: 14, weight: .semibold)), for: .normal)
         torchButton.alpha = planCardGrande ? 0 : 1
@@ -1226,18 +1881,26 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         planCardTitle.text = nivelBase.isEmpty && eligiendoNivel ? "Plano" : nombreDelNivel(currentLevel)
         guard !soloVistaPrevia else { return }
         var guardados: [MiniCuarto] = []
-        for (i, room) in capturedRooms.enumerated() {
-            guard !deletedRoomIndices.contains(i), (i < roomLevels.count ? roomLevels[i] : 1) == currentLevel else { continue }
-            let nombre = (i < voiceNames.count ? voiceNames[i] : nil) ?? suggestedRoomName(for: room)
-            guardados.append(miniCuarto(room, nombre: nombre))
+        // El cuarto que se está completando, o el que trae aviso, va en azul
+        // (con lo que falta en ámbar); los demás guardados, en gris.
+        let destacado: Int? = completandoIndice ?? (state == .roomDonePrompt ? aviso?.grupo : nil)
+        let nivelVisto = destacado.map { $0 < roomLevels.count ? roomLevels[$0] : currentLevel } ?? currentLevel
+        planCardTitle.text = nombreDelNivel(nivelVisto)
+        for g in gruposDelNivel(nivelVisto) where g != destacado {
+            guardados.append(miniGrupo(g))
         }
         let actual: String?
         if state == .scanningRoom && !eligiendoNivel {
-            actual = pendingCurrentRoomName ?? "Cuarto \(capturedRooms.count + 1)"
+            actual = pendingCurrentRoomName.map { Self.enIngles($0) } ?? "Room \(numeroSiguiente)"
         } else {
             actual = nil
         }
         let enCurso = state == .scanningRoom
+        if let g = destacado, g < capturedRooms.count, !enCurso {
+            minimapa.pintar(guardados: guardados, actual: nombreDelGrupo(g), punto: posicionCamara,
+                            enVivo: miniGrupo(g), huecos: huecosPorGrupo[g] ?? [], huecosAmbar: true)
+            return
+        }
         minimapa.pintar(guardados: guardados, actual: actual, punto: enCurso ? posicionCamara : nil,
                         enVivo: enCurso ? cuartoEnVivo : nil, huecos: enCurso ? huecosEnVivo : [])
     }
@@ -1246,6 +1909,12 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         guard !soloVistaPrevia, !sessionDelivered, let ses = captureView.captureSession, !(ses.delegate === enVivo) else { return }
         enVivo.original = ses.delegate
         enVivo.alActualizar = { [weak self] room in self?.cuartoActualizado(room) }
+        enVivo.alIndicar = { [weak self] texto in
+            guard let self = self, self.instruccionApple != texto else { return }
+            self.instruccionApple = texto
+            self.instruccionActual = self.instruccionCalidad ?? self.instruccionApple
+            if self.state == .scanningRoom { self.updateUI() }
+        }
         ses.delegate = enVivo
         NSLog("[RoomScan] cuarto en vivo enganchado (delegado original: %@)", enVivo.original == nil ? "ninguno" : "sí, se le pasa todo")
     }
@@ -1265,8 +1934,13 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         let sostener: CFTimeInterval = 3
         paredesVistas = paredesVistas.filter { ahora - $0.value.t <= sostener }
         aberturasVistas = aberturasVistas.filter { ahora - $0.value.t <= sostener }
-        let c = MiniCuarto(nombre: nil, paredes: paredesVistas.values.map { $0.linea },
+        var c = MiniCuarto(nombre: nil, paredes: paredesVistas.values.map { $0.linea },
                            aberturas: aberturasVistas.values.map { ($0.linea.0, $0.linea.1, $0.tipo) })
+        if let g = completandoIndice, g < capturedRooms.count {
+            // Completando: lo que ya estaba + lo nuevo, como un solo cuarto.
+            let base = miniGrupo(g)
+            c = MiniCuarto(nombre: nil, paredes: base.paredes + c.paredes, aberturas: base.aberturas + c.aberturas)
+        }
         cuartoEnVivo = c
         huecosEnVivo = FloorPlanEncoder.outlineGaps(wallsFt: c.paredes).map { ($0.a, $0.b) }
         refrescarMinimapa()
@@ -1511,13 +2185,27 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         // Recogida: solo los botones (el nombre ya está escogido).
         let recogida = bandejaRecogida && state == .scanningRoom && !modoNivel && roomSplitButtonsStack.isHidden
         if recogida {
-            sheetTitle.isHidden = true
+            // "Kitchen · First Floor", el campo con su micrófono, y
+            // "Siguiente cuarto" | "Terminar". Sin botones de nombres.
+            let tituloNombre = completandoIndice.map { nombreDelGrupo($0) } ?? Self.enIngles(pendingCurrentRoomName ?? "")
+            let t = NSMutableAttributedString(string: tituloNombre,
+                                              attributes: [.font: UIFont.systemFont(ofSize: 22, weight: .semibold), .foregroundColor: Self.tinta])
+            t.append(NSAttributedString(string: "  ·  \(nombreDelNivel(currentLevel))",
+                                        attributes: [.font: UIFont.systemFont(ofSize: 17), .foregroundColor: Self.tintaSuave]))
+            sheetTitle.attributedText = t
+            sheetTitle.isHidden = false
             sheetSubRow.isHidden = true
-            campoCaja.isHidden = true
+            campoCaja.isHidden = false
             chipsScroll.isHidden = true
+            cancelButton.isHidden = true
+            doneButton.isHidden = true
         }
+        filaSiguiente.isHidden = !recogida
+        // "Terminar" también sin nombre, pero solo cuando ya hay cuartos ("aún no hay").
+        terminarLink.isHidden = !(state == .scanningRoom && !modoNivel && !recogida && completandoIndice == nil && !gruposDelNivel(nil).isEmpty)
         buttonRow.isHidden = cancelButton.isHidden && doneButton.isHidden && continuarButton.isHidden
         sheetDivider.isHidden = buttonRow.isHidden || !conCampo || modoNivel || recogida
+        sheetStack.setCustomSpacing(recogida ? 14 : 2, after: sheetTitle)
         let ocupado = state == .processingRoom || state == .finishingSession
         sheetStatusRow.isHidden = !ocupado
         if ocupado {
@@ -1532,10 +2220,54 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
             scanCaption.isHidden = false
         } else if state == .scanningRoom {
             scanCaptionIcon.isHidden = true
-            scanCaptionLabel.text = "Escaneando \(pendingCurrentRoomName ?? "Cuarto \(capturedRooms.count + 1)")…" + (recogida ? "  ✎" : "")
+            scanCaptionLabel.text = "Escaneando \(pendingCurrentRoomName.map { Self.enIngles($0) } ?? "Cuarto \(numeroSiguiente)")…"
+                + (instruccionActual.map { "\n" + $0 } ?? "")
             scanCaption.isHidden = false
         } else {
             scanCaption.isHidden = true
+        }
+        // El aviso ámbar y la revisión final ocupan la bandeja solos.
+        let enAviso = aviso != nil && state == .roomDonePrompt
+        let enRev = enRevisionFinal && state == .roomDonePrompt
+        let guardadoDePaso = state == .roomDonePrompt && !enAviso && !enRev && !modoNivel && !revisandoTodo
+        if enAviso || enRev || guardadoDePaso || (revisandoTodo && state == .roomDonePrompt) {
+            [sheetSubRow, campoCaja, chipsScroll, nivelesCaption, buttonRow, filaSiguiente, promptStack,
+             roomSummaryLabel, roomSplitButtonsStack, sheetDivider].forEach { $0.isHidden = true }
+            scanCaption.isHidden = true
+        }
+        [avisoCaja, completarButton, continuarIgualButton, avisoNota].forEach { $0.isHidden = !enAviso }
+        if enAviso || enRev || guardadoDePaso || revisandoTodo { terminarLink.isHidden = true }
+        if revisandoTodo && state == .roomDonePrompt {
+            sheetTitle.isHidden = true
+            sheetStatusRow.isHidden = false
+            sheetStatusSpinner.startAnimating()
+            sheetStatusLabel.text = "Revisando el plano completo…"
+        }
+        revisionCaja.isHidden = !enRev
+        avisoBadge.isHidden = !enAviso
+        if let a = aviso, enAviso {
+            let t = NSMutableAttributedString(string: nombreDelGrupo(a.grupo),
+                                              attributes: [.font: UIFont.systemFont(ofSize: 22, weight: .semibold), .foregroundColor: Self.tinta])
+            let nivelDelAviso = a.grupo < roomLevels.count ? roomLevels[a.grupo] : currentLevel
+            t.append(NSAttributedString(string: "  ·  \(nombreDelNivel(nivelDelAviso))",
+                                        attributes: [.font: UIFont.systemFont(ofSize: 17), .foregroundColor: Self.tintaSuave]))
+            sheetTitle.attributedText = t
+            sheetTitle.isHidden = false
+            sheetStack.setCustomSpacing(14, after: sheetTitle)
+        } else if enRev {
+            sheetTitle.text = "Revisión final"
+            sheetTitle.isHidden = false
+            sheetStack.setCustomSpacing(12, after: sheetTitle)
+        } else if guardadoDePaso {
+            // El momento entre "guardado" y el siguiente cuarto: nada que revisar.
+            sheetTitle.isHidden = true
+            sheetStatusRow.isHidden = false
+            sheetStatusSpinner.startAnimating()
+            sheetStatusLabel.text = "Guardando y pasando al siguiente…"
+        }
+        if state == .scanningRoom, completandoIndice != nil {
+            scanCaptionLabel.text = "Completando \(pendingCurrentRoomName.map { Self.enIngles($0) } ?? "el cuarto")…"
+                + (instruccionActual.map { "\n" + $0 } ?? "")
         }
         planPanelSpinner.stopAnimating()
         statusLabel.isHidden = true
@@ -1592,7 +2324,7 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
                     aberturas: [(CGPoint(x: 14, y: 4), CGPoint(x: 14, y: 7), .puerta),
                                 (CGPoint(x: 4, y: 0), CGPoint(x: 9, y: 0), .ventana),
                                 (CGPoint(x: 0, y: 5), CGPoint(x: 0, y: 8.5), .ventana)])],
-                                actual: "Cocina", punto: CGPoint(x: 20, y: 7),
+                                actual: "Kitchen", punto: CGPoint(x: 20, y: 7),
                                 enVivo: MiniCuarto(nombre: nil, paredes: [
                                     (CGPoint(x: 14, y: 2), CGPoint(x: 24, y: 2)), (CGPoint(x: 24, y: 2), CGPoint(x: 24, y: 6)),
                                     (CGPoint(x: 24, y: 9), CGPoint(x: 24, y: 12)), (CGPoint(x: 24, y: 12), CGPoint(x: 14, y: 12))],
@@ -1600,6 +2332,32 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
                                 huecos: [(CGPoint(x: 24, y: 6), CGPoint(x: 24, y: 9))])
             }
             if vistaPreviaEstado == 2 { state = .processingRoom }
+            let sala = MiniCuarto(nombre: "Living Room", paredes: [
+                (CGPoint(x: 0, y: 0), CGPoint(x: 14, y: 0)), (CGPoint(x: 14, y: 0), CGPoint(x: 14, y: 12)),
+                (CGPoint(x: 14, y: 12), CGPoint(x: 0, y: 12)), (CGPoint(x: 0, y: 12), CGPoint(x: 0, y: 0))],
+                aberturas: [(CGPoint(x: 14, y: 4), CGPoint(x: 14, y: 7), .puerta), (CGPoint(x: 4, y: 0), CGPoint(x: 9, y: 0), .ventana)])
+            let cocina = MiniCuarto(nombre: "Kitchen", paredes: [
+                (CGPoint(x: 14, y: 2), CGPoint(x: 24, y: 2)), (CGPoint(x: 24, y: 2), CGPoint(x: 24, y: 5)),
+                (CGPoint(x: 24, y: 12), CGPoint(x: 14, y: 12))],
+                aberturas: [(CGPoint(x: 17, y: 12), CGPoint(x: 20, y: 12), .ventana)])
+            if vistaPreviaEstado == 3 {
+                state = .roomDonePrompt
+                pendingCurrentRoomName = nil
+                aviso = Aviso(grupo: 0, titulo: "Falta un lado del cuarto", terminar: false)
+                avisoTitulo.text = "Falta un lado del cuarto"
+                voiceNames = ["Cocina"]
+                minimapa.pintar(guardados: [sala], actual: "Kitchen", punto: CGPoint(x: 19, y: 7),
+                                enVivo: cocina, huecos: [(CGPoint(x: 24, y: 5), CGPoint(x: 24, y: 12))], huecosAmbar: true)
+            }
+            if vistaPreviaEstado == 4 {
+                state = .roomDonePrompt
+                pendingCurrentRoomName = nil
+                enRevisionFinal = true
+                let cocina2 = MiniCuarto(nombre: "Kitchen", paredes: cocina.paredes + [(CGPoint(x: 24, y: 5), CGPoint(x: 24, y: 12))], aberturas: cocina.aberturas)
+                planoGrande.pintar(guardados: [sala, cocina2], actual: nil, punto: nil)
+                minimapa.pintar(guardados: [sala, cocina2], actual: nil, punto: nil)
+                revisionDatos.text = "2 cuartos · se ve First Floor"
+            }
             updateUI()
             return
         }
@@ -1626,6 +2384,12 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         // dice en el momento, para que escanee los dos lados sin pelearse
         // con el escáner. Al terminar, el plano trae la partición propuesta
         // justo donde la cámara vio las maderas - y ELLA decide si se parte.
+        recorder.onCalidad = { [weak self] texto in
+            guard let self = self else { return }
+            self.instruccionCalidad = texto
+            self.instruccionActual = self.instruccionCalidad ?? self.instruccionApple
+            if self.state == .scanningRoom { self.updateUI() }
+        }
         recorder.onStudsSeen = { [weak self] roomIdx in
             self?.avisarMaderas(roomIdx, reintento: true)
         }
@@ -1770,6 +2534,9 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         // sobre el cuarto VIEJO.
         pendingDoneQuestion = nil
         bandejaRecogida = false
+        // Un aviso o una revisión final de antes no sigue abierto en el cuarto nuevo.
+        aviso = nil
+        enRevisionFinal = false
         // He said the next room's name mid-scan, but a missing-wall
         // warning held the auto-advance back. Carry the name forward so
         // he is not asked to repeat himself.
@@ -1780,13 +2547,19 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         pendingMirroredPort = nil
         isSessionRunning = true
         state = .scanningRoom
+        // Si el nombre ya venía dicho, la bandeja sale recogida (solo botones).
+        if pendingCurrentRoomName != nil && !eligiendoNivel && completandoIndice == nil { bandejaRecogida = true }
         updateUI()
         cuartoEnVivo = nil
         huecosEnVivo = []
         paredesVistas = [:]
         aberturasVistas = [:]
         engancharEnVivo()
-        let config = RoomCaptureSession.Configuration()
+        var config = RoomCaptureSession.Configuration()
+        // Sin la guía de Apple ("Move device to start" con el teléfono que
+        // sube y baja): él lo pidió fuera, igual que el modelito 3D. Sus
+        // indicaciones se dicen en español abajo, en el letrero.
+        config.isCoachingEnabled = false
         captureView.captureSession.run(configuration: config)
         // Si la pantalla de Apple vuelve a poner su delegado al arrancar, se
         // envuelve otra vez (pasándole todo a él primero).
@@ -1822,6 +2595,9 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
     }
 
     @objc private func doneTapped() {
+        // Lo escrito en el campo cuenta ANTES de cerrar el cuarto (si no, se
+        // perdía o le caía al cuarto siguiente).
+        if campo.isFirstResponder { campo.resignFirstResponder() }
         // A manual "Listo" tap always wins over a pending room-split
         // question too - the tech tapping the button is a stronger,
         // more deliberate signal than whatever they were about to say.
@@ -2008,7 +2784,11 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
                                  equipment: [[String: EquipmentEntry]], deletedIndices: Set<Int>) {
         let preMergeRooms = capturedRooms
         let preMergeLevels = roomLevels
-        let preMergeDeleted = deletedRoomIndices
+        let preMergeDeleted = deletedRoomIndices.union(indicesParche)
+        // Lo que se completó y lo que se dejó incompleto, ya con el índice del
+        // plano entregado.
+        let parchesEntrega = parchesParaEntregar(rooms)
+        let incompletosEntrega = incompletos.compactMap { g in rooms.firstIndex { originalRoomIndex(for: $0) == g } }.sorted()
         let recorder = keyframeRecorder
         keyframeRecorder = nil
         let newSessionDir = recorder?.sessionDir
@@ -2031,6 +2811,22 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
                 var inspection = inspectionIn
                 // Camino 2: lo que la sonda vio viaja con el plano para
                 // poder leerlo después. No cambia nada del plano.
+                if !self.nombresDeNivel.isEmpty {
+                    var d = inspection ?? ["version": 1, "status": "skipped"]
+                    d["nombresDeNivel"] = Dictionary(uniqueKeysWithValues: self.nombresDeNivel.map { (String($0.key), $0.value) })
+                    inspection = d
+                }
+                if !self.segundoCerebro.isEmpty {
+                    var d = inspection ?? ["version": 1, "status": "skipped"]
+                    d["segundoCerebro"] = self.segundoCerebro
+                    inspection = d
+                }
+                if !parchesEntrega.isEmpty || !incompletosEntrega.isEmpty {
+                    var d = inspection ?? ["version": 1, "status": "skipped"]
+                    if !parchesEntrega.isEmpty { d["parches"] = parchesEntrega }
+                    if !incompletosEntrega.isEmpty { d["incompleteRooms"] = incompletosEntrega }
+                    inspection = d
+                }
                 probeLock.lock(); let mp = meshProbe; probeLock.unlock()
                 if mp != nil || self.arConfigProbe != nil {
                     var d = inspection ?? ["version": 1, "status": "skipped"]
@@ -2068,6 +2864,8 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         for (out, room) in rooms.enumerated() {
             if let pre = originalRoomIndex(for: room) { mapaIndices[pre] = out }
         }
+        // Las fotos y el camino de un parche son de su cuarto.
+        for (p, g) in parcheDe { if let k = mapaIndices[g] { mapaIndices[p] = k } }
         var delivered = false
         var traceArrived = false
         let lock = NSLock()
@@ -2153,9 +2951,10 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
             self.sessionDelivered = true
             self.keyframeRecorder?.stopAndDeleteAll()
             self.keyframeRecorder = nil
-            self.onFinish?(.finished(rooms: self.capturedRooms, structure: nil, merged: false,
-                                     levels: self.roomLevels, voiceNames: self.voiceNames,
-                                     equipment: self.roomEquipment, deletedIndices: self.deletedRoomIndices,
+            let x = self.sinParches()
+            self.onFinish?(.finished(rooms: x.rooms, structure: nil, merged: false,
+                                     levels: x.levels, voiceNames: x.names,
+                                     equipment: x.equipment, deletedIndices: x.deleted,
                                      inspection: ["version": 1, "status": "skipped", "reason": "finish_watchdog"],
                                      surfaceAnswers: self.voiceSurfaceAnswers))
         }
@@ -2173,10 +2972,12 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         // the office. They sit in pre-merge space, but every renderer and
         // every total skips a room flagged deleted, so nothing draws them
         // in the wrong place.
-        let keptIdx = capturedRooms.indices.filter { !deletedRoomIndices.contains($0) }
-        let dropIdx = capturedRooms.indices.filter { deletedRoomIndices.contains($0) }
+        // Los parches no son cuartos: no entran al merge; se unen a su cuarto
+        // al entregar (deliverFinished -> inspection["parches"]).
+        let keptIdx = capturedRooms.indices.filter { !excluidosDelMerge.contains($0) }
+        let dropIdx = capturedRooms.indices.filter { deletedRoomIndices.contains($0) && !indicesParche.contains($0) }
         guard keptIdx.count > 1 else {
-            deliverFinished(rooms: capturedRooms, structure: nil, merged: true, levels: roomLevels, voiceNames: voiceNames, equipment: roomEquipment, deletedIndices: deletedRoomIndices)
+            entregarSinMerge(merged: true)
             return
         }
         if #available(iOS 17.0, *) {
@@ -2217,15 +3018,169 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
                     // rather than guessing how they connect.
                     await MainActor.run {
                         guard let self = self else { return }
-                        self.deliverFinished(rooms: rooms, structure: nil, merged: false, levels: self.roomLevels, voiceNames: self.voiceNames, equipment: self.roomEquipment, deletedIndices: self.deletedRoomIndices)
+                        self.entregarSinMerge(merged: false)
                     }
                 }
             }
         } else {
             // No StructureBuilder before iOS 17 - each room stays at its
             // own local origin, honestly flagged as unmerged.
-            deliverFinished(rooms: capturedRooms, structure: nil, merged: false, levels: roomLevels, voiceNames: voiceNames, equipment: roomEquipment, deletedIndices: deletedRoomIndices)
+            entregarSinMerge(merged: false)
         }
+    }
+
+    // Los cuartos tal como se escanearon, sin los parches (que se unen a su
+    // cuarto al entregar) y con los índices de borrados ya acomodados a esa
+    // lista. Antes el camino del error mandaba los cuartos sin borrados pero
+    // los niveles y nombres de TODOS: se corrían de cuarto.
+    private func sinParches() -> (rooms: [CapturedRoom], levels: [Int], names: [String?], equipment: [[String: EquipmentEntry]], deleted: Set<Int>) {
+        var r: [CapturedRoom] = [], l: [Int] = [], n: [String?] = [], e: [[String: EquipmentEntry]] = [], d = Set<Int>()
+        for i in capturedRooms.indices where !indicesParche.contains(i) {
+            if deletedRoomIndices.contains(i) { d.insert(r.count) }
+            r.append(capturedRooms[i])
+            l.append(i < roomLevels.count ? roomLevels[i] : 1)
+            n.append(i < voiceNames.count ? voiceNames[i] : nil)
+            e.append(i < roomEquipment.count ? roomEquipment[i] : [:])
+        }
+        return (r, l, n, e, d)
+    }
+
+    // EL PARCHE UNIDO A SU CUARTO. El merge de Apple mueve y gira cada
+    // cuarto; ese mismo movimiento se calcula con las paredes que el cuarto
+    // conserva (mismo identificador antes y después) y se le aplica al
+    // parche, que se escaneó en las coordenadas de antes. De lo escaneado en
+    // el parche solo pasa lo que el cuarto NO tenía: el pedazo de pared que
+    // faltaba, y las puertas o ventanas nuevas. Nada se borra ni se mueve
+    // del cuarto original.
+    private func parchesParaEntregar(_ rooms: [CapturedRoom]) -> [String: [String: Any]] {
+        var out: [String: [String: Any]] = [:]
+        let f = FloorPlanEncoder.metersToFeet
+        func conf(_ c: CapturedRoom.Confidence) -> String {
+            switch c { case .high: return "high"; case .medium: return "medium"; default: return "low" }
+        }
+        for g in Set(parcheDe.values) where !deletedRoomIndices.contains(g) && g < capturedRooms.count {
+            guard let k = rooms.firstIndex(where: { originalRoomIndex(for: $0) == g }) else { continue }
+            let raw = capturedRooms[g], dest = rooms[k]
+            var destPorId: [UUID: CapturedRoom.Surface] = [:]
+            for w in dest.walls { destPorId[w.identifier] = w }
+            var sumSin = 0.0, sumCos = 0.0
+            var pares: [(SIMD2<Double>, SIMD2<Double>)] = []
+            for w in raw.walls {
+                guard let d = destPorId[w.identifier] else { continue }
+                let (a0, b0) = FloorPlanEncoder.wallEndpoints(w)
+                let (a1, b1) = FloorPlanEncoder.wallEndpoints(d)
+                let ang = atan2(Double(b1.y - a1.y), Double(b1.x - a1.x)) - atan2(Double(b0.y - a0.y), Double(b0.x - a0.x))
+                let peso = max(Double(w.dimensions.x), 0.1)
+                sumSin += sin(ang) * peso
+                sumCos += cos(ang) * peso
+                pares.append((SIMD2(Double(a0.x + b0.x) / 2, Double(a0.y + b0.y) / 2),
+                              SIMD2(Double(a1.x + b1.x) / 2, Double(a1.y + b1.y) / 2)))
+            }
+            let th = pares.isEmpty ? 0 : atan2(sumSin, sumCos)
+            let co = cos(th), si = sin(th)
+            func rot(_ p: SIMD2<Double>) -> SIMD2<Double> { SIMD2(co * p.x - si * p.y, si * p.x + co * p.y) }
+            var tr = SIMD2<Double>(0, 0)
+            if !pares.isEmpty {
+                for (r0, r1) in pares { tr += r1 - rot(r0) }
+                tr /= Double(pares.count)
+            }
+            func aPies(_ p: SIMD2<Float>) -> CGPoint {
+                let q = rot(SIMD2(Double(p.x), Double(p.y))) + tr
+                return CGPoint(x: q.x * f, y: q.y * f)
+            }
+            func enPies(_ p: SIMD2<Float>) -> CGPoint { CGPoint(x: Double(p.x) * f, y: Double(p.y) * f) }
+            let propias: [(CGPoint, CGPoint)] = dest.walls.map { w in
+                let (a, b) = FloorPlanEncoder.wallEndpoints(w); return (enPies(a), enPies(b))
+            }
+            var conId: [(id: String, a: CGPoint, b: CGPoint)] = dest.walls.map { w in
+                let (a, b) = FloorPlanEncoder.wallEndpoints(w); return (w.identifier.uuidString, enPies(a), enPies(b))
+            }
+            var paredes: [[String: Any]] = []
+            var aberturas: [String: [[String: Any]]] = ["doors": [], "windows": [], "openings": []]
+            func centro(_ s: CapturedRoom.Surface) -> SIMD2<Float> { SIMD2(s.transform.columns.3.x, s.transform.columns.3.z) }
+            for p in parches(de: g) where p < capturedRooms.count {
+                let r = capturedRooms[p]
+                for w in r.walls {
+                    let (a, b) = FloorPlanEncoder.wallEndpoints(w)
+                    for (u, v) in Self.loQueNoCubren(aPies(a), aPies(b), propias) {
+                        let largo = hypot(v.x - u.x, v.y - u.y)
+                        guard largo >= 1.0 else { continue }
+                        let id = w.identifier.uuidString + "-p\(paredes.count)"
+                        paredes.append(["id": id, "start": ["x": u.x, "y": u.y], "end": ["x": v.x, "y": v.y],
+                                        "lengthFt": largo, "heightFt": Double(w.dimensions.y) * f,
+                                        "confidence": conf(w.confidence), "_parche": true])
+                        conId.append((id, u, v))
+                    }
+                }
+                let tipos: [(String, [CapturedRoom.Surface], [CapturedRoom.Surface])] = [
+                    ("doors", r.doors, dest.doors), ("windows", r.windows, dest.windows), ("openings", r.openings, dest.openings)
+                ]
+                for (clave, nuevas, viejas) in tipos {
+                    for o in nuevas {
+                        let c = aPies(centro(o))
+                        // Ya la tenía el cuarto: no se repite.
+                        let repetida = viejas.contains { v in let q = enPies(centro(v)); return hypot(q.x - c.x, q.y - c.y) < 1.5 }
+                            || (aberturas[clave] ?? []).contains { d in
+                                let pos = d["position"] as? [String: Double] ?? [:]
+                                return hypot((pos["x"] ?? 0) - c.x, (pos["y"] ?? 0) - c.y) < 1.5 }
+                        guard !repetida else { continue }
+                        var dic: [String: Any] = ["id": o.identifier.uuidString, "position": ["x": c.x, "y": c.y],
+                                                  "widthFt": Double(o.dimensions.x) * f, "heightFt": Double(o.dimensions.y) * f,
+                                                  "confidence": conf(o.confidence), "_parche": true]
+                        if let w = conId.min(by: { Self.distSegmento(c, $0.a, $0.b) < Self.distSegmento(c, $1.a, $1.b) }) {
+                            dic["wallId"] = w.id
+                        }
+                        aberturas[clave, default: []].append(dic)
+                    }
+                }
+            }
+            var entrada: [String: Any] = ["walls": paredes]
+            for (clave, lista) in aberturas where !lista.isEmpty { entrada[clave] = lista }
+            out[String(k)] = entrada
+            NSLog("[RoomScan] parche unido al cuarto %d: %d tramos de pared, giro %.1f°", k, paredes.count, th * 180 / .pi)
+        }
+        return out
+    }
+
+    static func distSegmento(_ p: CGPoint, _ a: CGPoint, _ b: CGPoint) -> Double {
+        let dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy
+        guard l2 > 0.0001 else { return hypot(p.x - a.x, p.y - a.y) }
+        let t = max(0, min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2))
+        return hypot(p.x - (a.x + dx * t), p.y - (a.y + dy * t))
+    }
+
+    // Lo que queda de la pared AB que ninguna pared de `refs` ya cubre
+    // (casi paralela, a menos de 0.7 ft de su línea).
+    static func loQueNoCubren(_ a: CGPoint, _ b: CGPoint, _ refs: [(CGPoint, CGPoint)]) -> [(CGPoint, CGPoint)] {
+        let dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy
+        guard l2 > 0.01 else { return [] }
+        let l = sqrt(l2)
+        var cortes: [(Double, Double)] = []
+        for (c, d) in refs {
+            let ex = d.x - c.x, ey = d.y - c.y, m = hypot(ex, ey)
+            guard m > 0.1, abs((dx * ex + dy * ey) / (l * m)) > 0.978 else { continue }
+            let dist = { (p: CGPoint) -> Double in abs((p.x - a.x) * dy - (p.y - a.y) * dx) / l }
+            guard dist(c) < 0.7, dist(d) < 0.7 else { continue }
+            let tc = ((c.x - a.x) * dx + (c.y - a.y) * dy) / l2
+            let td = ((d.x - a.x) * dx + (d.y - a.y) * dy) / l2
+            let lo = max(0, min(tc, td)), hi = min(1, max(tc, td))
+            if hi > lo { cortes.append((lo, hi)) }
+        }
+        cortes.sort { $0.0 < $1.0 }
+        var tramos: [(CGPoint, CGPoint)] = []
+        var t0 = 0.0
+        func punto(_ t: Double) -> CGPoint { CGPoint(x: a.x + dx * t, y: a.y + dy * t) }
+        for (lo, hi) in cortes {
+            if lo > t0 { tramos.append((punto(t0), punto(lo))) }
+            t0 = max(t0, hi)
+        }
+        if t0 < 1 { tramos.append((punto(t0), punto(1))) }
+        return tramos
+    }
+
+    private func entregarSinMerge(merged: Bool) {
+        let x = sinParches()
+        deliverFinished(rooms: x.rooms, structure: nil, merged: merged, levels: x.levels, voiceNames: x.names, equipment: x.equipment, deletedIndices: x.deleted)
     }
 
     // MARK: - Live plan panel
@@ -2247,7 +3202,7 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         // own StructureBuilder call (the single-flight bookkeeping only
         // covers LIVE merges, not the final one).
         guard state != .finishingSession else { return }
-        let visibleIndices = capturedRooms.indices.filter { !deletedRoomIndices.contains($0) }
+        let visibleIndices = capturedRooms.indices.filter { !excluidosDelMerge.contains($0) }
         let visibleRooms = visibleIndices.map { capturedRooms[$0] }
 
         guard !visibleRooms.isEmpty else {
@@ -2401,7 +3356,7 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
             // decide (re-scan it, continue, or finish) instead of
             // force-ending the whole walkthrough over one room's error.
             if !processedResult.walls.isEmpty {
-                speak("Este cuarto tuvo un problema al procesarse. Revísalo, o vuelve a escanearlo.") {}
+                speak("Este cuarto tuvo un problema al procesarse.") {}
             } else if capturedRooms.isEmpty {
                 // First room, nothing usable: nothing to salvage.
                 keyframeRecorder?.stopAndDeleteAll()
@@ -2419,12 +3374,42 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
                 return
             }
         }
+        if descartarCapturaActual && processedResult.walls.count >= 3 { descartarCapturaActual = false }
+        if descartarCapturaActual {
+            // "Terminar" sin nombre, sin equipo y casi sin paredes: lo que se
+            // empezó después del último cuarto no es un cuarto. No se guarda.
+            descartarCapturaActual = false
+            terminarAlAcabarCuarto = false
+            pendingCurrentRoomName = nil
+            pendingCurrentEquipment = [:]
+            state = .roomDonePrompt
+            updateUI()
+            validarAlTerminar()
+            return
+        }
         capturedRooms.append(processedResult)
         roomLevels.append(currentLevel)
         voiceNames.append(pendingCurrentRoomName)
         pendingCurrentRoomName = nil
         roomEquipment.append(pendingCurrentEquipment)
         pendingCurrentEquipment = [:]
+        let nuevo = capturedRooms.count - 1
+        if let g = completandoIndice {
+            // Un parche: se une a su cuarto, no es un cuarto aparte. Lo que se
+            // dijo mientras (equipo, otro nombre) es de ese cuarto.
+            indicesParche.insert(nuevo)
+            parcheDe[nuevo] = g
+            completandoIndice = nil
+            if g < roomEquipment.count, nuevo < roomEquipment.count, !roomEquipment[nuevo].isEmpty {
+                for (k, v) in roomEquipment[nuevo] { roomEquipment[g][k] = v }
+                roomEquipment[nuevo] = [:]
+            }
+            if g < voiceNames.count, nuevo < voiceNames.count, let nm = voiceNames[nuevo], nm != voiceNames[g] {
+                voiceNames[g] = nm
+            }
+        }
+        let grupo = grupoDe(nuevo)
+        let miembros = [grupo] + parches(de: grupo)
         // Grows the live plan panel by exactly this one room - never
         // called from the stop/start trigger, only from here, once this
         // room's real geometry has actually arrived.
@@ -2439,24 +3424,33 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         // A gap another wall already covers is not a gap. Own-room walls
         // are enough: pre-merge there is nothing else, and on the real
         // house own-room recovery reproduces the post-merge answer.
-        let sketchWalls = roomSketch(for: processedResult, name: nil).walls
+        // Con un parche, se revisa el cuarto UNIDO (lo de antes + lo nuevo):
+        // las dos capturas vienen en las mismas coordenadas de la cámara.
+        let sketchWalls = miembros.flatMap { roomSketch(for: capturedRooms[$0], name: nil).walls }
         let openGaps = FloorPlanEncoder.outlineGaps(wallsFt: sketchWalls)
             .filter { $0.ft > FloorPlanEncoder.outlineGapWarnFt
                       && !FloorPlanEncoder.gapCoveredByWalls($0, walls: sketchWalls) }
-        roomGapsByIndex[capturedRooms.count - 1] = openGaps.map { $0.ft }
+        roomGapsByIndex[grupo] = openGaps.map { $0.ft }
+        if grupo != nuevo { roomGapsByIndex[nuevo] = [] }
+        huecosPorGrupo[grupo] = openGaps.map { ($0.a, $0.b) }
         // LAS ESQUINAS QUE NO CERRARON: misma aritmética que el chequeo de
         // huecos, con las puertas, ventanas y aberturas de este cuarto para
         // no confundir un paso con una esquina. Solo se avisa; el plano
         // propone cerrarla (o la cierra sola si es chica) - ver
         // fpCornerFindings en www/index.html.
         let f = FloorPlanEncoder.metersToFeet
-        let portsFt: [(center: CGPoint, widthFt: Double)] = (processedResult.doors + processedResult.windows + processedResult.openings).map { p in
+        let todosLosPasos = miembros.flatMap { capturedRooms[$0].doors + capturedRooms[$0].windows + capturedRooms[$0].openings }
+        let portsFt: [(center: CGPoint, widthFt: Double)] = todosLosPasos.map { p in
             let t = p.transform
             return (center: CGPoint(x: Double(t.columns.3.x) * f, y: Double(t.columns.3.z) * f),
                     widthFt: Double(p.dimensions.x) * f)
         }
         let esquinas = FloorPlanEncoder.cornerFindings(wallsFt: sketchWalls, portsFt: portsFt)
-        roomCornersByIndex[capturedRooms.count - 1] = esquinas
+        roomCornersByIndex[grupo] = esquinas
+        if grupo != nuevo { roomCornersByIndex[nuevo] = [] }
+        // Lo que falta, para pintarlo ámbar en el minimapa: los huecos y las
+        // dos patas de cada esquina grande que no cerró.
+        huecosPorGrupo[grupo, default: []] += esquinas.filter { $0.d >= 2 }.flatMap { [($0.a, $0.vertex), ($0.vertex, $0.b)] }
         floorPlanPanelView.marcarEsquinas(esquinas.map { $0.vertex })
         if !esquinas.isEmpty {
             NSLog("[RoomScan] open corners in room %d: %@", capturedRooms.count - 1,
@@ -2466,7 +3460,7 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         // Misma clase de arithmetic que el chequeo de contorno: sobre la
         // geometria ya en la mano, en main, en microsegundos, sin poses.
         let mirrored = ScanInspector.mirroredPortCheck(rooms: capturedRooms,
-                                                       deletedIndices: deletedRoomIndices,
+                                                       deletedIndices: excluidosDelMerge,
                                                        levels: roomLevels,
                                                        alreadyReported: reportedMirroredPorts)
         if let m = mirrored.first {
@@ -2503,6 +3497,9 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
                 guard self.state != .finishingSession,
                       self.capturedRooms.count - 1 == coverageRoomIndex else { return }
                 self.updateUI()
+                // El segundo asistente no regaña cuarto por cuarto: todo se
+                // revisa junto al tocar Terminar (validarAlTerminar).
+                if true { return }
                 guard result.percent < 70, result.total >= 4 else { return }
                 // ONE spoken warning per room. If a wall is missing, that
                 // is strictly more actionable than thin coverage, and two
@@ -2551,11 +3548,11 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         // can re-sweep it NOW - marching him into the next room is
         // exactly the wrong outcome. He lands on the room-done card with
         // the warning instead, and the name he said is kept.
-        let gapsHere = roomGapsByIndex[capturedRooms.count - 1] ?? []
+        let gapsHere = roomGapsByIndex[grupo] ?? []
         // Una esquina abierta de 2 ft o más también frena el auto-continuar:
         // se le va a preguntar si repite, y eso no se pregunta desde el
         // cuarto siguiente.
-        let esquinaGrande = (peorEsquina(capturedRooms.count - 1)?.d ?? 0) >= 2
+        let esquinaGrande = (peorEsquina(grupo)?.d ?? 0) >= 2
         if let nextName = autoContinueNextRoomName, gapsHere.isEmpty, !esquinaGrande {
             autoContinueNextRoomName = nil
             pendingCurrentRoomName = nextName
@@ -2585,13 +3582,30 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         updateUI()
         // "Terminar" mientras escaneaba: el cuarto ya se guardó; si no trae
         // ningún aviso, se termina el plano como con el botón de siempre.
-        if terminarAlAcabarCuarto {
-            terminarAlAcabarCuarto = false
-            if gapsHere.isEmpty && peorEsquina(capturedRooms.count - 1) == nil {
-                finishTapped()
-                return
-            }
+        // EL FLUJO NUEVO (su diseño del 13-oct): al guardar un cuarto se
+        // revisa. Completo -> el siguiente cuarto sin ninguna revisión (o la
+        // revisión final, si tocó Terminar). Le falta un lado o una esquina
+        // -> el aviso ámbar en la bandeja: Completar escaneo o Continuar de
+        // todos modos. Las preguntas habladas de antes ya no se hacen aquí.
+        let pidioTerminar = terminarAlAcabarCuarto
+        terminarAlAcabarCuarto = false
+        siguienteAlAcabarCuarto = false
+        // EL SEGUNDO ASISTENTE NO INTERRUMPE (13-oct): al pasar de cuarto no
+        // se avisa nada - un hueco de ahora puede cerrarlo el cuarto que
+        // sigue (el hallway que se escanea después). Todo se revisa junto al
+        // tocar Terminar; si se estaba completando algo de esa revisión, se
+        // vuelve a revisar.
+        _ = gapsHere; _ = esquinaGrande
+        if pidioTerminar || enFlujoFinal {
+            validarAlTerminar()
+            return
         }
+        showVoiceCaption("✓ \(nombreDelGrupo(grupo)) guardado")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+            guard let self = self, self.state == .roomDonePrompt, self.aviso == nil, !self.enRevisionFinal else { return }
+            self.scanAnotherTapped()
+        }
+        if true { return }
         // Se habla, no solo se pintan botones: el tecnico trae el telefono
         // en alto y las manos ocupadas. Pero UNA pregunta a la vez.
         //
@@ -2947,14 +3961,35 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
     }
 
     private func showVoiceCaption(_ name: String) {
+        // El letrero flotante era del diseño viejo (13-oct: "no tiene que
+        // aparecer enfrente de la pantalla"). Lo que antes decía ahí ya lo
+        // dicen la voz y la bandeja; se deja de enseñar.
         voiceCaptionLabel.text = "  \(name) ✓  "
-        voiceCaptionLabel.isHidden = false
+        voiceCaptionLabel.isHidden = true
+        return
         NSObject.cancelPreviousPerformRequests(withTarget: self, selector: #selector(hideVoiceCaption), object: nil)
         perform(#selector(hideVoiceCaption), with: nil, afterDelay: 2.5)
     }
 
     @objc private func hideVoiceCaption() {
         voiceCaptionLabel.isHidden = true
+    }
+
+    // EL MICRÓFONO DEL CAMPO (un solo asistente, 13-oct): tocarlo nunca lo
+    // apaga - antes lo apagaba y él terminaba dictando con el teclado del
+    // iPhone, que solo escribe y no guarda. Ahora cierra el teclado y deja
+    // escuchando al asistente. Apagarlo: dejarlo apretado, o decir "cállate".
+    @objc private func micCampoTapped() {
+        campo.resignFirstResponder()
+        micTocadoEn = Date()
+        if micMuted { micToggleTapped() }
+        showVoiceCaption(eligiendoNivel ? "🎤 Te escucho: di el nivel" : "🎤 Te escucho: di el nombre del cuarto")
+    }
+
+    @objc private func micLargoTapped(_ g: UILongPressGestureRecognizer) {
+        guard g.state == .began else { return }
+        micToggleTapped()
+        showVoiceCaption(micMuted ? "Micrófono apagado (déjalo apretado para prenderlo)" : "Micrófono prendido")
     }
 
     @objc private func micToggleTapped() {
@@ -3467,7 +4502,7 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
     // pero se dicen como "uno sin nombre" - callarlos seria esconder
     // justo lo que le falta por hacer.
     private func speakProgressSummary() {
-        let vivos = capturedRooms.indices.filter { !deletedRoomIndices.contains($0) }
+        let vivos = capturedRooms.indices.filter { !excluidosDelMerge.contains($0) }
         guard !vivos.isEmpty else {
             speak("Todavía no hay ningún cuarto guardado.") {}
             return
@@ -3647,14 +4682,95 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
             let dicho = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             if let v = nivelDeTexto(dicho) {
                 seleccionarNivel(v)
-                showVoiceCaption(Self.nombreVisible(v))
                 continuarTapped()
-            } else if !dicho.isEmpty {
-                campo.text = dicho
-                nivelSeleccionado = dicho
-                pintarBandeja()
+            } else if !dicho.isEmpty, dicho.split(separator: " ").count <= 4 {
+                // Por voz SOLO entra un nivel del proyecto. Antes cualquier
+                // cosa dicha quedaba como nivel: "living room" se volvió el
+                // nivel y el plano decía "Living Room" donde va el piso.
+                let opciones = nivelesDelProyecto.prefix(3).map { Self.nombreVisible($0) }.joined(separator: ", ")
+                speak("Primero el nivel. Di o toca uno: \(opciones).") {}
             }
             return
+        }
+        // UN SOLO ASISTENTE (13-oct): la voz sigue a la bandeja y nada más.
+        // Lo que la bandeja pide es lo que se escucha; ya no hay preguntas
+        // aparte de "¿es el nombre?" o "¿cuarto nuevo o corrijo?".
+        do {
+            let l = raw.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: " ,.;:¡!¿?"))
+            let n = l.split(separator: " ").count
+            func dice(_ ws: [String]) -> Bool { ws.contains { l == $0 || l.contains($0) } }
+            // Los comandos de siempre ("cállate", "cómo vamos") siguen su camino
+            // de abajo; un "sí"/"no" suelto no es un nombre.
+            let generales = ["silencio", "cállate", "callate", "ya no hables", "cállese", "callese",
+                             "cómo vamos", "como vamos", "qué llevo", "que llevo", "cuántos cuartos",
+                             "cuantos cuartos", "qué tengo", "que tengo"]
+            let esGeneral = n <= 4 && dice(generales)
+            let esSiNo = n <= 2 && (Self.isYes(l) || Self.isNo(l))
+            let controles = ["siguiente", "otro cuarto", "cuarto nuevo", "nuevo cuarto", "cuarto listo",
+                             "terminar", "terminamos", "termina el plano", "terminé", "termine", "ya terminé", "ya termine"]
+            let esControl = n <= 3 && (dice(controles) || l == "listo")
+            // ¿Se le puede creer que es un nombre? Un nombre de cuarto conocido,
+            // o la bandeja está pidiendo el nombre, o acaba de tocar el micrófono.
+            let micReciente = micTocadoEn.map { Date().timeIntervalSince($0) < 12 } ?? false
+            func esNombreCreible(_ nombre: String, pidiendo: Bool) -> Bool {
+                let k = nombre.split(separator: " ").count
+                guard k <= 4, !esGeneral, !esSiNo, !esControl, !Self.isMoveOnPhrase(nombre.lowercased()) else { return false }
+                return isKnownRoomWord(nombre) || micReciente || (pidiendo && k <= 3)
+            }
+            if !esGeneral {
+                if state == .roomDonePrompt, aviso != nil {
+                    if n <= 4, dice(["completar", "completa", "complétalo", "completalo"]) { completarTapped(); return }
+                    if n <= 4, dice(["continuar", "continúa", "continua", "sigue así", "sigue asi", "de todos modos"]) { continuarIgualTapped(); return }
+                    return
+                }
+                if state == .roomDonePrompt, enRevisionFinal {
+                    if n <= 3, dice(["guardar", "guarda", "guárdalo", "guardalo"]) { guardarTapped(); return }
+                    if n <= 3, dice(["otro nivel"]) { otroNivelTapped(); return }
+                    if n <= 4, dice(["seguir", "sigue escaneando", "otro cuarto"]) { seguirTapped(); return }
+                    return
+                }
+                if revisandoTodo { return }
+                // Entre un cuarto y el siguiente: un nombre ahí es del que SIGUE.
+                if state == .processingRoom || (state == .roomDonePrompt && aviso == nil && !enRevisionFinal) {
+                    if case .roomName(let nombre) = classifyVoiceCommand(raw), esNombreCreible(nombre, pidiendo: false) {
+                        learnRoomName(nombre)
+                        pendingRoomNameAfterGap = nombre
+                        speak("Entendido, el siguiente es \(Self.enIngles(nombre)).") {}
+                    }
+                    return
+                }
+                if state == .scanningRoom && !eligiendoNivel {
+                    if n <= 3, dice(["siguiente", "otro cuarto", "cuarto nuevo", "nuevo cuarto", "cuarto listo"]) || l == "listo" {
+                        noteOwnSpeechLevel(level)
+                        siguienteTapped()
+                        return
+                    }
+                    if n <= 3, dice(["terminar", "terminamos", "termina el plano"]) {
+                        noteOwnSpeechLevel(level)
+                        terminarTapped()
+                        return
+                    }
+                    if esSiNo { return }
+                    let intento = classifyVoiceCommand(raw)
+                    if case .roomName(let nombre) = intento {
+                        let pidiendo = pendingCurrentRoomName == nil && !bandejaRecogida
+                        guard esNombreCreible(nombre, pidiendo: pidiendo) else { return }
+                        // El nombre se guarda directo (o corrige el que tenía).
+                        pendingUnsureName = nil
+                        roomSplitConfirmationTimer?.invalidate()
+                        roomSplitConfirmationTimer = nil
+                        pendingRoomSplitCandidateName = nil
+                        learnRoomName(nombre)
+                        let isRename = pendingCurrentRoomName != nil && pendingCurrentRoomName != nombre
+                        if let g = completandoIndice, g < voiceNames.count { voiceNames[g] = nombre }
+                        pendingCurrentRoomName = nombre
+                        if !campo.isEditing { campo.text = Self.enIngles(nombre) }
+                        confirmName(Self.enIngles(nombre), isRename: isRename)
+                        animarBandeja()
+                        return
+                    }
+                }
+            }
         }
         // Un nombre que sono raro y quedo esperando un si o un no. Va antes
         // que todo lo demas para que ese "si" no se lea como otra cosa.
@@ -3732,8 +4848,8 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         // volver, porque callar apaga el micro y la voz ya no puede
         // reactivarse a si misma - decir "callate" sin avisar eso lo dejaria
         // creyendo que el asistente se murio.
-        if wordCount <= 3, ["silencio", "cállate", "callate", "ya no hables", "cállese", "callese"]
-            .contains(where: { lower == $0 || lower.hasPrefix($0 + " ") }) {
+        if wordCount <= 4, ["silencio", "cállate", "callate", "ya no hables", "cállese", "callese"]
+            .contains(where: { lower.contains($0) }) {
             noteOwnSpeechLevel(level)
             speak("Me callo. Toca el micrófono en la pantalla cuando quieras que vuelva.") { [weak self] in
                 guard let self = self, !self.micMuted else { return }
@@ -3978,8 +5094,10 @@ final class MinimapaVista: UIView {
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    private var huecosAmbar = false
     func pintar(guardados: [MiniCuarto], actual: String?, punto: CGPoint?,
-                enVivo: MiniCuarto? = nil, huecos: [(CGPoint, CGPoint)] = []) {
+                enVivo: MiniCuarto? = nil, huecos: [(CGPoint, CGPoint)] = [], huecosAmbar: Bool = false) {
+        self.huecosAmbar = huecosAmbar
         self.guardados = guardados
         self.actual = actual
         self.punto = punto
@@ -4082,11 +5200,16 @@ final class MinimapaVista: UIView {
             let c = pr(CGPoint(x: (xs.min()! + xs.max()!) / 2, y: (ys.min()! + ys.max()!) / 2))
             let anchoCuarto = (xs.max()! - xs.min()!) * scale - 8
             // Un nombre que no cabe en su cuarto se achica; si ni así, no se pone.
-            for tam in [10.0, 8.0] as [CGFloat] {
-                let attrs: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: tam, weight: .medium), .foregroundColor: gris]
-                let t = n as NSString, sz = t.size(withAttributes: attrs)
-                if sz.width <= anchoCuarto {
-                    t.draw(at: CGPoint(x: c.x - sz.width / 2, y: c.y - sz.height / 2), withAttributes: attrs)
+            // Un renglón si cabe; si no, dos ("Living / Room"); si ni así, nada.
+            let altoCuarto = (ys.max()! - ys.min()!) * scale - 6
+            let par = NSMutableParagraphStyle(); par.alignment = .center; par.lineBreakMode = .byWordWrapping
+            for tam in [10.0, 9.0, 8.0] as [CGFloat] {
+                let attrs: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: tam, weight: .medium), .foregroundColor: gris, .paragraphStyle: par]
+                let t = n as NSString
+                let caja = t.boundingRect(with: CGSize(width: max(anchoCuarto, 1), height: 200), options: [.usesLineFragmentOrigin], attributes: attrs, context: nil)
+                let palabraMasLarga = n.split(separator: " ").map { ($0 as NSString).size(withAttributes: attrs).width }.max() ?? 0
+                if palabraMasLarga <= anchoCuarto, caja.height <= min(altoCuarto, tam * 2.6) {
+                    t.draw(in: CGRect(x: c.x - anchoCuarto / 2, y: c.y - caja.height / 2, width: anchoCuarto, height: caja.height + 2), withAttributes: attrs)
                     break
                 }
             }
@@ -4095,6 +5218,7 @@ final class MinimapaVista: UIView {
         // El cuarto que va: azul, con sus puertas y ventanas; lo que todavía
         // no se cierra, punteado.
         var centroEnVivo: CGPoint?
+        var anchoEnVivo: CGFloat = 0
         if let v = enVivo, !v.paredes.isEmpty {
             let azul = UIColor.systemBlue
             ctx.setStrokeColor(azul.cgColor)
@@ -4121,7 +5245,8 @@ final class MinimapaVista: UIView {
                 }
             }
             if !huecos.isEmpty {
-                ctx.setLineWidth(2.5)
+                if huecosAmbar { ctx.setStrokeColor(UIColor.systemOrange.cgColor) }
+                ctx.setLineWidth(huecosAmbar ? 3 : 2.5)
                 ctx.setLineDash(phase: 0, lengths: [4, 3])
                 for (a, b) in huecos { ctx.move(to: pr(a)); ctx.addLine(to: pr(b)) }
                 ctx.strokePath()
@@ -4129,11 +5254,18 @@ final class MinimapaVista: UIView {
             }
             let xs = v.paredes.flatMap { [$0.0.x, $0.1.x] }, ys = v.paredes.flatMap { [$0.0.y, $0.1.y] }
             centroEnVivo = pr(CGPoint(x: (xs.min()! + xs.max()!) / 2, y: (ys.min()! + ys.max()!) / 2))
+            anchoEnVivo = (xs.max()! - xs.min()!) * scale - 8
         }
         if let c = centroEnVivo, let n = actual, !n.isEmpty {
-            let attrs: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 10, weight: .semibold), .foregroundColor: UIColor.systemBlue]
-            let t = n as NSString, sz = t.size(withAttributes: attrs)
-            t.draw(at: CGPoint(x: c.x - sz.width / 2, y: c.y - sz.height - 4), withAttributes: attrs)
+            // Que quepa dentro de su cuarto: se achica antes que tocar la pared.
+            for tam in [10.0, 9.0, 8.0] as [CGFloat] {
+                let attrs: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: tam, weight: .semibold), .foregroundColor: UIColor.systemBlue]
+                let t = n as NSString, sz = t.size(withAttributes: attrs)
+                if sz.width <= anchoEnVivo || tam == 8 {
+                    t.draw(at: CGPoint(x: c.x - sz.width / 2, y: c.y - sz.height - 3), withAttributes: attrs)
+                    break
+                }
+            }
         }
 
         // Donde está parado: el punto azul.
@@ -4166,6 +5298,9 @@ final class MinimapaVista: UIView {
 final class DelegadoEnVivo: NSObject, RoomCaptureSessionDelegate {
     var original: RoomCaptureSessionDelegate?
     var alActualizar: ((CapturedRoom) -> Void)?
+    // Las indicaciones de Apple ("más despacio", "acércate"), en español,
+    // ahora que su guía en pantalla está apagada.
+    var alIndicar: ((String?) -> Void)?
     private let lock = NSLock()
     private var ultimo: CFTimeInterval = 0
 
@@ -4193,6 +5328,17 @@ final class DelegadoEnVivo: NSObject, RoomCaptureSessionDelegate {
     }
     func captureSession(_ session: RoomCaptureSession, didProvide instruction: RoomCaptureSession.Instruction) {
         original?.captureSession(session, didProvide: instruction)
+        let texto: String?
+        switch instruction {
+        case .moveCloseToWall: texto = "Acércate un poco a la pared"
+        case .moveAwayFromWall: texto = "Aléjate un poco de la pared"
+        case .slowDown: texto = "Más despacio"
+        case .turnOnLight: texto = "Falta luz: prende la linterna"
+        case .lowTexture: texto = "Apunta a algo con más detalle"
+        default: texto = nil
+        }
+        guard let f = alIndicar else { return }
+        DispatchQueue.main.async { f(texto) }
     }
     func captureSession(_ session: RoomCaptureSession, didStartWith configuration: RoomCaptureSession.Configuration) {
         original?.captureSession(session, didStartWith: configuration)

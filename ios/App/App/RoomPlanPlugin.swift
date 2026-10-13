@@ -84,6 +84,30 @@ public class RoomPlanPlugin: CAPPlugin, CAPBridgedPlugin, QLPreviewControllerDat
                         self?.lastStructure = structure
                         var dict = FloorPlanEncoder.encodeStructure(rooms: rooms, merged: merged, levels: levels, voiceNames: voiceNames, equipment: equipment, deletedIndices: deletedIndices, surfaceAnswers: surfaceAnswers)
                         if let inspection = inspection { dict["inspection"] = inspection }
+                        // EL PARCHE: lo que se escaneó con "Completar escaneo" se une a su
+                        // cuarto (paredes que faltaban, puertas y ventanas nuevas); ya viene
+                        // acomodado al plano entregado.
+                        if var insp = dict["inspection"] as? [String: Any],
+                           let parches = insp["parches"] as? [String: [String: Any]],
+                           var cuartos = dict["rooms"] as? [[String: Any]] {
+                            for (k, p) in parches {
+                                guard let i = Int(k), cuartos.indices.contains(i) else { continue }
+                                for clave in ["walls", "doors", "windows", "openings"] {
+                                    let extra = p[clave] as? [[String: Any]] ?? []
+                                    if !extra.isEmpty { cuartos[i][clave] = ((cuartos[i][clave] as? [[String: Any]]) ?? []) + extra }
+                                }
+                                cuartos[i]["_completado"] = true
+                            }
+                            dict["rooms"] = cuartos
+                            insp["parches"] = nil
+                            insp["parchesUnidos"] = parches.count
+                            dict["inspection"] = insp
+                        }
+                        if let insp = dict["inspection"] as? [String: Any], let inc = insp["incompleteRooms"] as? [Int],
+                           var cuartos = dict["rooms"] as? [[String: Any]] {
+                            for i in inc where cuartos.indices.contains(i) { cuartos[i]["incomplete"] = true }
+                            dict["rooms"] = cuartos
+                        }
                         // El nivel que escogió en la bandeja (puede no ser el que mandó la web).
                         if !vc.nivelBase.isEmpty { dict["nivelBase"] = vc.nivelBase }
                         call.resolve(dict)

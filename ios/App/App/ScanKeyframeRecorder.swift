@@ -53,6 +53,11 @@ final class ScanKeyframeRecorder {
     // técnico mientras camina. Nada de esto toca la sesión de RoomPlan.
     var onStudsSeen: ((Int) -> Void)?
     static let umbralStudsEnVivo: Float = 0.7
+    // EL SEGUNDO CEREBRO, EN VIVO (13-oct): lo que ARKit sabe y RoomPlan no
+    // enseña - si el rastreo está limitado (y por qué) y si el LiDAR está
+    // midiendo con poca confianza. Solo lee el cuadro; se llama en main,
+    // solo cuando el aviso CAMBIA (nil = ya todo bien).
+    var onCalidad: ((String?) -> Void)?
     struct Trace {
         let poses: [PoseRecord]
         let keyframes: [KeyframeMeta]
@@ -115,6 +120,9 @@ final class ScanKeyframeRecorder {
     // saber si RoomPlan nos deja ver puertas y ventanas por segunda vía.
     // Nunca crea, cambia ni quita nada de la sesión.
     private var meshTicks = 0
+    private var calidadUltima: String?
+    private var calidadTicks = 0
+    private var profundidadBaja: [Int: (suma: Double, n: Int)] = [:]
     private var meshSamples = 0
     private var meshFramesWithMesh = 0
     private var meshMaxAnchors = 0
@@ -261,7 +269,40 @@ final class ScanKeyframeRecorder {
         guard let frame = arSessionProvider()?.currentFrame else { noteActivity("tick.noFrame"); return }
         // Limited/relocalizing poses would poison coverage and their
         // images are blurry - skip the whole tick.
-        guard case .normal = frame.camera.trackingState else { noteActivity("tick.limitedTracking"); return }
+        // El rastreo de ARKit: si está limitado se dice por qué, en español.
+        var aviso: String? = nil
+        switch frame.camera.trackingState {
+        case .limited(.excessiveMotion): aviso = "Más despacio: la cámara se mueve muy rápido"
+        case .limited(.insufficientFeatures): aviso = "Apunta a algo con más detalle (o prende la linterna)"
+        case .limited(.relocalizing): aviso = "Ubicándose otra vez: regresa la cámara a donde estaba"
+        case .limited(.initializing): aviso = nil
+        case .notAvailable: aviso = "La cámara perdió su ubicación"
+        default: break
+        }
+        guard case .normal = frame.camera.trackingState else {
+            avisarCalidad(aviso)
+            noteActivity("tick.limitedTracking")
+            return
+        }
+        // La confianza del LiDAR, cada ~2 s: qué parte de la profundidad viene
+        // marcada "baja" por ARKit. Mucha baja = datos poco fiables (vidrio,
+        // espejo, muy lejos, muy oscuro). Se guarda por cuarto y se avisa.
+        calidadTicks += 1
+        if scanning, calidadTicks % 4 == 0 {
+            var baja: Double? = nil
+            if let conf = frame.sceneDepth?.confidenceMap ?? frame.smoothedSceneDepth?.confidenceMap {
+                baja = Self.fraccionBaja(conf)
+            }
+            if let b = baja {
+                let previo = profundidadBaja[roomIndex] ?? (0, 0)
+                profundidadBaja[roomIndex] = (previo.suma + b, previo.n + 1)
+                aviso = b > 0.5 ? "El LiDAR no ve bien aquí: acércate o ve más despacio" : nil
+            }
+            avisarCalidad(aviso)
+        } else if calidadUltima != nil && calidadUltima!.hasPrefix("Más despacio") || calidadUltima?.hasPrefix("Ubicándose") == true || calidadUltima?.hasPrefix("La cámara perdió") == true {
+            // El rastreo ya volvió a la normalidad: se quita su aviso.
+            avisarCalidad(nil)
+        }
 
         let thermal = ProcessInfo.processInfo.thermalState
         if thermal.rawValue > maxThermal.rawValue { maxThermal = thermal }
@@ -416,6 +457,39 @@ final class ScanKeyframeRecorder {
     // caer en un píxel de ruido): en una pared abierta los studs son lo más
     // cercano; en una pared normal el percentil 8 es la misma pared.
     static let parcheProfundidad = 15   // radio: 31x31
+    private func avisarCalidad(_ texto: String?) {
+        guard texto != calidadUltima else { return }
+        calidadUltima = texto
+        guard let f = onCalidad else { return }
+        DispatchQueue.main.async { f(texto) }
+    }
+
+    // Qué fracción de los pixeles de confianza vienen en "baja" (0).
+    static func fraccionBaja(_ mapa: CVPixelBuffer) -> Double? {
+        CVPixelBufferLockBaseAddress(mapa, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(mapa, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddress(mapa) else { return nil }
+        let w = CVPixelBufferGetWidth(mapa), h = CVPixelBufferGetHeight(mapa)
+        let bpr = CVPixelBufferGetBytesPerRow(mapa)
+        guard w > 0, h > 0 else { return nil }
+        var bajos = 0, total = 0
+        // Uno de cada 4 en cada dirección basta (256x192 -> ~3000 muestras).
+        for y in stride(from: 0, to: h, by: 4) {
+            let fila = base.advanced(by: y * bpr).assumingMemoryBound(to: UInt8.self)
+            for x in stride(from: 0, to: w, by: 4) {
+                if fila[x] == 0 { bajos += 1 }
+                total += 1
+            }
+        }
+        return total > 0 ? Double(bajos) / Double(total) : nil
+    }
+
+    // Una copia de las fotos tomadas hasta ahora (para que el segundo cerebro
+    // mire las que apuntaban a un hueco).
+    func snapshotKeyframes(_ completion: @escaping ([KeyframeMeta]) -> Void) {
+        queue.async { [weak self] in completion(self?.keyframes ?? []) }
+    }
+
     // MARK: - Sonda de la malla (always on `queue`)
 
     private func probeMesh(_ frame: ARFrame) {
@@ -484,7 +558,10 @@ final class ScanKeyframeRecorder {
             "faces": meshFacesBest,
             "planes": meshPlanesBest,
             "perRoom": perRoom,
-            "maxMs": (meshMaxMs * 10).rounded() / 10
+            "maxMs": (meshMaxMs * 10).rounded() / 10,
+            "profundidadBajaPorCuarto": Dictionary(uniqueKeysWithValues: profundidadBaja.map {
+                (String($0.key), (($0.value.suma / Double(max($0.value.n, 1))) * 100).rounded() / 100)
+            })
         ]
     }
 
