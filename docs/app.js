@@ -1,15 +1,15 @@
 // Scanova · arranque, sesión y navegación. Las pantallas viven en index.html; lo de trabajos en trabajos.js.
-import { SUPABASE_URL, ANON_KEY, APP_BUILD } from './config.js?v=2026-10-13-8';
-import { ESQUEMA_APARATO, urlEntrarGoogle } from './google.js?v=2026-10-13-8';
-import * as trabajos from './trabajos.js?v=2026-10-13-8';
-import * as personas from './personas.js?v=2026-10-13-8';
-import * as fotos from './fotos.js?v=2026-10-13-8';
-import * as panel from './panel.js?v=2026-10-13-8';
-import * as camara from './camara.js?v=2026-10-13-8';
-import * as direccion from './direccion.js?v=2026-10-13-8';
-import * as proyecto from './proyecto.js?v=2026-10-13-8';
-import * as foto from './foto.js?v=2026-10-13-8';
-import * as editor from './editor.js?v=2026-10-13-8';
+import { SUPABASE_URL, ANON_KEY, APP_BUILD } from './config.js?v=2026-10-13-9';
+import { ESQUEMA_APARATO, urlEntrarGoogle } from './google.js?v=2026-10-13-9';
+import * as trabajos from './trabajos.js?v=2026-10-13-9';
+import * as personas from './personas.js?v=2026-10-13-9';
+import * as fotos from './fotos.js?v=2026-10-13-9';
+import * as panel from './panel.js?v=2026-10-13-9';
+import * as camara from './camara.js?v=2026-10-13-9';
+import * as direccion from './direccion.js?v=2026-10-13-9';
+import * as proyecto from './proyecto.js?v=2026-10-13-9';
+import * as foto from './foto.js?v=2026-10-13-9';
+import * as editor from './editor.js?v=2026-10-13-9';
 
 export const $ = (s, r = document) => r.querySelector(s);
 export const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -374,4 +374,35 @@ async function arrancar(){
   }
   if(esAparato()) irA('pEntrar'); else mostrarInicio();
 }
-if(typeof document !== 'undefined'){ document.addEventListener('DOMContentLoaded', arrancar); console.info('Scanova360', APP_BUILD); }
+// ---------- versión nueva ----------
+// El servidor deja que el teléfono guarde la página 10 minutos; sin esto, después de publicar seguía viendo la vieja
+// aunque cerrara y abriera la app. Al abrir y al volver a la pantalla pregunta la versión (sin caché) y, si hay otra,
+// recarga con ?v= (otra dirección = página fresca). Una sola vez por versión, para no dar vueltas.
+export function debeRecargar(remota, local, yaIntentada){
+  const v = String(remota || '').trim();
+  return !!v && /^\d{4}-\d{2}-\d{2}-[\w-]+$/.test(v) && v !== local && v !== yaIntentada;
+}
+function ocupado(){
+  const b = document.body.classList;
+  if(b.contains('con-camara') || b.contains('fv-editando') || fotos.hayFotosSubiendo()) return true;
+  const p = [...document.querySelectorAll('.pantalla')].find(x => !x.hidden);
+  if(p && ['pForma', 'pClave', 'pCrear', 'pCodigo', 'pNivel', 'pCuarto'].includes(p.id)) return true;
+  const a = document.activeElement; return !!(a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && a.type !== 'button')));
+}
+let BUSCANDO = false;
+async function buscarVersionNueva(){
+  if(BUSCANDO || ocupado()) return; BUSCANDO = true;
+  try{
+    const r = await fetch('version.txt?cb=' + Date.now(), { cache:'no-store' }); if(!r.ok) return;
+    const v = (await r.text()).trim();
+    let ya = ''; try{ ya = sessionStorage.getItem('scanova.recargo') || ''; }catch{}
+    if(!debeRecargar(v, APP_BUILD, ya) || ocupado()) return;
+    try{ sessionStorage.setItem('scanova.recargo', v); }catch{}
+    location.replace(location.pathname + '?v=' + encodeURIComponent(v) + location.hash);
+  }catch{} finally { BUSCANDO = false; }
+}
+if(typeof document !== 'undefined'){
+  document.addEventListener('DOMContentLoaded', arrancar); console.info('Scanova360', APP_BUILD);
+  window.addEventListener('load', () => setTimeout(buscarVersionNueva, 1500));
+  document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible') buscarVersionNueva(); });
+}
