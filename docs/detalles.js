@@ -1,8 +1,8 @@
 // Scanova · "Project Details" (diseño de Amilcar, 12 oct 2026): el panel de la derecha en la computadora y el cajón
 // que entra desde la derecha en el teléfono. Customer, Project Users, Collaborators, Description, Tasks y Project Conversation.
 // Lo que se guarda vive en sql/fotos-05-detalles.sql.
-import { $, $$, authFetch, esManager, PERFIL } from './app.js?v=2026-10-13-6';
-import * as trabajos from './trabajos.js?v=2026-10-13-6';
+import { $, $$, authFetch, esManager, PERFIL } from './app.js?v=2026-10-13-7';
+import * as trabajos from './trabajos.js?v=2026-10-13-7';
 
 const esc = (v) => trabajos.esc(v);
 const IC = (n) => '<svg class="ic"><use href="#i-' + n + '"/></svg>';

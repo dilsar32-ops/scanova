@@ -1,12 +1,12 @@
 // Scanova · la ficha de un proyecto (diseño de Amilcar, 12 oct 2026): portada, nombre, dirección, etapa, cliente,
 // encargado y fecha; pestañas Rooms · Photos · Measurements · Notes · Documents · Activity.
 // Rooms = niveles (Basement, First Floor…) y sus cuartos (Kitchen…). Photos = las fotos por nivel y por cuarto.
-import { $, $$, authFetch, irA, atras, esManager, PERFIL } from './app.js?v=2026-10-13-6';
-import * as trabajos from './trabajos.js?v=2026-10-13-6';
-import * as fotos from './fotos.js?v=2026-10-13-6';
-import * as panel from './panel.js?v=2026-10-13-6';
-import * as camara from './camara.js?v=2026-10-13-6';
-import * as detalles from './detalles.js?v=2026-10-13-6';
+import { $, $$, authFetch, irA, atras, esManager, PERFIL } from './app.js?v=2026-10-13-7';
+import * as trabajos from './trabajos.js?v=2026-10-13-7';
+import * as fotos from './fotos.js?v=2026-10-13-7';
+import * as panel from './panel.js?v=2026-10-13-7';
+import * as camara from './camara.js?v=2026-10-13-7';
+import * as detalles from './detalles.js?v=2026-10-13-7';
 
 const esc = (v) => trabajos.esc(v);
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -44,6 +44,19 @@ export function agruparPorCuarto(lista, cuartos){
   const grupos = []; const usados = new Set();
   (cuartos || []).forEach(c => { const fs = lista.filter(f => f.cuarto_id === c.id); if(fs.length){ grupos.push({ titulo: c.nombre, fotos: fs }); fs.forEach(f => usados.add(f.id)); } });
   const resto = lista.filter(f => !usados.has(f.id)); if(resto.length) grupos.push({ titulo: 'No room', fotos: resto });
+  return grupos;
+}
+// View by Level: en el orden de los niveles, y al final las que no tienen nivel.
+export function agruparPorNivel(lista, niveles){
+  const grupos = []; const usados = new Set();
+  (niveles || []).forEach(n => { const fs = lista.filter(f => f.nivel_id === n.id); if(fs.length){ grupos.push({ titulo: n.nombre, fotos: fs }); fs.forEach(f => usados.add(f.id)); } });
+  const resto = lista.filter(f => !usados.has(f.id)); if(resto.length) grupos.push({ titulo: 'No Level', fotos: resto });
+  return grupos;
+}
+// View by Date: un grupo por día, en el orden en que ya vienen (Newest u Oldest First).
+export function agruparPorDia(lista){
+  const grupos = []; let g = null;
+  lista.forEach(f => { const dia = fechaCortaEn(fechaF(f)) || 'No date'; if(!g || g.titulo !== dia){ g = { titulo: dia, fotos: [] }; grupos.push(g); } g.fotos.push(f); });
   return grupos;
 }
 // Activity: subidas seguidas de la misma persona (menos de 2 h entre una y otra) se cuentan juntas.
@@ -87,8 +100,9 @@ export function actividadDetalles(tareas, coms, nombreDe){
   return out.filter(x => !isNaN(x.cuando));
 }
 export function cabeceraHtml(t, portada, manager){
-  // Su diseño: nombre; dirección; "PM · Created" en una línea; y abajo las etiquetas. La foto mide lo mismo que el texto.
-  const pm = t.encargado ? 'PM: ' + esc(t.encargado) : '';
+  // Su diseño (13-oct): nombre; dirección; etiquetas; y abajo "Project Manager" y "Created", cada uno en su línea.
+  // En el teléfono se queda como lo aprobó: "PM: x | Created" en una línea (ahí se acomoda por posición, no por orden).
+  const pm = t.encargado ? '<span class="pm-largo">Project Manager: </span><span class="pm-corto">PM: </span>' + esc(t.encargado) : '';
   const fecha = 'Created: ' + esc(fechaCortaEn(t.created_at));   // su pedido: junto a PM, la fecha en que se creó el proyecto
   // El cliente ya sale en Project Details (Customer); aquí se repetía junto al nombre del proyecto.
   const meta = [pm, fecha].filter(Boolean).map(x => '<span class="pm-i">' + x + '</span>').join('<span class="sep">|</span>');
@@ -97,8 +111,8 @@ export function cabeceraHtml(t, portada, manager){
     <div class="pcab-datos">
       <h1 class="pcab-t">${esc(t.cliente)}</h1>
       <a class="pcab-dir" href="${esc(trabajos.mapsUrl(t.direccion))}" target="_blank" rel="noopener">${esc(t.direccion || 'No address')}</a>
-      <div class="pcab-meta">${meta}</div>
       <div class="pcab-etqs">${etiquetasHtml(t)}<button type="button" class="enlace-editar solo-compu" data-editar-etq>${IC('lapiz')}Edit Labels</button></div>
+      <div class="pcab-meta">${meta}</div>
       <button type="button" class="enlace-editar solo-movil-i" data-editar-etq>${IC('lapiz')}Edit Labels</button>
     </div>
     <div class="pcab-acc">
@@ -109,7 +123,7 @@ export function cabeceraHtml(t, portada, manager){
   </div>`;
 }
 export function tabsHtml(activa, conteos){
-  return '<div class="ptabs" id="fichaTabs" role="tablist">' + TABS.map(([k, txt]) => `<button type="button" class="ptab${k === activa ? ' on' : ''}" data-ptab="${k}">${txt}${k === 'fotos' ? ' <span class="n" id="fotosConteo">(' + (conteos.fotos || 0) + ')</span>' : ''}</button>`).join('') + '</div>';
+  return '<div class="ptabs" id="fichaTabs" role="tablist">' + TABS.filter(([k]) => k !== 'cuartos').map(([k, txt]) => `<button type="button" class="ptab${k === activa ? ' on' : ''}" data-ptab="${k}">${txt}${k === 'fotos' ? ' <span class="n" id="fotosConteo">(' + (conteos.fotos || 0) + ')</span>' : ''}</button>`).join('') + '</div>';
 }
 export function fotoCardHtml(f, url, etiqueta, sel){
   return `<div class="pfoto${sel ? ' sel' : ''}">
@@ -120,7 +134,7 @@ export function fotoCardHtml(f, url, etiqueta, sel){
 
 // ---------- estado ----------
 let T = null, NIVELES = [], CUARTOS = [], TAB = 'fotos', SUBTAB = 'niveles', NIVEL_CUARTOS = '';
-let FILTRO = { nivel:'todos', cuarto:'todos' }, VISTA = 'grid', ORDEN = 'nuevas', POR_CUARTO = false;
+let FILTRO = { nivel:'todos', cuarto:'todos' }, VISTA = 'grid', ORDEN = 'nuevas', VER_POR = 'nivel';
 let MODO_SEL = false; const SEL = new Set(); let URLS = {}; let EDIT_NIVEL = null, EDIT_CUARTO = null;
 export const niveles = () => NIVELES;
 export const cuartos = () => CUARTOS;
@@ -153,7 +167,7 @@ function aviso(txt){ const a = $('#fichaAviso'); if(a) a.textContent = txt || ''
 // ---------- abrir la ficha ----------
 export function abrir(t, portada){
   T = t; NIVELES = []; CUARTOS = []; TAB = 'fotos'; SUBTAB = 'niveles'; NIVEL_CUARTOS = '';
-  FILTRO = { nivel:'todos', cuarto:'todos' }; POR_CUARTO = false; MODO_SEL = false; SEL.clear(); URLS = {};
+  FILTRO = { nivel:'todos', cuarto:'todos' }; VER_POR = 'nivel'; MODO_SEL = false; SEL.clear(); URLS = {};
   $('#trabajoFicha').innerHTML = cabeceraHtml(t, portada, esManager()) + tabsHtml(TAB, { fotos: 0 }) +
     TABS.map(([k]) => `<div class="tab-panel" data-panel="${k}"${k === TAB ? '' : ' hidden'}>${k === 'fotos' ? '<div id="fotosPanel"></div><p class="aviso" id="fotosAviso"></p>' : '<div id="panel-' + k + '"></div>'}</div>`).join('') +
     '<p class="aviso" id="fichaAviso"></p>';
@@ -172,7 +186,12 @@ function pintarTodo(){ pintarCuartos(); pintarFotos(); pintarNotas(); pintarActi
 
 // ---------- Rooms ----------
 function miniDe(lista){ const f = ordenarFotos(lista, 'nuevas')[0]; return f ? (URLS[f.id] || '') : ''; }
+// Ya no es pestaña (su diseño): se llega por ••• > Levels & Rooms y tiene su "Back to Photos" arriba.
 function pintarCuartos(){
+  pintarCuartosLista();
+  const caja = $('#panel-cuartos'); if(caja && !caja.querySelector('.pcuartos-cab')) caja.insertAdjacentHTML('afterbegin', `<div class="pcuartos-cab"><button type="button" class="volver" data-ptab="fotos">${IC('atras')}Back to Photos</button><h2 class="sec-t">Levels & Rooms</h2></div>`);
+}
+function pintarCuartosLista(){
   const caja = $('#panel-cuartos'); if(!caja) return;
   const fs = fotos.lista();
   const sub = `<div class="subtabs"><button type="button" class="subtab${SUBTAB === 'niveles' ? ' on' : ''}" data-subtab="niveles">Levels</button><button type="button" class="subtab${SUBTAB === 'cuartos' ? ' on' : ''}" data-subtab="cuartos">Rooms</button></div>`;
@@ -202,7 +221,19 @@ function pintarCuartos(){
 }
 
 // ---------- Photos ----------
-function ordenVisible(lista){ const fs = ordenarFotos(filtrarFotos(lista, FILTRO), ORDEN); return POR_CUARTO ? agruparPorCuarto(fs, CUARTOS.filter(c => FILTRO.nivel === 'todos' || c.nivel_id === FILTRO.nivel)).flatMap(g => g.fotos) : fs; }
+function gruposVisibles(fs){
+  if(VER_POR === 'cuarto') return agruparPorCuarto(fs, CUARTOS.filter(c => FILTRO.nivel === 'todos' || c.nivel_id === FILTRO.nivel));
+  if(VER_POR === 'fecha') return agruparPorDia(fs);
+  return FILTRO.nivel === 'todos' && NIVELES.length ? agruparPorNivel(fs, NIVELES) : null;
+}
+function ordenVisible(lista){ const fs = ordenarFotos(filtrarFotos(lista, FILTRO), ORDEN); const g = gruposVisibles(fs); return g ? g.flatMap(x => x.fotos) : fs; }
+const VER_TXT = { nivel:'Level', cuarto:'Room', fecha:'Date' };
+export function menuVerPorHtml(verPor, orden){
+  const ok = (on) => on ? IC('check', 'menu-ok') : '';
+  return ['nivel', 'cuarto', 'fecha'].map(k => `<button type="button" data-ver-por="${k}"${k === verPor ? ' class="on"' : ''}>View by ${VER_TXT[k]}${ok(k === verPor)}</button>`).join('') +
+    '<div class="menu-sep"></div><p class="menu-cab">Date order</p>' +
+    [['nuevas', 'Newest First'], ['viejas', 'Oldest First']].map(([k, txt]) => `<button type="button" data-orden-fotos="${k}"${k === orden ? ' class="on"' : ''}>${txt}${ok(k === orden)}</button>`).join('');
+}
 export function pintarFotos(urls){
   if(urls) URLS = Object.assign({}, URLS, urls);
   const caja = $('#fotosPanel'); if(!caja || !T) return;
@@ -221,7 +252,6 @@ export function pintarFotos(urls){
       <div class="chips pchips">${chips.join('')}</div>
       <label class="sel psel-nivel"><select id="selNivelFotos" aria-label="Level">${opNivel.join('')}</select>${IC('chev')}</label>
       <div class="vistas"><button type="button" class="vista${VISTA === 'grid' ? ' on' : ''}" data-vista="grid" aria-label="Grid">${IC('cuadros')}</button><button type="button" class="vista${VISTA === 'lista' ? ' on' : ''}" data-vista="lista" aria-label="List">${IC('lista')}</button></div>
-      <label class="sel psel-orden"><select id="selOrdenFotos" aria-label="Order"><option value="nuevas"${ORDEN === 'nuevas' ? ' selected' : ''}>Newest</option><option value="viejas"${ORDEN === 'viejas' ? ' selected' : ''}>Oldest</option></select>${IC('chev')}</label>
       <span class="pherr-salto"></span>
       ${selCuarto}
       <button type="button" class="btn btn-outline btn-chico psel-btn${MODO_SEL ? ' on' : ''}" id="btnSeleccionar">${MODO_SEL ? 'Cancel' : 'Select'}</button>
@@ -229,7 +259,7 @@ export function pintarFotos(urls){
     </div>`;
   const porNivel = (FILTRO.nivel === 'todos' && NIVELES.length) ? '<h3 class="psub solo-movil">By Level</h3><div class="plista solo-movil">' + NIVELES.map(nv => { const m = miniDe(todas.filter(f => f.nivel_id === nv.id));
       return `<div class="pfila" data-filtro-nivel="${esc(nv.id)}"><span class="pfila-mini">${m ? '<img src="' + esc(m) + '" alt="">' : IC('cubo')}</span><span class="pfila-txt"><b>${esc(nv.nombre)}</b><small>${c.nivel[nv.id] || 0} photos</small></span>${IC('chev-der', 'chev-der')}</div>`; }).join('') + '</div>' : '';
-  const titulo = (FILTRO.cuarto !== 'todos' ? nombreCuarto(FILTRO.cuarto) : FILTRO.nivel === 'todos' ? 'All' : FILTRO.nivel === 'sin' ? 'No level' : nombreNivel(FILTRO.nivel)) + ' Photos';
+  const titulo = (FILTRO.cuarto !== 'todos' ? nombreCuarto(FILTRO.cuarto) : FILTRO.nivel === 'todos' ? 'All' : FILTRO.nivel === 'sin' ? 'No Level' : nombreNivel(FILTRO.nivel)) + ' Photos';
   const fs = ordenarFotos(filtrarFotos(todas, FILTRO), ORDEN);
   const d = destinoActual();
   const destino = (T.estado === 'archivado' ? '' : `<p class="pdestino">${IC('pin')}New photos go to: <b>${esc(nombreDestino(d))}</b></p>`);
@@ -237,12 +267,12 @@ export function pintarFotos(urls){
   let cuerpo;
   if(!todas.length) cuerpo = '<div class="vacio-fotos">' + IC('camara') + '<div><b>No photos in this project yet.</b><br>Tap Upload Photos, or the blue camera button to take several in a row.</div></div>';
   else if(!fs.length) cuerpo = '<p class="vacio">No photos here yet.</p>';
-  else if(POR_CUARTO) cuerpo = agruparPorCuarto(fs, CUARTOS.filter(x => FILTRO.nivel === 'todos' || x.nivel_id === FILTRO.nivel)).map(g => `<section class="pgrupo"><h4>${esc(g.titulo)} <span class="n">${g.fotos.length}</span></h4><div class="pgrid ${VISTA}">${g.fotos.map(tarjeta).join('')}</div></section>`).join('');
+  else if(gruposVisibles(fs)) cuerpo = gruposVisibles(fs).map(g => `<section class="pgrupo"><h4>${esc(g.titulo)} <span class="n">${g.fotos.length}</span></h4><div class="pgrid ${VISTA}">${g.fotos.map(tarjeta).join('')}</div></section>`).join('');
   else cuerpo = `<div class="pgrid ${VISTA}">${fs.map(tarjeta).join('')}</div>`;
   const barraSel = MODO_SEL ? `<div class="psel-barra"><b>${SEL.size} selected</b><button type="button" class="btn btn-outline btn-chico" data-sel-accion="mover"${SEL.size ? '' : ' disabled'}>${IC('carpeta')}Move to room</button><button type="button" class="btn btn-outline btn-chico btn-rojo" data-sel-accion="papelera"${SEL.size ? '' : ' disabled'}>${IC('archivo')}Delete</button></div>` : '';
   caja.classList.toggle('pmodo-sel', MODO_SEL);
   caja.innerHTML = destino + fotos.tandaHtml() + herr + porNivel + barraSel +
-    `<div class="sec-cab ptitulo"><h2 class="sec-t">${esc(titulo)} (${fs.length})</h2>${fs.length ? `<button type="button" class="ver-cuarto" id="btnPorCuarto">${POR_CUARTO ? 'View by Date' : 'View by Room'}${IC('chev-der')}</button>` : ''}</div>` + cuerpo;
+    `<div class="sec-cab ptitulo"><h2 class="sec-t">${esc(titulo)} (${fs.length})</h2>${todas.length ? `<button type="button" class="ver-por" id="btnVerPor" aria-haspopup="menu">View by: ${VER_TXT[VER_POR]}${IC('chev')}</button>` : ''}</div>` + cuerpo;
   if(TAB === 'cuartos') pintarCuartos();
 }
 
@@ -474,7 +504,7 @@ export function conectar(){
     if((el = q('[data-foto-menu]'))){ e.stopPropagation(); const id = el.dataset.fotoMenu;
       panel.abrirMenuEn(el, `<button type="button" data-p-accion="foto-mover" data-id="${esc(id)}">${IC('carpeta')}Move to room</button><button type="button" data-p-accion="foto-bajar" data-id="${esc(id)}">${IC('galeria')}Open full size</button><button type="button" class="rojo" data-p-accion="foto-papelera" data-id="${esc(id)}">${IC('archivo')}Delete</button>`); return; }
     if(q('#btnFichaMenu')){ e.stopPropagation(); const t = T; const dig = trabajos.telDigitos(t.telefono);
-      panel.abrirMenuEn(q('#btnFichaMenu'), `<button type="button" data-p-accion="detalles">${IC('doc')}Project details</button><button type="button" data-p-accion="etiquetas">${IC('etiqueta')}Edit labels</button><button type="button" data-p-accion="editar">${IC('lapiz')}Edit project</button>${dig ? `<button type="button" data-p-accion="llamar">${IC('tel')}Call</button><button type="button" data-p-accion="mensaje">${IC('msj')}Message</button>` : ''}<button type="button" data-p-accion="mapa">${IC('pin')}Open in Maps</button>${esManager() ? `<button type="button" data-p-accion="archivar" class="${t.estado === 'archivado' ? '' : 'rojo'}">${IC('archivo')}${t.estado === 'archivado' ? 'Reactivate' : 'Archive'}</button>` : ''}`); return; }
+      panel.abrirMenuEn(q('#btnFichaMenu'), `<button type="button" data-p-accion="detalles">${IC('doc')}Project details</button><button type="button" data-p-accion="etiquetas">${IC('etiqueta')}Edit labels</button><button type="button" data-p-accion="niveles">${IC('casa')}Levels & Rooms</button><button type="button" data-p-accion="editar">${IC('lapiz')}Edit project</button>${dig ? `<button type="button" data-p-accion="llamar">${IC('tel')}Call</button><button type="button" data-p-accion="mensaje">${IC('msj')}Message</button>` : ''}<button type="button" data-p-accion="mapa">${IC('pin')}Open in Maps</button>${esManager() ? `<button type="button" data-p-accion="archivar" class="${t.estado === 'archivado' ? '' : 'rojo'}">${IC('archivo')}${t.estado === 'archivado' ? 'Reactivate' : 'Archive'}</button>` : ''}`); return; }
     if((el = q('[data-p-accion]'))){
       const a = el.dataset.pAccion, id = el.dataset.id; panel.cerrarMenu();
       if(a === 'nivel-cuartos'){ NIVEL_CUARTOS = id; SUBTAB = 'cuartos'; pintarCuartos(); }
@@ -491,6 +521,7 @@ export function conectar(){
       else if(a === 'editar') trabajos.editar(T, 'pTrabajo');
       else if(a === 'detalles') detalles.abrirPanel();
       else if(a === 'etiquetas') abrirEtiquetas();
+      else if(a === 'niveles'){ irTab('cuartos'); const m = $('#main'); if(m) m.scrollTo(0, 0); }
       else if(a === 'llamar') location.href = 'tel:' + trabajos.telDigitos(T.telefono);
       else if(a === 'mensaje') location.href = 'sms:' + trabajos.telDigitos(T.telefono);
       else if(a === 'mapa') window.open(trabajos.mapsUrl(T.direccion), '_blank', 'noopener');
@@ -510,7 +541,9 @@ export function conectar(){
     if((el = q('[data-ver-cuarto]')) && !q('.mas-btn')){ const c = CUARTOS.find(x => x.id === el.dataset.verCuarto); if(c){ FILTRO = { nivel:c.nivel_id, cuarto:c.id }; irTab('fotos'); } return; }
     if((el = q('[data-filtro-nivel]'))){ FILTRO = { nivel: el.dataset.filtroNivel, cuarto:'todos' }; pintarFotos(); return; }
     if((el = q('[data-vista]'))){ VISTA = el.dataset.vista; pintarFotos(); return; }
-    if(q('#btnPorCuarto')){ POR_CUARTO = !POR_CUARTO; pintarFotos(); return; }
+    if(q('#btnVerPor')){ e.stopPropagation(); panel.abrirMenuEn(q('#btnVerPor'), menuVerPorHtml(VER_POR, ORDEN)); return; }
+    if((el = q('[data-ver-por]'))){ VER_POR = el.dataset.verPor; panel.cerrarMenu(); pintarFotos(); return; }
+    if((el = q('[data-orden-fotos]'))){ ORDEN = el.dataset.ordenFotos; panel.cerrarMenu(); pintarFotos(); return; }
     if(q('#btnSeleccionar')){ MODO_SEL = !MODO_SEL; SEL.clear(); pintarFotos(); return; }
     if((el = q('[data-sel-accion]'))){ const ids = [...SEL]; if(el.dataset.selAccion === 'mover') mover(ids); else papelera(ids); return; }
     if((el = q('[data-abrir-tipos]'))){ ESC_ABRIR = ESC_ABRIR === el.dataset.abrirTipos ? '' : el.dataset.abrirTipos; pintarEscoger(); return; }
@@ -532,7 +565,7 @@ export function conectar(){
   document.addEventListener('change', (e) => {
     if(e.target.id === 'selCuartoFotos'){ FILTRO.cuarto = e.target.value; pintarFotos(); }
     else if(e.target.id === 'selNivelFotos'){ FILTRO = { nivel: e.target.value, cuarto:'todos' }; pintarFotos(); }
-    else if(e.target.id === 'selOrdenFotos'){ ORDEN = e.target.value; pintarFotos(); }
+
     else if(e.target.id === 'selNivelCuartos'){ NIVEL_CUARTOS = e.target.value; pintarCuartos(); }
   });
   // formas

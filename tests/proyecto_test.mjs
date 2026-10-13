@@ -28,7 +28,18 @@ ok('fechaHora: Oct 12, 2026 y la hora', /^Oct 12, 2026 \d{1,2}:\d{2} (AM|PM)$/.t
 ok('fechaCortaEn: una fecha sola (sin hora) no se corre un día', P.fechaCortaEn('2026-10-10') === 'Oct 10, 2026' && P.fechaCortaEn(null) === '');
 const card = P.fotoCardHtml({ id:'f<1', subida_at:'2026-10-12T14:00:00Z' }, 'u.jpg', 'Kitchen <A>', true);
 ok('fotoCardHtml: abre la foto, nombre del cuarto escapado, fecha, ••• y marcada si está escogida', /data-foto="f&lt;1"/.test(card) && /Kitchen &lt;A&gt;/.test(card) && /data-foto-menu=/.test(card) && /class="pfoto sel"/.test(card) && /src="u\.jpg"/.test(card));
-ok('tabsHtml: Photos con su conteo y la activa marcada', /data-ptab="fotos">Photos <span class="n" id="fotosConteo">\(142\)<\/span>/.test(P.tabsHtml('fotos', { fotos:142 })) && /class="ptab on" data-ptab="cuartos"/.test(P.tabsHtml('cuartos', { fotos:0 })));
+ok('tabsHtml: Photos con su conteo y la activa marcada', /data-ptab="fotos">Photos <span class="n" id="fotosConteo">\(142\)<\/span>/.test(P.tabsHtml('fotos', { fotos:142 })) && /class="ptab on" data-ptab="notas"/.test(P.tabsHtml('notas', { fotos:0 })));
+ok('tabsHtml: su diseño del 13-oct, sin pestaña Rooms; Photos va primero', !/data-ptab="cuartos"/.test(P.tabsHtml('fotos', { fotos:0 })) && P.tabsHtml('fotos', { fotos:0 }).indexOf('data-ptab="fotos"') < P.tabsHtml('fotos', { fotos:0 }).indexOf('data-ptab="medidas"'));
+{ const NV = [{ id:'n1', nombre:'First Floor' }, { id:'n2', nombre:'Basement' }];
+  const L = [{ id:'a', nivel_id:'n2' }, { id:'b', nivel_id:null }, { id:'c', nivel_id:'n1' }, { id:'d', nivel_id:'n2' }];
+  const g = P.agruparPorNivel(L, NV);
+  ok('View by Level: grupos en el orden de los niveles y al final No Level', g.map(x => x.titulo + ':' + x.fotos.map(f => f.id).join('')).join(' ') === 'First Floor:c Basement:ad No Level:b');
+  ok('View by Level: un nivel sin fotos no sale', P.agruparPorNivel([{ id:'x', nivel_id:'n1' }], NV).length === 1);
+  const D = [{ id:'1', tomada_at:'2026-10-13T15:00:00Z' }, { id:'2', tomada_at:'2026-10-13T14:00:00Z' }, { id:'3', tomada_at:'2026-10-12T14:00:00Z' }];
+  const gd = P.agruparPorDia(D);
+  ok('View by Date: un grupo por día, respetando el orden en que vienen', gd.length === 2 && gd[0].fotos.length === 2 && gd[1].fotos[0].id === '3' && /Oct 1[23], 2026/.test(gd[0].titulo));
+  const m = P.menuVerPorHtml('cuarto', 'viejas');
+  ok('menú View by: Level/Room/Date, Date order Newest/Oldest First, con la marca en lo escogido', /View by Level/.test(m) && /View by Room/.test(m) && /View by Date/.test(m) && /Newest First/.test(m) && /Oldest First/.test(m) && /data-ver-por="cuarto" class="on"/.test(m) && /data-orden-fotos="viejas" class="on"/.test(m) && !/data-ver-por="nivel" class="on"/.test(m) && (m.match(/menu-ok/g) || []).length === 2); }
 ok('nombreDestino: nivel › cuarto, solo nivel, o No room', typeof P.nombreDestino === 'function' && P.nombreDestino({}) === 'No room');
 
 // ---------- su segunda imagen: etiquetas, Project Details ----------

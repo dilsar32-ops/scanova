@@ -736,7 +736,7 @@ body.menu-abierto .menu-velo{ display:block; position:absolute; inset:0; z-index
   #pTrabajo{ max-width:1560px; }
   .ptrabajo{ display:grid; grid-template-columns:minmax(0,1fr) 340px; gap:24px; align-items:start; }
   body.det-oculto .ptrabajo{ grid-template-columns:minmax(0,1fr); }
-  body.det-oculto #pTrabajo{ max-width:1180px; }
+  body.det-oculto #pTrabajo{ max-width:1560px; }   /* su diseño 13-oct: sin la barra de detalles, las fotos usan todo el ancho */
   .pdet-lado{ display:block; position:sticky; top:0; max-height:calc(100vh - 100px); overflow:auto; padding-bottom:12px; }
   body.det-oculto .pdet-lado{ display:none; }
   body.det-oculto .pdet-mostrar{ display:inline-flex; align-items:center; gap:6px; font:inherit; font-size:13.5px; font-weight:600; color:#fff; background:#1e293b; border:0; border-radius:10px; padding:0 12px; height:40px; cursor:pointer; }
@@ -1344,3 +1344,21 @@ body.fv-editando .fv-asa{ visibility:hidden; }
    que mide lo mismo que el texto. */
 .pcab .portada{ position:relative; }
 .pcab .portada img{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+
+/* ---------- 13-oct: su diseño de la ficha (Photos sin pestaña Rooms, "View by", PM y Created en su línea) ---------- */
+.pm-largo{ display:none; }
+@media (min-width:900px){
+  .pm-largo{ display:inline; } .pcab-meta .pm-corto{ display:none; }
+  .pcab .pcab-meta{ flex-direction:column; align-items:flex-start; gap:2px; }
+  .pcab .pcab-meta .sep{ display:none; }
+  .pcab .pcab-etqs{ margin:2px 0 4px; }
+}
+.ver-por{ display:inline-flex; align-items:center; gap:6px; font:inherit; font-size:14.5px; font-weight:600; color:var(--accent); background:var(--card); border:1.5px solid var(--accent); border-radius:10px; padding:7px 12px; cursor:pointer; }
+.ver-por .ic{ width:16px; height:16px; }
+.menu-pop .menu-ok{ margin-left:auto; color:var(--accent) !important; }
+.menu-pop button.on{ color:var(--accent); }
+.menu-pop .menu-sep{ border-top:1px solid var(--line); margin:6px 4px; }
+.menu-pop .menu-cab{ margin:6px 10px 2px; font-size:11.5px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-mute); }
+.pcuartos-cab{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin:0 0 12px; }
+.pcuartos-cab .sec-t{ margin:0; }
+.pcuartos-cab .volver{ padding:4px 0; }
