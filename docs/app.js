@@ -86,9 +86,21 @@ export { ESQUEMA_APARATO, urlEntrarGoogle };
 export function leerVuelta(fragmento){
   const f = String(fragmento || '').replace(/^#/, ''); if(!f) return null;
   const q = new URLSearchParams(f);
-  if(q.get('access_token')) return { access_token: q.get('access_token'), refresh_token: q.get('refresh_token') || '' };
-  if(q.get('error') || q.get('error_description')) return { error: (q.get('error_description') || q.get('error') || '').replace(/\+/g, ' ') };
+  if(q.get('access_token')) return { access_token: q.get('access_token'), refresh_token: q.get('refresh_token') || '', ...(q.get('type') ? { tipo: q.get('type') } : {}) };
+  if(q.get('error') || q.get('error_description')) return { error: (q.get('error_description') || q.get('error') || '').replace(/\+/g, ' '), codigo: q.get('error_code') || '' };
   return null;
+}
+// A dónde regresa el enlace del correo de "¿Olvidó su contraseña?": a Scanova360 (no a la página de Field Reports, que es
+// la dirección principal del proyecto en Supabase). En la app o fuera de http, siempre a scanova360.com.
+export function urlVueltaClave(href){
+  try{ const u = new URL(href); if(u.protocol === 'https:' || u.protocol === 'http:') return u.origin + u.pathname.replace(/[^/]*$/, ''); }catch{}
+  return 'https://scanova360.com/';
+}
+// Pura: el mensaje cuando el enlace del correo falla.
+export function errorDeVuelta(v){
+  if(!v || !v.error) return '';
+  if(v.codigo === 'otp_expired' || /expired|invalid/i.test(v.error)) return 'Ese enlace ya venció o ya se usó. Pida otro con "¿Olvidó su contraseña?".';
+  return 'No se pudo entrar: ' + v.error;
 }
 async function googleActivo(){
   try{ const r = await fetch(SUPABASE_URL + '/auth/v1/settings', { headers:{ apikey: ANON_KEY } }); const d = await r.json(); return !!(d && d.external && d.external.google); }catch{ return false; }
@@ -109,7 +121,7 @@ async function entrarConGoogle(aviso){
 // Con la vuelta en la mano: guardar la sesión, saber quién es, y llevarlo a donde le toca.
 async function procesarVuelta(v, aviso){
   if(!v) return false;
-  if(v.error){ abrirEntrar('pEntrar'); $('#entrarAviso').textContent = 'No se pudo entrar con Google: ' + v.error; return true; }
+  if(v.error){ abrirEntrar('pEntrar'); $('#entrarAviso').textContent = errorDeVuelta(v); return true; }
   guardarSes({ access_token: v.access_token, refresh_token: v.refresh_token, user_id: null });
   const r = await authFetch('/auth/v1/user'); const u = r.ok ? await r.json() : null;
   if(!u || !u.id){ guardarSes(null); abrirEntrar('pEntrar'); $('#entrarAviso').textContent = 'No se pudo entrar con Google. Intente otra vez.'; return true; }
@@ -121,6 +133,32 @@ async function procesarVuelta(v, aviso){
     pintarQuien(); await llegar(p); return true;
   }
   pedirCodigo(); return true;
+}
+// Vino del enlace del correo: con esa sesión de un rato se pone la contraseña nueva, y luego entra como siempre.
+async function pedirClaveNueva(v){
+  guardarSes({ access_token: v.access_token, refresh_token: v.refresh_token, user_id: null });
+  $('#ncClave').value = ''; $('#ncClave2').value = ''; $('#ncAviso').textContent = '';
+  abrirEntrar('pClave');
+  try{ const r = await authFetch('/auth/v1/user'); const u = r.ok ? await r.json() : null; if(u && u.id){ guardarSes({ ...SES, user_id: u.id }); if(u.email) $('#ncCorreo').textContent = 'Para ' + u.email + '. Escriba su contraseña nueva.'; } }catch{}
+}
+async function guardarClaveNueva(){
+  const aviso = $('#ncAviso'); aviso.classList.remove('ok');
+  const c1 = $('#ncClave').value || '', c2 = $('#ncClave2').value || '';
+  if(c1.length < 6) return aviso.textContent = 'La contraseña necesita 6 letras o más.';
+  if(c1 !== c2) return aviso.textContent = 'Las dos contraseñas no son iguales.';
+  const b = $('#btnNcGuardar'); b.disabled = true; b.textContent = 'Guardando…';
+  try{
+    const r = await authFetch('/auth/v1/user', { method:'PUT', body: JSON.stringify({ password: c1 }) });
+    const t = await r.text(); let d = null; try{ d = JSON.parse(t); }catch{}
+    if(!r.ok){ const m = (d && (d.msg || d.message || d.error_description)) || ('HTTP ' + r.status);
+      throw new Error(/different from the old/i.test(m) ? 'La contraseña nueva tiene que ser distinta a la anterior.' : r.status === 401 ? 'El enlace ya venció. Pida otro con "¿Olvidó su contraseña?".' : m); }
+    if(d && d.id) guardarSes({ ...SES, user_id: d.id });
+    aviso.classList.add('ok'); aviso.textContent = 'Listo: su contraseña quedó cambiada.';
+    const p = await cargarPerfil();
+    if(p && p.company_id){ pintarQuien(); await llegar(p); }
+    else { guardarSes(null); abrirEntrar('pEntrar'); $('#entrarAviso').classList.add('ok'); $('#entrarAviso').textContent = 'Contraseña cambiada. Ya puede entrar con su correo y la contraseña nueva.'; }
+  }catch(e){ aviso.textContent = 'No se pudo cambiar. ' + String(e && e.message || ''); }
+  b.disabled = false; b.textContent = 'Guardar y entrar';
 }
 // Entró con Google pero no es del equipo todavía: pedir el código (queda en espera hasta que el manager apruebe).
 function pedirCodigo(){
@@ -158,20 +196,20 @@ export function cerrarEntrar(){ MODAL = false; document.body.classList.remove('m
 // ---------- navegación: una pantalla a la vez, con su salida al pie ----------
 const pila = [];
 export function irA(id, desde){
-  const enVentana = MODAL && (id === 'pEntrar' || id === 'pCrear' || id === 'pEspera' || id === 'pCodigo');
+  const enVentana = MODAL && (id === 'pEntrar' || id === 'pCrear' || id === 'pEspera' || id === 'pCodigo' || id === 'pClave');
   if(!enVentana){ MODAL = false; document.body.classList.remove('modal-entrar'); ocultarInicio(); }
   if(desde) pila.push(desde);
   document.body.classList.remove('menu-abierto');
   if(id !== 'pFoto' && editor.activo()) editor.cerrar(true);
   if(id !== 'pTrabajo'){ const k = $('#cajonDetalles'); if(k){ k.hidden = true; document.body.classList.remove('con-cajon'); } }
   $$('.pantalla').forEach(p => { p.hidden = p.id !== id; });
-  const solo = (id === 'pEntrar' || id === 'pCrear' || id === 'pEspera' || id === 'pCodigo');
+  const solo = (id === 'pEntrar' || id === 'pCrear' || id === 'pEspera' || id === 'pCodigo' || id === 'pClave');
   document.body.classList.toggle('modo-entrar', solo);
   $('#pie').hidden = solo;
   // La barra lateral y la de abajo marcan en qué parte está (Projects abarca la forma y la ficha).
   const seccion = { pInicio:'inicio', pProyectos:'proyectos', pForma:'proyectos', pTrabajo:'proyectos', pNivel:'proyectos', pCuarto:'proyectos', pFoto:'proyectos', pPersonas:'settings', pGaleria:'galeria', pMas:'mas', pPronto: PRONTO }[id] || '';
   $$('[data-nav]').forEach(b => b.classList.toggle('on', !!seccion && b.dataset.nav === seccion));
-  $('#subtitulo').textContent = { pEntrar:'Scanova360', pCrear:'Crear cuenta', pEspera:'Cuenta en espera', pInicio:'Home', pProyectos:'Projects', pPersonas:'Team', pForma:'Project', pTrabajo:'Project', pNivel:'Level', pCuarto:'Room', pFoto:'Photo', pGaleria:'Gallery', pMas:'More' }[id] || 'Scanova360';
+  $('#subtitulo').textContent = { pEntrar:'Scanova360', pClave:'Contraseña nueva', pCrear:'Crear cuenta', pEspera:'Cuenta en espera', pInicio:'Home', pProyectos:'Projects', pPersonas:'Team', pForma:'Project', pTrabajo:'Project', pNivel:'Level', pCuarto:'Room', pFoto:'Photo', pGaleria:'Gallery', pMas:'More' }[id] || 'Scanova360';
   const m = $('#main'); if(m) m.scrollTo(0, 0); window.scrollTo(0, 0);
 }
 export function atras(){ const a = pila.pop(); if(a) irA(a); else irA('pInicio'); if(!a || a === 'pInicio' || a === 'pProyectos'){ trabajos.pintar(); trabajos.cargar(); } }
@@ -225,11 +263,13 @@ async function arrancar(){
   });
   googleActivo().then(si => { $$('.g-solo').forEach(x => { x.hidden = !si; }); });
   // Recuperar: Supabase manda el correo con el enlace; aqui solo se pide.
+  $('#btnNcGuardar').addEventListener('click', guardarClaveNueva);
+  $('#ncClave2').addEventListener('keydown', (e) => { if(e.key === 'Enter') guardarClaveNueva(); });
   $('#lnkOlvide').addEventListener('click', async (e) => {
     e.preventDefault();
     const correo = ($('#inCorreo').value || '').trim(); const aviso = $('#entrarAviso');
     if(!correo) return aviso.textContent = 'Escriba su correo arriba y vuelva a tocar aquí.';
-    try{ await authPost('/auth/v1/recover', { email: correo }); aviso.classList.add('ok'); aviso.textContent = 'Le mandamos un correo para cambiar la contraseña. Revise también la carpeta de correo no deseado.'; }
+    try{ await authPost('/auth/v1/recover?redirect_to=' + encodeURIComponent(urlVueltaClave(location.href)), { email: correo }); aviso.classList.add('ok'); aviso.textContent = 'Le mandamos un correo para cambiar la contraseña. Revise también la carpeta de correo no deseado.'; }
     catch(err){ aviso.classList.remove('ok'); aviso.textContent = 'No se pudo mandar el correo. ' + String(err && err.message || ''); }
   });
   async function entrar(){
@@ -320,7 +360,9 @@ async function arrancar(){
 
   // ¿Viene de vuelta de Google? (#access_token=... o #error=...): se limpia la dirección y se entra.
   const vuelta = leerVuelta(location.hash);
-  if(vuelta){ history.replaceState(null, '', location.pathname + location.search); if(!esAparato()) mostrarInicio(); if(await procesarVuelta(vuelta)) return; }
+  if(vuelta){ history.replaceState(null, '', location.pathname + location.search); if(!esAparato()) mostrarInicio();
+    if(vuelta.tipo === 'recovery'){ await pedirClaveNueva(vuelta); return; }   // vino del correo de "¿Olvidó su contraseña?"
+    if(await procesarVuelta(vuelta)) return; }
   SES = leerSes();
   if(SES && SES.access_token){
     const p = await cargarPerfil();

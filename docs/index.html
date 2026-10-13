@@ -334,6 +334,22 @@ body.en-inicio{ overflow:hidden; }
         </div>
       </section>
 
+      <!-- CONTRASEÑA NUEVA: llega aquí desde el enlace del correo de "¿Olvidó su contraseña?". -->
+      <section class="pantalla entrar" id="pClave" hidden>
+        <div class="entrar-caja">
+          <button type="button" class="cerrar-modal" data-cerrar-modal aria-label="Cerrar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+          <div class="marca">
+            <svg class="logo" aria-hidden="true"><use href="#i-logo"/></svg>
+            <div class="marca-nombre">Contraseña nueva</div>
+            <div class="marca-lema" id="ncCorreo">Escriba su contraseña nueva.</div>
+          </div>
+          <div class="field"><label for="ncClave">Contraseña nueva <span class="hint">6 letras o más</span></label><input type="password" id="ncClave" autocomplete="new-password"></div>
+          <div class="field"><label for="ncClave2">Escríbala otra vez</label><input type="password" id="ncClave2" autocomplete="new-password"></div>
+          <button type="button" class="btn btn-accent btn-block btn-grande" id="btnNcGuardar">Guardar y entrar</button>
+          <p class="aviso" id="ncAviso"></p>
+        </div>
+      </section>
+
       <!-- EN ESPERA: la cuenta existe pero el manager todavia no la aprueba. -->
       <section class="pantalla entrar" id="pEspera" hidden>
         <div class="entrar-caja centrado">
