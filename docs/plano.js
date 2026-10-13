@@ -1,5 +1,5 @@
 // GENERADO por tools/extraer_plano.py desde Field Reports (no editar a mano: se vuelve a generar).
-// Dibuja el plano igual que Field Reports. 107 piezas.
+// Dibuja el plano igual que Field Reports. 112 piezas.
 /* eslint-disable */
 const document = (typeof globalThis !== "undefined" && globalThis.document) || undefined;
   const $ = (sel, el) => { const d = el || (typeof document !== 'undefined' ? document : null); return d && d.querySelector ? d.querySelector(sel) : null; };
@@ -94,6 +94,150 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
     }else{
       rotateRooms(data.rooms, floorplanDominantAngle(data.rooms));
     }
+  }
+  function floorplanRectifyWalls(data){
+    let straightened = 0;
+    ((data && data.rooms) || []).forEach(room => {
+      const walls = (room.walls||[]).filter(w => w.start && w.end);
+      if(!walls.length) return;
+      // Corner clustering via the shared fpBuildNodes (defined with the
+      // editor engine, same 0.35ft radius): endpoints within tolerance
+      // are ONE physical corner node; positions write back to every
+      // endpoint at the end - a room literally cannot come apart.
+      const { nodes, ends } = fpBuildNodes(walls.map(w => ({ wall: w, roomIdx: 0 })));
+      const offAxisDeg = e => {
+        const ang = Math.abs(Math.atan2(e.b.y-e.a.y, e.b.x-e.a.x)) * 180/Math.PI % 180;
+        return Math.min(ang % 90, 90 - (ang % 90));
+      };
+      const horiz = e => Math.abs(e.b.y-e.a.y) <= Math.abs(e.b.x-e.a.x);
+      const lenOf = e => Math.hypot(e.b.x-e.a.x, e.b.y-e.a.y);
+      // Count what pass A will straighten BEFORE moving anything.
+      ends.forEach(e => { const off = offAxisDeg(e); if(off > 0.05 && off <= 3) straightened++; });
+      // Pass A: near-axis noise - consensus mean-snap, iterated until the
+      // corner network stops moving (walls sharing corners tug on the same
+      // nodes; averaging converges geometrically).
+      for(let it = 0; it < 12; it++){
+        let moved = 0;
+        ends.forEach(e => {
+          const off = offAxisDeg(e);
+          if(off <= 0 || off > 3) return;
+          if(horiz(e)){
+            const y = (e.a.y + e.b.y)/2;
+            if(Math.abs(e.a.y-y) > 1e-6 || Math.abs(e.b.y-y) > 1e-6){ e.a.y = y; e.b.y = y; moved++; }
+          }else{
+            const x = (e.a.x + e.b.x)/2;
+            if(Math.abs(e.a.x-x) > 1e-6 || Math.abs(e.b.x-x) > 1e-6){ e.a.x = x; e.b.x = x; moved++; }
+          }
+        });
+        if(!moved) break;
+      }
+      // Pass B: a SHORT (<=6ft) connector 3-25deg off-axis joined at both
+      // ends to longer axis-aligned walls is a mis-measured square return
+      // - the corner backed by the SHORTER neighbor (least evidence)
+      // moves onto the other corner's line. Genuinely diagonal
+      // architecture (a 45deg bay, a long angled wall) never matches.
+      ends.forEach(e => {
+        const off = offAxisDeg(e);
+        if(off <= 3 || off > 25 || lenOf(e) > 6) return;
+        const neighborAt = node => {
+          let best = null;
+          ends.forEach(o => {
+            if(o === e) return;
+            if((o.a === node || o.b === node) && offAxisDeg(o) <= 3 && (!best || lenOf(o) > lenOf(best))) best = o;
+          });
+          return best;
+        };
+        const nA = neighborAt(e.a), nB = neighborAt(e.b);
+        if(!nA || !nB || lenOf(nA) <= lenOf(e) || lenOf(nB) <= lenOf(e)) return;
+        const moveA = lenOf(nA) <= lenOf(nB);
+        const mover = moveA ? e.a : e.b, anchor = moveA ? e.b : e.a;
+        // TOPE (13 de septiembre): esta regla movía una esquina hasta
+        // 6·sin 25° = 2.54 ft sin decir cuánto. Ahora, más de 0.75 ft no se
+        // mueve solo: queda para el asistente de esquinas, que lo PROPONE
+        // con la cifra en el botón. 0.75 conserva el caso aceptado en obra
+        // (Master Bedroom: conector de 2.4 ft a 17.8°, 0.73 ft).
+        const lateral = horiz(e) ? Math.abs(mover.y - anchor.y) : Math.abs(mover.x - anchor.x);
+        if(lateral > FP_ESQ.reglaBTope) return;
+        if(data) data._rectifiedMaxMoveFt = Math.max(data._rectifiedMaxMoveFt || 0, Math.round(lateral * 100) / 100);
+        if(horiz(e)) mover.y = anchor.y; else mover.x = anchor.x;
+        straightened++;
+      });
+      // Write node positions back to every endpoint they own.
+      nodes.forEach(n => n.refs.forEach(p => { p.x = n.x; p.y = n.y; }));
+      walls.forEach(w => { w.lengthFt = Math.round(Math.hypot(w.end.x-w.start.x, w.end.y-w.start.y)*100)/100; });
+    });
+    if(data) data._rectified = straightened;
+    return straightened;
+  }
+  function floorplanRefineGeometry(data){
+    // HARD GATE (audit-confirmed critical): unmerged rooms live in
+    // INDEPENDENT coordinate frames - two rooms' walls overlapping in
+    // those frames is pure coincidence, and "reconciling" them welded
+    // unrelated physical walls together (up to 0.55ft displacement and
+    // +30% room area on the insurance PDF, reproduced on real scans).
+    // Cross-room refinement is only meaningful in one shared frame.
+    if(data && data.merged === false){
+      data._refinement = { snappedWalls: 0, snappedOpenings: 0, skipped: 'unmerged' };
+      return data._refinement;
+    }
+    const rooms = ((data && data.rooms) || []).filter(r => !r.deleted && (r.walls||[]).length);
+    const sameLevel = (a, b) => (a.level||1) === (b.level||1);
+    let snappedWalls = 0, snappedOpenings = 0;
+    // --- Shared-wall snapping ---
+    for(let a=0; a<rooms.length; a++){
+      for(let b=a+1; b<rooms.length; b++){
+        if(!sameLevel(rooms[a], rooms[b])) continue; // floors never share a physical wall line
+        (rooms[a].walls||[]).forEach(wa => {
+          if(!wa.start || !wa.end) return; // malformed record - skip, never crash
+          const dxA = wa.end.x-wa.start.x, dyA = wa.end.y-wa.start.y;
+          const lenA = Math.hypot(dxA,dyA) || 1;
+          const uxA = dxA/lenA, uyA = dyA/lenA;
+          const nxA = -uyA, nyA = uxA;
+          (rooms[b].walls||[]).forEach(wb => {
+            if(!wb.start || !wb.end) return; // malformed record - skip, never crash
+            const dxB = wb.end.x-wb.start.x, dyB = wb.end.y-wb.start.y;
+            const lenB = Math.hypot(dxB,dyB) || 1;
+            if(Math.abs((dxB/lenB)*uxA + (dyB/lenB)*uyA) < 0.98) return; // not parallel
+            const offB = ((wb.start.x-wa.start.x)*nxA + (wb.start.y-wa.start.y)*nyA);
+            if(Math.abs(offB) < 0.02 || Math.abs(offB) > 0.6) return; // already aligned, or not the same wall
+            const proj = p => (p.x-wa.start.x)*uxA + (p.y-wa.start.y)*uyA;
+            const b0 = proj(wb.start), b1 = proj(wb.end);
+            const lo = Math.max(0, Math.min(b0,b1)), hi = Math.min(lenA, Math.max(b0,b1));
+            if(hi - lo <= 1.0) return; // no meaningful overlap
+            // Length-weighted mutual best-fit line: shift each wall along
+            // the normal so both land on it.
+            const target = offB * (lenB / (lenA + lenB));
+            const shiftA = target, shiftB = target - offB;
+            [wa.start, wa.end].forEach(p => { p.x += nxA*shiftA; p.y += nyA*shiftA; });
+            [wb.start, wb.end].forEach(p => { p.x += nxA*shiftB; p.y += nyA*shiftB; });
+            snappedWalls++;
+          });
+        });
+      }
+    }
+    // --- Cross-room door/opening position snapping ---
+    const snapPair = (listA, listB) => {
+      (listA||[]).forEach(oa => {
+        (listB||[]).forEach(ob => {
+          if(!oa.position || !ob.position) return;
+          const d = Math.hypot(oa.position.x-ob.position.x, oa.position.y-ob.position.y);
+          if(d < 0.02 || d > 0.75) return;
+          const mx = (oa.position.x+ob.position.x)/2, my = (oa.position.y+ob.position.y)/2;
+          oa.position = {x:mx, y:my};
+          ob.position = {x:mx, y:my};
+          snappedOpenings++;
+        });
+      });
+    };
+    for(let a=0; a<rooms.length; a++){
+      for(let b=a+1; b<rooms.length; b++){
+        if(!sameLevel(rooms[a], rooms[b])) continue;
+        snapPair(rooms[a].doors, rooms[b].doors);
+        snapPair(rooms[a].openings, rooms[b].openings);
+      }
+    }
+    if(data) data._refinement = { snappedWalls, snappedOpenings };
+    return { snappedWalls, snappedOpenings };
   }
   const FLOORPLAN_CATEGORY_ES = {
     storage: 'Storage', refrigerator: 'Refrigerator', stove: 'Stove', oven: 'Oven',
@@ -1756,6 +1900,113 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
     }
     return out;
   }
+  function fpApplyCornerFix(data, ri, f, auto){
+    const room = ((data && data.rooms) || [])[ri];
+    if(!room || !f) return false;
+    const largo = w => { w.lengthFt = Math.round(Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y) * 100) / 100; };
+    const mover = (w, punta, a, marca) => {
+      const desde = { x: w[punta].x, y: w[punta].y };
+      w[punta] = { x: a.x, y: a.y };
+      largo(w);
+      if(auto) w[marca] = { end: punta, from: desde, ft: Math.round(Math.hypot(a.x - desde.x, a.y - desde.y) * 100) / 100 };
+      else w._geomEdited = true;
+    };
+    if(f.kind === 'corner'){
+      mover(f.wallA, f.puntaA, f.vertex, '_cornerClosed');
+      mover(f.wallB, f.puntaB, f.vertex, '_cornerClosed');
+      return true;
+    }
+    if(f.kind === 'overshoot'){
+      mover(f.wallA, f.puntaA, f.vertex, '_cornerTrimmed');
+      mover(f.wallB, f.puntaB, f.vertex, '_cornerTrimmed');
+      return true;
+    }
+    if(f.kind === 'skew'){
+      // La esquina es UN nodo: se mueven todas las puntas que lo comparten,
+      // no solo la pared torcida. Revision del 13 de septiembre: antes solo
+      // se marcaba `f.wall` y sin destino, asi que Reopen no podia devolver
+      // nada (borraba la marca y dejaba la esquina movida) y la pared
+      // vecina que tambien se corrio se iba sin *, sin † y sin contar en el
+      // resumen. Ahora CADA pared que toca el nodo lleva su marca, con
+      // destino incluido, para que Reopen sepa a donde volver.
+      const refs = f.nodo.refs;
+      const desde = { x: f.nodo.x, y: f.nodo.y };
+      const destino = { x: f.destino.x, y: f.destino.y };
+      refs.forEach(p => { p.x = destino.x; p.y = destino.y; });
+      (room.walls || []).forEach(w => {
+        if(!w.start || !w.end) return;
+        if(refs.indexOf(w.start) < 0 && refs.indexOf(w.end) < 0) return;
+        largo(w);
+        if(auto){
+          if(w === f.wall) w._cornerSquared = { from: desde, to: destino, ft: f.lateralFt };
+          else w._cornerNodeMoved = { from: desde, to: destino, ft: f.lateralFt };
+        }else{
+          w._geomEdited = true;
+        }
+      });
+      return true;
+    }
+    return false;
+  }
+  function floorplanCloseCorners(data){
+    const cuenta = { closed: 0, squared: 0, trimmed: 0, maxMoveFt: 0 };
+    if(!data || !data.rooms) return cuenta;
+    (data.rooms || []).forEach((room, ri) => {
+      if(!room || room.deleted) return;
+      // Una a la vez y se vuelve a mirar: cerrar una esquina cambia el contorno.
+      // Las que la usuaria ya reabrio (`_cornerAcks`, escrito por
+      // fpReopenCorners) no se vuelven a cerrar solas: "despues ya no
+      // vuelve a cerrarse sola" tiene que valer tambien cuando esto se
+      // llama desde AI Fix, no solo al cargar el plano.
+      const acks = room._cornerAcks || {};
+      for(let vuelta = 0; vuelta < 8; vuelta++){
+        const f = fpCornerFindings(data, ri).find(x => x.band === 'auto' && !acks[x.key]);
+        if(!f || !fpApplyCornerFix(data, ri, f, true)) break;
+        if(f.kind === 'corner') cuenta.closed++;
+        else if(f.kind === 'skew') cuenta.squared++;
+        else cuenta.trimmed++;
+        cuenta.maxMoveFt = Math.max(cuenta.maxMoveFt, f.maxMoveFt || 0);
+      }
+    });
+    const antes = data._corners || { closed: 0, squared: 0, trimmed: 0, maxMoveFt: 0 };
+    data._corners = { closed: antes.closed + cuenta.closed, squared: antes.squared + cuenta.squared,
+                      trimmed: antes.trimmed + cuenta.trimmed, maxMoveFt: Math.max(antes.maxMoveFt || 0, cuenta.maxMoveFt) };
+    return cuenta;
+  }
+  function fpReopenCorners(data){
+    let n = 0;
+    ((data && data.rooms) || []).forEach((room, ri) => {
+      let nRoom = 0;
+      const cerca = (a, b) => Math.hypot(a.x - b.x, a.y - b.y) <= 0.05;
+      const squares = [];
+      (room.walls || []).forEach(w => { if(w._cornerSquared) squares.push(w._cornerSquared); });
+      squares.forEach(sq => {
+        (room.walls || []).forEach(w => {
+          ['start', 'end'].forEach(punta => {
+            if(w[punta] && cerca(w[punta], sq.to)) w[punta] = { x: sq.from.x, y: sq.from.y };
+          });
+        });
+      });
+      (room.walls || []).forEach(w => {
+        if(!w.start || !w.end) return;
+        ['_cornerClosed', '_cornerTrimmed'].forEach(k => {
+          const m = w[k];
+          if(!m || !m.from || !m.end) return;
+          w[m.end] = { x: m.from.x, y: m.from.y };
+          delete w[k]; n++; nRoom++;
+        });
+        if(w._cornerSquared){ delete w._cornerSquared; n++; nRoom++; }
+        if(w._cornerNodeMoved){ delete w._cornerNodeMoved; n++; nRoom++; }
+        w.lengthFt = Math.round(Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y) * 100) / 100;
+      });
+      if(nRoom){
+        room._cornerAcks = room._cornerAcks || {};
+        fpCornerFindings(data, ri).forEach(f => { room._cornerAcks[f.key] = true; });
+      }
+    });
+    if(data) data._corners = { closed: 0, squared: 0, trimmed: 0, maxMoveFt: 0, reopened: n };
+    return n;
+  }
   function fpWalkedPath(data, level){
     const raw = data && data.inspection && data.inspection.path;
     if(!Array.isArray(raw)) return [];
@@ -2522,4 +2773,4 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
   let FP_VISTA_LIMPIA = false;
   function fpKVista(label, dimTxt, rb, X, Y, lx, ly){ const w = 2 * Math.min(lx - X(rb.minX), X(rb.maxX) - lx) * 0.88, h = 2 * Math.min(ly - Y(rb.minY), Y(rb.maxY) - ly) * 0.8; const ancho = Math.max(0.64 * 30 * String(label).replace(/&[a-z#0-9]+;/g, 'x').length, 0.6 * 23 * String(dimTxt).length); return Math.max(0.5, Math.min(2.4, w / ancho, h / 70)); }
   export function ponerVista(limpia){ FP_VISTA_LIMPIA = !!limpia; fpSheetExport = !!limpia; }
-export { buildFloorplanSvg, buildFloorplanSvgUnmerged, floorplanLevels, fpRoomDisplayAreaSqFt, fpDisplayTotalAreaSqFt, fpOrderedRoomPolygon, fpPolygonAreaSqFt, fpFeetInches, fpPlanMeasurements, fpRoomMeasurements, floorplanIsExteriorWall };
+export { buildFloorplanSvg, buildFloorplanSvgUnmerged, floorplanLevels, fpRoomDisplayAreaSqFt, fpDisplayTotalAreaSqFt, fpOrderedRoomPolygon, fpPolygonAreaSqFt, fpFeetInches, fpPlanMeasurements, fpRoomMeasurements, floorplanIsExteriorWall, floorplanAlignRooms, floorplanRectifyWalls, floorplanRefineGeometry, floorplanCloseCorners };

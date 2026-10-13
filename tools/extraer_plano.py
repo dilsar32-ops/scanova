@@ -7,7 +7,9 @@ FR = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser('~/Downloads/field
 src = open(os.path.join(FR, 'www', 'index.html'), encoding='utf-8').read()
 ROOTS = ['buildFloorplanSvg', 'buildFloorplanSvgUnmerged', 'floorplanLevels', 'fpRoomDisplayAreaSqFt',
          'fpDisplayTotalAreaSqFt', 'fpOrderedRoomPolygon', 'fpPolygonAreaSqFt', 'fpFeetInches',
-         'fpPlanMeasurements', 'fpRoomMeasurements', 'floorplanIsExteriorWall']
+         'fpPlanMeasurements', 'fpRoomMeasurements', 'floorplanIsExteriorWall',
+         # lo que Field Reports le hace a cada escaneo al recibirlo: enderezarlo, escuadrarlo, cerrar esquinas
+         'floorplanAlignRooms', 'floorplanRectifyWalls', 'floorplanRefineGeometry', 'floorplanCloseCorners']
 ROOTS += [r for r in (sys.argv[2].split(',') if len(sys.argv) > 2 else []) if r]
 defs = {}   # nombre -> (orden, texto)
 SIG = re.compile(r'\n  (?=[A-Za-z_$/])')

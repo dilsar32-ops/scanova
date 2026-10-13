@@ -2,8 +2,8 @@
 // (el mismo escáner de Field Reports, que ya viene dentro de la app: plugin RoomScan) y se dibuja con el
 // mismo código de Field Reports (plano.js, copiado por tools/extraer_plano.py). Un escaneo por piso;
 // un escaneo nuevo no borra el anterior (queda de historial), se ve el más reciente.
-import * as plano from './plano.js?v=2026-10-13-11';
-import { authFetch, esAparato } from './app.js?v=2026-10-13-11';
+import * as plano from './plano.js?v=2026-10-13-12';
+import { authFetch, esAparato } from './app.js?v=2026-10-13-12';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
@@ -16,6 +16,7 @@ const PZ = { s: 1, x: 0, y: 0 }, PZ_GRANDE = { s: 1, x: 0, y: 0 };   // acercami
 // ---------- puras (para las pruebas) ----------
 export const fmtPies = (n) => (Math.round(Number(n) || 0)).toLocaleString('en-US');
 export function resumenPlano(data){
+  data = prepararPlano(data);
   const rooms = ((data && data.rooms) || []).filter(r => !r.deleted && (r.walls || []).length);
   if(!rooms.length) return { area: 0, cuartos: 0, murosExt: 0, techo: 0 };
   const m = plano.fpPlanMeasurements(data);
@@ -28,10 +29,26 @@ export function resumenPlano(data){
 }
 // El plano que se ve de cada piso: el más reciente (la lista viene ordenada del más nuevo al más viejo).
 export const planoDe = (planos, nivelId) => (planos || []).find(p => (p.nivel_id || SIN_NIVEL) === (nivelId || SIN_NIVEL)) || null;
+// El escaneo sale del iPhone con el ángulo con que se sostuvo el teléfono. Field Reports lo endereza al
+// recibirlo (sus pasos, en el mismo orden): girarlo a escuadra, escuadrar paredes, juntar las paredes que son
+// la misma, cerrar esquinas chicas. Su queja del 13-oct: "los planos salen de lado". Se hace sobre una copia
+// (nunca se toca lo guardado) y se recuerda, así no se repite en cada dibujo.
+const LISTOS = new WeakMap();
+export function prepararPlano(data){
+  if(!data || typeof data !== 'object') return data;
+  if(LISTOS.has(data)) return LISTOS.get(data);
+  const d = JSON.parse(JSON.stringify(data));
+  try{
+    plano.floorplanAlignRooms(d);
+    if(!d._handEdited){ plano.floorplanRectifyWalls(d); plano.floorplanRefineGeometry(d); plano.floorplanCloseCorners(d); }
+  }catch(e){ console.warn('enderezar plano', e); }
+  LISTOS.set(data, d); return d;
+}
 // limpia = la vista de la pantalla (solo el plano, su pedido del 13-oct); sin limpia = la hoja completa del PDF/exportar.
 export function svgDelPlano(data, trabajo, limpia){
   plano.ponerVista(!!limpia);
   plano.ponerTrabajo({ client: trabajo && trabajo.cliente || '', address: trabajo && trabajo.direccion || '', date: new Date().toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) });
+  data = prepararPlano(data);
   const lv = plano.floorplanLevels(data); const nivel = lv && lv.length ? lv[0] : undefined;
   return data && data.merged === false ? plano.buildFloorplanSvgUnmerged(data, nivel) : plano.buildFloorplanSvg(data, nivel);
 }
@@ -130,34 +147,42 @@ export function pintar(){
 // El cuadro del plano usa lo que queda de pantalla debajo de lo demás y el plano entra completo ahí (se acerca con +).
 export function enfocar(){ medir(); }
 function medir(){
-  const l = $('#panel-plano .pl-lienzo'); const m = $('#main'); if(!l) return;
+  const l = $('#panel-plano .pl-lienzo'); const m = $('#main');
+  // Solo con la pestaña Floor Plan a la vista: escondida (otra pestaña, otra pantalla) no se mide ni se fija nada.
+  if(!l || !l.offsetParent){ if(typeof document !== 'undefined') document.body.classList.remove('pl-fijo'); return; }
   if(window.matchMedia && !window.matchMedia('(min-width: 900px)').matches){
     // Teléfono (su pedido del 13-oct): solo el plano, lo más grande posible. El cuadro toma la forma del
     // plano a todo lo ancho; si el plano es alto, se topa en 62% de la pantalla y el plano queda centrado.
-    if(!l.classList.contains('ajustado')){ l.style.height = ''; return; }
+    if(!l.classList.contains('ajustado')){ l.style.height = ''; document.body.classList.remove('pl-fijo'); return; }
+    // Su pedido (13-oct): la página del plano NO se mueve para arriba y para abajo, queda como su diseño:
+    // cabecera, pestañas, plano y botones en UNA pantalla, y el cuadro del plano se lleva el espacio que sobra.
+    // Si de plano no cabe (teléfono acostado, letra muy grande), la página se desplaza como siempre.
     const v = l.querySelector('svg'); const vb = v && v.viewBox && v.viewBox.baseVal;
     const ar = vb && vb.width && vb.height ? vb.width / vb.height : 1.4;
-    // Su pedido (13-oct, foto con el espacio sobrante en rojo): el cuadro
-    // del plano crece hasta que el resumen y los botones queden pegados abajo, sin espacio vacío, todo en una pantalla.
-    const ancho = l.clientWidth - 16;
-    const forma = Math.max(200, Math.round(ancho / ar + 16));
-    const tabs = $('#fichaTabs'), panel = $('#panel-plano');
-    let alto = forma;
-    if(tabs && panel){
-      const ultimo = panel.lastElementChild;
-      const resto = ultimo ? ultimo.getBoundingClientRect().bottom - l.getBoundingClientRect().bottom : 0;   // resumen + botones + pisos
-      const visible = m ? m.clientHeight : window.innerHeight;
-      // Con la cabecera del proyecto A LA VISTA (su diseño: foto, nombre, etiquetas, pestañas, plano y botones en una pantalla).
-      const arriba = l.getBoundingClientRect().top - (m ? m.getBoundingClientRect().top - m.scrollTop : 0);
-      alto = Math.max(forma, Math.round(visible - arriba - resto - 14));
+    const panel = $('#panel-plano'); const ultimo = panel && panel.lastElementChild;
+    const resto = ultimo ? ultimo.getBoundingClientRect().bottom - l.getBoundingClientRect().bottom : 0;   // resumen + botones + pisos
+    const visible = m ? m.clientHeight : window.innerHeight;
+    const arriba = l.getBoundingClientRect().top - (m ? m.getBoundingClientRect().top - m.scrollTop : 0);
+    const pie = m ? parseFloat(getComputedStyle(m).paddingBottom) || 0 : 0;   // el margen de abajo de la pantalla también cuenta
+    const cabe = Math.floor(visible - arriba - resto - pie - 2);
+    if(cabe >= 160){
+      l.style.height = cabe + 'px';
+      // Lo que todavía sobresalga (márgenes de más abajo) se le quita al cuadro: así la página ya no se mueve.
+      const sobra = m ? m.scrollHeight - m.clientHeight : 0;
+      if(sobra > 0) l.style.height = Math.max(160, cabe - sobra) + 'px';
+      document.body.classList.add('pl-fijo'); if(m) m.scrollTop = 0;
+    } else {
+      document.body.classList.remove('pl-fijo');
+      l.style.height = Math.max(200, Math.round((l.clientWidth - 16) / ar + 16)) + 'px';
     }
-    l.style.height = Math.min(alto, Math.round(window.innerHeight * 0.75)) + 'px';
     return;
   }
   const arriba = l.getBoundingClientRect().top + (m ? m.scrollTop : window.scrollY);   // dónde queda el cuadro con la página arriba del todo
   l.style.height = Math.max(380, Math.round(window.innerHeight - arriba - 18)) + 'px';
 }
 if(typeof window !== 'undefined') window.addEventListener('resize', () => medir());
+// La foto de la cabecera llega después y cambia el alto: se vuelve a medir para que todo siga cabiendo.
+if(typeof document !== 'undefined') document.addEventListener('load', (e) => { if(e.target && e.target.tagName === 'IMG' && e.target.closest && e.target.closest('#pTrabajo') && $('#panel-plano .pl-lienzo')) medir(); }, true);
 function avisar(t, ok){ AVISO = t || ''; AVISO_OK = !!ok; pintar(); }
 
 // ---------- acercar con los dedos (su pedido 13-oct: sin + y − encima del plano) ----------
@@ -221,9 +246,10 @@ async function escanear(){
     const r = await RS.scan({ nivelBase: niv && niv.id !== SIN_NIVEL ? niv.nombre : '' });
     if(!r || r.cancelled){ OCUPADO = false; if(r && r.error) avisar(r.error); return; }
     r.job = { client: T.cliente || '', address: T.direccion || '', date: new Date().toISOString().slice(0, 10) };
-    const res = resumenPlano(r);
+    const d = prepararPlano(r);   // se guarda ya derecho
+    const res = resumenPlano(d);
     if(!res.cuartos){ OCUPADO = false; avisar('The scan came back without any room. Nothing was saved - try again walking slowly along the walls.'); return; }
-    const fila = { trabajo_id: T.id, nivel_id: niv && niv.id !== SIN_NIVEL ? niv.id : null, data: r, area_sqft: res.area, cuartos: res.cuartos, muros_ext_ft: res.murosExt, techo_ft: res.techo || null };
+    const fila = { trabajo_id: T.id, nivel_id: niv && niv.id !== SIN_NIVEL ? niv.id : null, data: d, area_sqft: res.area, cuartos: res.cuartos, muros_ext_ft: res.murosExt, techo_ft: res.techo || null };
     const g = await authFetch('/rest/v1/fotos_planos', { method:'POST', headers:{ Prefer:'return=representation' }, body: JSON.stringify(fila) });
     const guardada = g.ok ? (await g.json())[0] : null;
     if(!guardada || !guardada.id) throw new Error(g.status === 404 ? 'falta correr sql/fotos-07-planos.sql' : 'HTTP ' + g.status);

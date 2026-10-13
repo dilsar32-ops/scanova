@@ -1519,3 +1519,8 @@ body.fv-editando .fv-asa{ visibility:hidden; }
 .pl-lienzo.ajustado, .pl-grande-lienzo{ touch-action:pan-y; }
 .pl-lienzo.ajustado.pz-cerca, .pl-grande-lienzo.pz-cerca{ touch-action:none; }
 .pl-grande-lienzo{ overflow:hidden; }
+/* 13-oct: en el teléfono la página del plano queda quieta (todo cabe en una pantalla); un dedo sobre el plano no mueve la página. */
+@media (max-width:899px){
+  body.pl-fijo #main{ overflow:hidden; }
+  body.pl-fijo .pl-lienzo.ajustado{ touch-action:none; }
+}

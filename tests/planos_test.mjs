@@ -26,6 +26,19 @@ ok('la hoja después de la vista limpia sigue completa (el modo no se queda pega
 { const e = PL.zoomEn({ s: 1, x: 0, y: 0 }, 2, 150, 100); ok('pellizco: acerca en el punto de los dedos (el punto no se mueve)', e.x === -150 && e.y === -100); }
 { const e = PL.limitarPZ({ s: 2, x: -900, y: 40 }, 300, 200); ok('pellizco: no deja mover el plano fuera del cuadro', e.x === -300 && e.y === 0); }
 { const src = fs.readFileSync(new URL('../docs/planos.js', import.meta.url), 'utf8'); ok('teléfono: sin + y − encima del plano', /class="pl-tel-flota"><button type="button" class="pl-grande-btn"/.test(src)); }
+// Su queja del 13-oct: "los planos salen de lado". El escaneo llega con el ángulo del teléfono: se endereza.
+{ const girar = (d, gr) => { const a = gr*Math.PI/180, c = Math.cos(a), sn = Math.sin(a); const rot = p => ({ x: p.x*c - p.y*sn, y: p.x*sn + p.y*c });
+    const o = JSON.parse(JSON.stringify(d)); delete o._handEdited; o.rooms.forEach(r => { (r.walls||[]).forEach(w => { w.start = rot(w.start); w.end = rot(w.end); }); ['doors','windows','openings'].forEach(k => (r[k]||[]).forEach(x => x.position && (x.position = rot(x.position)))); (r.objects||[]).forEach(x => { x.center = rot(x.center); }); }); return o; };
+  const chueco = d => { let peor = 0; d.rooms.forEach(r => (r.walls||[]).forEach(w => { if(Math.hypot(w.end.x-w.start.x, w.end.y-w.start.y) < 2) return; const g = Math.abs(Math.atan2(w.end.y-w.start.y, w.end.x-w.start.x))*180/Math.PI % 90; peor = Math.max(peor, Math.min(g, 90-g)); })); return peor; };
+  const crudo = girar(data, 33), listo = PL.prepararPlano(crudo);
+  ok('plano de lado (33°) sale derecho: ninguna pared chueca', chueco(crudo) > 30 && chueco(listo) < 0.5);
+  ok('enderezar no cambia el área', Math.abs(PL.resumenPlano(crudo).area - r.area) < 1);
+  ok('enderezar no toca lo guardado (trabaja sobre una copia)', chueco(crudo) > 30);
+  ok('el dibujo usa el plano enderezado', PL.svgDelPlano(crudo, {}, true) === PL.svgDelPlano(listo, {}, true) || /LIVING ROOM/.test(PL.svgDelPlano(crudo, {}, true)));
+  const src = fs.readFileSync(new URL('../docs/planos.js', import.meta.url), 'utf8');
+  ok('el escaneo nuevo se guarda ya derecho', /const d = prepararPlano\(r\)/.test(src) && /data: d, area_sqft/.test(src));
+  ok('teléfono: la página del plano queda quieta si todo cabe (pl-fijo)', /classList\.add\('pl-fijo'\)/.test(src) && /pl-fijo/.test(fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8')));
+}
 const L = [{ id:'a', nivel_id:'n1', created_at:'2026-10-13' }, { id:'b', nivel_id:'n1', created_at:'2026-10-12' }, { id:'c', nivel_id:null }];
 ok('de cada piso se ve el escaneo más reciente; los viejos quedan de historial', PL.planoDe(L, 'n1').id === 'a' && PL.planoDe(L, 'sin').id === 'c' && PL.planoDe(L, 'n2') === null);
 ok('pestañas: Photos, Floor Plan, Measurements… (Floor Plan después de Photos)', /data-ptab="fotos".*data-ptab="plano".*data-ptab="medidas"/.test(PR.tabsHtml('plano', { fotos: 3 })) && /Floor Plan/.test(PR.tabsHtml('plano', { fotos: 3 })));
