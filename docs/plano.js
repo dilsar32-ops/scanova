@@ -1,5 +1,5 @@
 // GENERADO por tools/extraer_plano.py desde Field Reports (no editar a mano: se vuelve a generar).
-// Dibuja el plano igual que Field Reports. 107 piezas.
+// Dibuja el plano igual que Field Reports. 110 piezas.
 /* eslint-disable */
 const document = (typeof globalThis !== "undefined" && globalThis.document) || undefined;
   const $ = (sel, el) => { const d = el || (typeof document !== 'undefined' ? document : null); return d && d.querySelector ? d.querySelector(sel) : null; };
@@ -974,7 +974,8 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
       + `</pattern></defs>`;
   }
   let fpEstiloVista = true;
-  function fpVista(){ return fpEstiloVista && !fpSheetExport && fpRenderMode !== 'moisture'; }
+  let fpConTablaMedidas = false;
+  function fpVista(){ return fpEstiloVista && fpRenderMode !== 'moisture'; }
   function fpPiesPulg(ft){ const t = Math.round((+ft || 0) * 12); return `${Math.floor(t / 12)}' ${t % 12}"`; }
   function fpFeetInches(decimalFeet){
     const totalInches = Math.round(decimalFeet * 12);
@@ -2244,25 +2245,98 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
     });
     return out + '</g>' + sueltas;
   }
-  function fpMarcoVista(svgW, svgH, u, data, floorNum){
+  function fpAltoTablaMedidas(nCuartos, u){ return u * (2.4 + 2.0 + 1.75 * nCuartos + 2.0 + 2.0); }
+  function fpTablaMedidasSvg(data, floorNum, x0, y0, w, u){
+    const enPiso = r => (r.level || 1) === floorNum;
+    const cuartos = ((data && data.rooms) || []).map((r, i) => ({ r, i })).filter(x => !x.r.deleted && (x.r.walls || []).length && enPiso(x.r));
+    if(!cuartos.length) return '';
+    const t = fpPlanMeasurements(data, enPiso);
+    const n1 = v => (+v || 0).toFixed(1), raya = '\u2014';
+    const fs = u * 1.05, fh = u * 0.8;
+    const cols = [0.30, 0.11, 0.11, 0.11, 0.13, 0.13, 0.11];
+    const xs = []; let acc = x0; cols.forEach(c => { acc += w * c; xs.push(acc); });   // borde derecho de cada columna
+    const celda = (i, y, txt, peso, color) => i === 0
+      ? `<text x="${x0 + u * 0.2}" y="${y}" font-size="${fs.toFixed(1)}" font-weight="${peso || 400}" fill="${color || '#3A4552'}">${txt}</text>`
+      : `<text x="${xs[i] - u * 0.2}" y="${y}" font-size="${fs.toFixed(1)}" font-weight="${peso || 400}" fill="${color || '#3A4552'}" text-anchor="end">${txt}</text>`;
+    let y = y0 + u * 1.7, o = `<g class="fp-tabla" font-family="'IBM Plex Sans',sans-serif" style="pointer-events:none;">`;
+    o += `<line x1="${x0}" y1="${y0}" x2="${x0 + w}" y2="${y0}" stroke="#1C2530" stroke-width="2"/>`;
+    o += `<text x="${x0 + u * 0.2}" y="${y}" font-size="${(u * 1.25).toFixed(1)}" font-weight="700" fill="#1C2530">Total Area: ${n1(fpDisplayTotalAreaSqFt(data))} sq ft &#160;&#160; Rooms: ${cuartos.length}</text>`;
+    o += `<text x="${x0 + w - u * 0.2}" y="${y}" font-size="${fh.toFixed(1)}" font-weight="700" letter-spacing="1" fill="#1C2530" text-anchor="end">LEVEL ${floorNum}</text>`;
+    y += u * 2.0;
+    ['ROOM', 'FLOOR SF', 'WALL SF', 'CEILING SF', 'PERIMETER LF', 'BASEBOARD LF', 'CEILING HT'].forEach((h, i) => {
+      o += i === 0 ? `<text x="${x0 + u * 0.2}" y="${y}" font-size="${fh.toFixed(1)}" font-weight="700" letter-spacing="0.8" fill="#5a6472">${h}</text>`
+        : `<text x="${xs[i] - u * 0.2}" y="${y}" font-size="${fh.toFixed(1)}" font-weight="700" letter-spacing="0.8" fill="#5a6472" text-anchor="end">${h}</text>`;
+    });
+    o += `<line x1="${x0}" y1="${y + u * 0.55}" x2="${x0 + w}" y2="${y + u * 0.55}" stroke="#1C2530" stroke-width="1.6"/>`;
+    cuartos.forEach(({ r, i }) => {
+      y += u * 1.75;
+      const m = fpRoomMeasurements(r);
+      const marca = m.guessedFt > 1 ? '<tspan fill="#8a6d1a">\u2020</tspan>' : '';
+      o += celda(0, y, esc(r.roomName || `Room ${i + 1}`) + marca);
+      o += celda(1, y, n1(m.floorSqFt));
+      o += celda(2, y, (m.outlineOk && m.heightKnown) ? n1(m.netWallSqFt) : raya);
+      o += celda(3, y, n1(m.ceilingSqFt));
+      o += celda(4, y, m.outlineOk ? n1(m.perimeterFt) : raya);
+      o += celda(5, y, m.outlineOk ? n1(m.baseboardFt) : raya);
+      o += celda(6, y, m.heightKnown ? fpFeetInches(m.wallHeightFt) : raya);
+    });
+    y += u * 0.7;
+    o += `<line x1="${x0}" y1="${y}" x2="${x0 + w}" y2="${y}" stroke="#1C2530" stroke-width="1.6"/>`;
+    y += u * 1.35;
+    o += celda(0, y, 'TOTAL', 700, '#1C2530') + celda(1, y, n1(t.floorSqFt), 700, '#1C2530')
+      + celda(2, y, n1(t.netWallSqFt) + (t.noHeight.length ? '\u2020' : ''), 700, '#1C2530') + celda(3, y, n1(t.ceilingSqFt), 700, '#1C2530')
+      + celda(4, y, n1(t.perimeterFt), 700, '#1C2530') + celda(5, y, n1(t.baseboardFt), 700, '#1C2530');
+    const notas = [];
+    if(t.guessedRooms) notas.push(`\u2020 part of the boundary was closed by the app, not measured (${n1(t.guessedFt)} ft in ${t.guessedRooms} room${t.guessedRooms > 1 ? 's' : ''})`);
+    if(t.noHeight.length) notas.push(`\u2020 ${t.noHeight.length} room${t.noHeight.length > 1 ? 's have' : ' has'} no wall height, so ${t.noHeight.length > 1 ? 'they are' : 'it is'} left out of the Wall SF total`);
+    if(t.noOutline.length) notas.push(`${t.noOutline.length} room${t.noOutline.length > 1 ? 's' : ''} could not be outlined`);
+    if(notas.length) o += `<text x="${x0 + u * 0.2}" y="${y + u * 1.5}" font-size="${(u * 0.78).toFixed(1)}" fill="#5a6472">${notas.join(' \u00b7 ')}</text>`;
+    return o + '</g>';
+  }
+  function fpMarcoVista(svgW, svgH, u, data, floorNum, conTabla){
     const company = esc(($('#companyName') && $('#companyName').value) || 'Scanova360');
     const job = (data && data.job) || fpJobInfo();
-    const quien = esc([job.client, job.address].filter(Boolean).join(' · '));
-    const m = Math.round(u * 0.6), hH = u * 3.6, hF = u * 3.2;
+    // Su pedido (14-oct): el nombre del cliente y ABAJO su dirección; el teléfono no va en la hoja.
+    const nomCli = esc(job.client || ''), dirCli = esc(job.address || '');
+    const m = Math.round(u * 0.6), hH = u * 5.0, hF = u * 3.2;
+    // La marca de Scanova360 se escribe como su logo: "Scanova" en tinta y "360" en su azul, Plus Jakarta Sans.
+    const esMarca360 = /360$/.test(company);
+    const letra = esMarca360 ? "'Plus Jakarta Sans',-apple-system,'Helvetica Neue',Arial,sans-serif" : "'IBM Plex Sans',sans-serif";
     const lv = floorplanLevels(data);
     const iNivel = Math.max(0, lv.indexOf(floorNum));
     const nombreNivel = (data && data._nivelBase) ? (fpPlantaDeNivel(data, floorNum) || ('Floor ' + floorNum)) : ('Floor ' + floorNum);
     const hayDudosas = (data.rooms || []).some(r => !r.deleted && (r.level || 1) === floorNum && (r.walls || []).some(w => w.confidence === 'low'));
-    let o = `<g class="fp-marco" style="pointer-events:none;" font-family="'IBM Plex Sans',sans-serif">`;
-    o += `<rect x="${m}" y="${m}" width="${svgW - 2*m}" height="${svgH - 2*m}" fill="none" stroke="#8d96a2" stroke-width="1.5"/>`;
-    // encabezado
-    o += `<text x="${m + u}" y="${m + u * 1.55}" font-size="${(u * 1.05).toFixed(1)}" font-weight="700" letter-spacing="1.2" fill="#1C2530">${company.toUpperCase()}</text>`;
-    if(quien) o += `<text x="${m + u}" y="${m + u * 2.75}" font-size="${(u * 0.78).toFixed(1)}" font-weight="500" fill="#4a5462">${quien}</text>`;
-    o += `<text x="${svgW - m - u}" y="${m + u * 1.75}" font-size="${(u * 0.95).toFixed(1)}" font-weight="700" letter-spacing="1" fill="#8d96a2" text-anchor="end">DRAFT • FOR REVIEW</text>`;
-    o += `<line x1="${m + u * 0.6}" y1="${m + hH}" x2="${svgW - m - u * 0.6}" y2="${m + hH}" stroke="#8d96a2" stroke-width="1.2"/>`;
+    let o = `<g class="fp-marco" style="pointer-events:none;" font-family="${letra}">`;
+    o += `<rect x="${m}" y="${m}" width="${svgW - 2*m}" height="${svgH - 2*m}" rx="${(u * 0.3).toFixed(1)}" fill="none" stroke="#d3dce8" stroke-width="1.4"/>`;
+    // encabezado: la marca, y debajo el cliente (nombre) y su dirección
+    // Su diseño (14-oct): la marca a la izquierda, una línea fina que la separa, y AL LADO el cliente (nombre
+    // grande y abajo la dirección), aprovechando todo el renglón.
+    const yMedio = m + hH / 2;
+    let anchoMarca;
+    if(esMarca360){
+      const fm = u * 2.7;
+      anchoMarca = company.length * fm * 0.6;
+      o += `<text x="${m + u}" y="${(yMedio + fm * 0.36).toFixed(1)}" font-size="${fm.toFixed(1)}" font-weight="800" letter-spacing="-0.035em" fill="#0f1a2e">${company.replace(/360$/, '')}<tspan fill="#2563eb">360</tspan></text>`;
+    } else {
+      const fm = u * 1.55;
+      anchoMarca = company.length * fm * 0.66;
+      o += `<text x="${m + u}" y="${(yMedio + fm * 0.36).toFixed(1)}" font-size="${fm.toFixed(1)}" font-weight="700" letter-spacing="1.2" fill="#1C2530">${company.toUpperCase()}</text>`;
+    }
+    if(nomCli || dirCli){
+      const xSep = m + u + anchoMarca + u * 1.3, xCli = xSep + u * 1.3;
+      o += `<line x1="${xSep.toFixed(1)}" y1="${(m + hH * 0.22).toFixed(1)}" x2="${xSep.toFixed(1)}" y2="${(m + hH * 0.8).toFixed(1)}" stroke="#d3dce8" stroke-width="1.6"/>`;
+      if(nomCli) o += `<text x="${xCli.toFixed(1)}" y="${(dirCli ? yMedio - u * 0.15 : yMedio + u * 0.55).toFixed(1)}" font-size="${(u * 1.55).toFixed(1)}" font-weight="700" fill="#0f1a2e">${nomCli}</text>`;
+      if(dirCli) o += `<text x="${xCli.toFixed(1)}" y="${(nomCli ? yMedio + u * 1.45 : yMedio + u * 0.5).toFixed(1)}" font-size="${(u * 1.2).toFixed(1)}" font-weight="400" fill="#56657c">${dirCli}</text>`;
+    }
+    // Su pedido (14-oct): la esquina derecha va limpia — sin "DRAFT • FOR REVIEW" ni el total (el total va en la tabla).
+    o += `<line x1="${m + u * 0.6}" y1="${m + hH}" x2="${svgW - m - u * 0.6}" y2="${m + hH}" stroke="#d3dce8" stroke-width="1.2"/>`;
     // pie: cinco casillas
     const yT = svgH - m - hF, yTxt = yT + hF * 0.56, ancho = svgW - 2*m;
-    o += `<line x1="${m + u * 0.6}" y1="${yT}" x2="${svgW - m - u * 0.6}" y2="${yT}" stroke="#8d96a2" stroke-width="1.2"/>`;
+    if(conTabla){
+      const nC = ((data && data.rooms) || []).filter(r => !r.deleted && (r.walls || []).length && (r.level || 1) === floorNum).length;
+      o += fpTablaMedidasSvg(data, floorNum, m + u * 0.6, yT - fpAltoTablaMedidas(nC, u) + u * 0.3, svgW - 2*m - u * 1.2, u);
+    }
+    o += `<line x1="${m + u * 0.6}" y1="${yT}" x2="${svgW - m - u * 0.6}" y2="${yT}" stroke="#d3dce8" stroke-width="1.2"/>`;
     const cols = [0.2, 0.2, 0.2, 0.28, 0.12];
     const celdas = [
       `<tspan fill="#4a5462">Level:</tspan> <tspan font-weight="700">${esc(nombreNivel)}</tspan>`,
@@ -2274,7 +2348,7 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
     let x = m;
     cols.forEach((c, i) => {
       const w = ancho * c;
-      if(i) o += `<line x1="${x}" y1="${yT + hF * 0.22}" x2="${x}" y2="${yT + hF * 0.82}" stroke="#8d96a2" stroke-width="1"/>`;
+      if(i) o += `<line x1="${x}" y1="${yT + hF * 0.22}" x2="${x}" y2="${yT + hF * 0.82}" stroke="#d3dce8" stroke-width="1"/>`;
       if(celdas[i]) o += `<text x="${x + u * 0.9}" y="${yTxt}" font-size="${(u * 0.82).toFixed(1)}" fill="#1C2530">${celdas[i]}</text>`;
       else {
         o += `<text x="${x + u * 0.7}" y="${yT + hF * 0.42}" font-size="${(u * 0.62).toFixed(1)}" fill="#3a4452">Measurements from the LiDAR scan; verify before final export.</text>`;
@@ -2315,8 +2389,10 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
     if(vista){
       vu = Math.max(16, Math.min(34, (maxX - minX + 9) * FLOORPLAN_SVG_SCALE / 90));
       padL = padR = 4.6;
-      padT = 3.3 + (vu * 3.6) / FLOORPLAN_SVG_SCALE;
-      padB = 2.8 + (vu * 3.2) / FLOORPLAN_SVG_SCALE;
+      // con marco (pantalla) el alto del encabezado y del pie; en la hoja del PDF no hay marco
+      padT = fpSheetExport ? 3.0 : 3.3 + (vu * 5.0) / FLOORPLAN_SVG_SCALE;
+      padB = fpSheetExport ? 3.0 : 2.8 + (vu * 3.2) / FLOORPLAN_SVG_SCALE;
+      if(fpConTablaMedidas && !fpSheetExport) padB += fpAltoTablaMedidas(rooms.length, vu) / FLOORPLAN_SVG_SCALE;
     }
     minX-=padL; minY-=padT; maxX+=padR; maxY+=padB;
     const w = Math.max(1, maxX-minX), h = Math.max(1, maxY-minY);
@@ -2526,7 +2602,7 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
       // "FLOOR 1" encima del dibujo de un sotano, que es la misma mentira.
       const sello = ((data && data._nivelBase) ? (fpPlantaDeNivel(data, floorNum) || '') : '') || ('FLOOR ' + floorNum);
       if(vista){
-        s += fpMarcoVista(svgW, svgH, vu, data, floorNum);
+        s += fpMarcoVista(svgW, svgH, vu, data, floorNum, fpConTablaMedidas);
       } else {
         s += `<text x="16" y="${svgH-64}" font-size="24" font-weight="700" letter-spacing="1" font-family="'IBM Plex Sans',sans-serif" fill="#1C2530">${esc(sello.toUpperCase())}</text>`;
         s += fpTitleBlock(svgW, svgH, data);
@@ -2600,5 +2676,5 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
   function buildFloorplanSvg(data, level){
     return data.merged ? buildFloorplanSvgMerged(data, level) : buildFloorplanSvgUnmerged(data, level);
   }
-  export function ponerVista(limpia){ fpEstiloVista = !!limpia; fpSheetExport = false; }
+  export function ponerVista(limpia){ fpEstiloVista = true; fpSheetExport = false; fpConTablaMedidas = !limpia; }
 export { buildFloorplanSvg, buildFloorplanSvgUnmerged, floorplanLevels, fpRoomDisplayAreaSqFt, fpDisplayTotalAreaSqFt, fpOrderedRoomPolygon, fpPolygonAreaSqFt, fpFeetInches, fpPlanMeasurements, fpRoomMeasurements, floorplanIsExteriorWall, floorplanAlignRooms, floorplanRectifyWalls, floorplanRefineGeometry, floorplanCloseCorners, floorplanDetectSubAreas, fpReconocerClosets };

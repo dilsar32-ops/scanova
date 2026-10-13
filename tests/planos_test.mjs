@@ -17,16 +17,16 @@ ok('el nombre del cliente va escapado en el sello', !/Lauren <Harris>/.test(svg)
 // Vista de la pantalla (su pedido 13-oct): solo el plano. La hoja del PDF/exportar no cambia.
 const limpia = PL.svgDelPlano(data, { cliente: 'Lauren Harris', direccion: '9 Oak Ln' }, true);
 const hoja = PL.svgDelPlano(data, { cliente: 'Lauren Harris', direccion: '9 Oak Ln' });
-ok('vista limpia: sin sello FLOOR PLAN, la hoja sí lo tiene', !/>FLOOR PLAN</.test(limpia) && />FLOOR PLAN</.test(hoja));
+ok('14-oct: la imagen que se exporta es la MISMA hoja que la pantalla (sin el sello viejo FLOOR PLAN)', !/>FLOOR PLAN</.test(limpia) && !/>FLOOR PLAN</.test(hoja) && /Scanova<tspan fill="#2563eb">360<\/tspan>/.test(hoja) && !/DRAFT/.test(hoja));
 // Su diseño del 14-oct: la vista es una hoja limpia — cadenas de medidas por fuera, nombre + sq ft, marco.
-ok('vista: medidas por fuera en cadenas (la hoja no las usa)', /class="fp-cadenas"/.test(limpia) && !/class="fp-cadenas"/.test(hoja) && /8' 7"/.test(limpia));
+ok('vista y exportar: medidas por fuera en cadenas, y el total en el encabezado', /class="fp-cadenas"/.test(limpia) && /class="fp-cadenas"/.test(hoja) && /8' 7"/.test(limpia) && /Total Area: [\d.]+ sq ft/.test(hoja));
 ok('vista: nombre + sq ft de cada cuarto (sin las medidas del cuarto)', /LIVING ROOM/.test(limpia) && /303\.7 sq ft/.test(limpia) && !/27'-11" x 18'-8"/.test(limpia));
-ok('vista: marco con encabezado y pie (DRAFT • FOR REVIEW, Units, Scale, Page)', /DRAFT \u2022 FOR REVIEW|DRAFT • FOR REVIEW/.test(limpia) && /Not to scale/.test(limpia) && /ft \/ in/.test(limpia) && /Page/.test(limpia));
+ok('vista: marco con encabezado y pie (Units, Scale, Page)',  /Not to scale/.test(limpia) && /ft \/ in/.test(limpia) && /Page/.test(limpia));
 ok('vista: piso blanco y sin el sello viejo de abajo', !/#fbfbfa/.test(limpia) && !/TOTAL AREA/.test(limpia));
 { const ultObj = Math.max(limpia.lastIndexOf('class="fp-obj"'), hoja.lastIndexOf('class="fp-obj"') >= 0 ? 0 : 0), primPared = limpia.indexOf('class="fp-wall"');
   ok('ningún mueble encima de una pared: todos los muebles se dibujan antes que las paredes (vista y hoja)', limpia.lastIndexOf('class="fp-obj"') < primPared && hoja.lastIndexOf('class="fp-obj"') < hoja.indexOf('class="fp-wall"') && limpia.includes('class="fp-obj"')); }
 ok('ventanas de doble línea y esquinas de pared unidas', (limpia.match(/stroke-width="1.2"\/>/g) || []).length >= 4 && /style="pointer-events:none;"\/>/.test(limpia));
-ok('la hoja después de la vista limpia sigue completa (el modo no se queda pegado)', PL.svgDelPlano(data, {}) .includes('>FLOOR PLAN<'));
+ok('exportar lleva abajo la tabla de medidas (como Field Reports); la pantalla no, y no se queda pegada', /class="fp-tabla"/.test(PL.svgDelPlano(data, {})) && /FLOOR SF/.test(PL.svgDelPlano(data, {})) && !/class="fp-tabla"/.test(PL.svgDelPlano(data, {}, true)));
 // Acercar con los dedos (13-oct): nunca se sale del cuadro ni se encoge de más.
 { const e = PL.limitarPZ({ s: 0.4, x: 50, y: 50 }, 300, 200); ok('pellizco: no se encoge menos que entero', e.s === 1 && e.x === 0 && e.y === 0); }
 { const e = PL.zoomEn({ s: 1, x: 0, y: 0 }, 2, 150, 100); ok('pellizco: acerca en el punto de los dedos (el punto no se mueve)', e.x === -150 && e.y === -100); }

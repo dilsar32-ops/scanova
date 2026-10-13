@@ -55,7 +55,8 @@ out += '\nexport { ' + ', '.join(ROOTS) + ' };\n'
 # paredes unidas, ventanas de doble línea, nombre + sq ft, cadenas de medidas por fuera y el marco con
 # encabezado y pie. Scanova solo lo prende para la pantalla y lo apaga para la hoja que se exporta.
 assert 'let fpEstiloVista' in out and 'function fpVista()' in out, 'falta el estilo de la vista en Field Reports'
-out = out.replace('\nexport { ', "\n  export function ponerVista(limpia){ fpEstiloVista = !!limpia; fpSheetExport = false; }\nexport { ", 1)
+# 14-oct: "que el PDF también lleve ese estilo" -> la imagen que se exporta es la MISMA hoja que la pantalla.
+out = out.replace('\nexport { ', "\n  export function ponerVista(limpia){ fpEstiloVista = true; fpSheetExport = false; fpConTablaMedidas = !limpia; }\nexport { ", 1)
 # Scanova no dice el nombre de la otra empresa en el sello del plano.
 out = out.replace("'Restoration Doctor'", "'Scanova360'")
 assert 'Restoration Doctor' not in out and 'RESTORATION DOCTOR' not in out, 'quedo el nombre de la otra empresa'

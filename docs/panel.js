@@ -1,11 +1,11 @@
 // Scanova · el panel nuevo (diseño de Amilcar, 12 oct 2026): Home con "Welcome", Recent Projects en tarjetas,
 // la tabla All Projects con filtro, búsqueda y orden; Projects; Gallery; el botón de cámara (Capture) y el menú •••.
 // Lo puro va arriba (se prueba en Node); lo que toca la página va abajo.
-import { $, $$, irA, esManager, PERFIL } from './app.js?v=2026-10-14-2';
-import * as trabajos from './trabajos.js?v=2026-10-14-2';
-import * as fotos from './fotos.js?v=2026-10-14-2';
-import * as camara from './camara.js?v=2026-10-14-2';
-import * as cerca from './cerca.js?v=2026-10-14-2';
+import { $, $$, irA, esManager, PERFIL } from './app.js?v=2026-10-14-3';
+import * as trabajos from './trabajos.js?v=2026-10-14-3';
+import * as fotos from './fotos.js?v=2026-10-14-3';
+import * as camara from './camara.js?v=2026-10-14-3';
+import * as cerca from './cerca.js?v=2026-10-14-3';
 
 // Se piden al usarse (no al cargar): así no importa en qué orden se cargan los módulos.
 const esc = (v) => trabajos.esc(v);

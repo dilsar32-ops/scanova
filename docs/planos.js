@@ -2,8 +2,8 @@
 // (el mismo escáner de Field Reports, que ya viene dentro de la app: plugin RoomScan) y se dibuja con el
 // mismo código de Field Reports (plano.js, copiado por tools/extraer_plano.py). Un escaneo por piso;
 // un escaneo nuevo no borra el anterior (queda de historial), se ve el más reciente.
-import * as plano from './plano.js?v=2026-10-14-2';
-import { authFetch, esAparato } from './app.js?v=2026-10-14-2';
+import * as plano from './plano.js?v=2026-10-14-3';
+import { authFetch, esAparato } from './app.js?v=2026-10-14-3';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
@@ -59,8 +59,11 @@ export function prepararPlano(data){
 // limpia = la vista de la pantalla (solo el plano, su pedido del 13-oct); sin limpia = la hoja completa del PDF/exportar.
 export function svgDelPlano(data, trabajo, limpia){
   plano.ponerVista(!!limpia);
-  plano.ponerTrabajo({ client: trabajo && trabajo.cliente || '', address: trabajo && trabajo.direccion || '', date: new Date().toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) });
+  plano.ponerTrabajo({ client: trabajo && trabajo.cliente || '', phone: trabajo && trabajo.telefono || '', address: trabajo && trabajo.direccion || '', date: new Date().toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) });
   data = prepararPlano(data);
+  // El cliente que sale en la hoja es el del PROYECTO (nombre, teléfono, dirección al día), no la copia que se
+  // guardó dentro del escaneo el día que se escaneó (esa no trae teléfono y no se entera si lo corrigen).
+  if(data && trabajo && (trabajo.cliente || trabajo.direccion)) data.job = Object.assign({}, data.job || {}, { client: trabajo.cliente || '', phone: trabajo.telefono || '', address: trabajo.direccion || '' });
   const lv = plano.floorplanLevels(data); const nivel = lv && lv.length ? lv[0] : undefined;
   return data && data.merged === false ? plano.buildFloorplanSvgUnmerged(data, nivel) : plano.buildFloorplanSvg(data, nivel);
 }
@@ -275,8 +278,31 @@ async function escanear(){
 }
 
 // ---------- exportar (PNG del plano, como la foto: hoja de compartir en el teléfono) ----------
+// La letra de la marca (Plus Jakarta Sans) DENTRO de la imagen que se exporta: un SVG dibujado como imagen no
+// puede pedir letras de afuera y el navegador la cambiaba por otra (su pedido del 14-oct: siempre el estilo de
+// Scanova). Se baja una vez y se guarda; sin internet, la hoja sale igual con la letra del sistema.
+let FUENTE_MARCA = null;
+async function fuenteMarca(){
+  if(FUENTE_MARCA !== null) return FUENTE_MARCA;
+  try{
+    const css = await fetch('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap').then(r => r.ok ? r.text() : '');
+    const caras = [...css.matchAll(/@font-face\s*{([^}]*)}/g)].map(m => m[1]).filter(b => /latin;|U\+0000-00FF/.test(b) || !/unicode-range/.test(b));
+    let out = '';
+    for(const b of caras){
+      const peso = (b.match(/font-weight:\s*(\d+)/) || [])[1] || '400', src = (b.match(/url\((https:[^)]+)\)/) || [])[1];
+      if(!src) continue;
+      const buf = await fetch(src).then(r => r.arrayBuffer()); let bin = ''; const u8 = new Uint8Array(buf);
+      for(let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+      out += `@font-face{font-family:'Plus Jakarta Sans';font-weight:${peso};src:url(data:font/woff2;base64,${btoa(bin)}) format('woff2');}`;
+    }
+    FUENTE_MARCA = out;
+  }catch(e){ FUENTE_MARCA = ''; }
+  return FUENTE_MARCA;
+}
 async function pngDelPlano(p){
-  const svg = svgDelPlano(p.data, T);
+  let svg = svgDelPlano(p.data, T);
+  const fuente = await fuenteMarca();
+  if(fuente) svg = svg.replace(/(<svg[^>]*>)/, `$1<defs><style>${fuente}</style></defs>`);
   const m = svg.match(/viewBox="([\d.\-]+) ([\d.\-]+) ([\d.]+) ([\d.]+)"/); const w = m ? +m[3] : 2000, h = m ? +m[4] : 1400;
   const k = Math.min(2, 3600 / Math.max(w, h)); const c = document.createElement('canvas'); c.width = Math.round(w * k); c.height = Math.round(h * k);
   const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
