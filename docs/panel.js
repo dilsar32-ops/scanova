@@ -250,8 +250,6 @@ export function conectar(){
   // Los puntitos siguen al carrusel de Recent Projects.
   $('#recientes').addEventListener('scroll', (e) => { const c = e.currentTarget; const n = c.children.length; if(n < 2) return;
     const i = Math.round(c.scrollLeft / Math.max(1, c.scrollWidth - c.clientWidth) * (n - 1)); $$('#recPuntos i').forEach((x, k) => x.classList.toggle('on', k === i)); }, { passive:true });
-  // La lupa de arriba (teléfono): lleva al buscador de All Projects.
-  $('#btnBuscarTel').addEventListener('click', () => { if($('#pInicio').hidden){ irA('pInicio'); pintar(); } const i = $('#inBuscarI'); if(i){ i.scrollIntoView({ block:'center' }); i.focus(); } });
   $('#btnFiltroP').addEventListener('click', () => $('#herrProyectos').classList.toggle('abierto'));
   $('#btnCampana').addEventListener('click', (e) => {
     const n = Number($('#campanaPunto').dataset.n || 0);

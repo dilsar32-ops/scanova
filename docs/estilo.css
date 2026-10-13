@@ -1326,3 +1326,21 @@ body.fv-editando .fv-asa{ visibility:hidden; }
   .pcab-etqs .enlace-editar.solo-compu{ display:inline-flex !important; white-space:nowrap; }
   .pcab .solo-movil-i{ display:none; }
 }
+/* Su pedido (computadora): letras de la cabecera más grandes, como antes, y la foto más cuadrada */
+@media (min-width:900px){
+  .pcab{ grid-template-columns:150px minmax(0,1fr) auto; gap:22px; }
+  .pcab .portada{ width:150px; border-radius:14px; }
+  .pcab-t{ font-size:30px; }
+  .pcab-dir{ font-size:16.5px; }
+  .pcab-meta{ font-size:15.5px; }
+  .pcab-datos{ gap:7px; padding:4px 0; }
+  .pcab-etqs{ margin-top:6px; }
+  .pcab-etqs .etq-c{ font-size:13.5px; padding:4px 10px; }
+}
+@media (min-width:900px){ .pcab{ grid-template-columns:140px minmax(0,1fr) auto; } .pcab .portada{ width:140px; } }
+@media (max-width:899px){ .pcab-meta{ font-size:13px; } .pcab-dir{ font-size:14px; } }
+@media (max-width:899px){ .pcab{ grid-template-columns:92px minmax(0,1fr) auto; } .pcab .portada{ width:92px; } }
+/* La foto de la portada NUNCA estira el cuadro (las fotos del teléfono son verticales): se recorta dentro de un cuadro
+   que mide lo mismo que el texto. */
+.pcab .portada{ position:relative; }
+.pcab .portada img{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
