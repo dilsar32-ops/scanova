@@ -455,8 +455,9 @@ body.en-inicio{ overflow:hidden; }
         <div class="card forma">
           <h1 class="titulo chico" id="formaTitulo">Trabajo nuevo</h1>
           <div class="forma-grid">
-            <div class="field"><label for="fCliente">Project name</label><input type="text" id="fCliente" autocomplete="off" placeholder="Harris Residence"></div>
-            <div class="field"><label for="fClienteNombre">Client <span class="hint">opcional</span></label><input type="text" id="fClienteNombre" autocomplete="off" placeholder="Harris Family"></div>
+            <div class="field"><label for="fCliente">Client name</label><input type="text" id="fCliente" autocomplete="off" placeholder="Lauren Harris"></div>
+            <!-- Un proyecto es de UN cliente: su nombre es el del proyecto (su regla). Este campo aparte ya no se usa. -->
+            <div class="field" hidden><label for="fClienteNombre">Client <span class="hint">opcional</span></label><input type="text" id="fClienteNombre" autocomplete="off" placeholder="Harris Family"></div>
             <div class="field"><label for="fTelefono">Teléfono</label><input type="tel" id="fTelefono" autocomplete="off" placeholder="(703) 555-0100"></div>
             <div class="field ancho"><label for="fDireccion">Dirección</label>
               <div class="dir-campo">

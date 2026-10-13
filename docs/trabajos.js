@@ -96,7 +96,8 @@ function leerForma(){
            correo: $('#fCorreo').value.trim(), tipo: $('#fTipo').value, notas: $('#fNotas').value.trim(),
            etapa: ETAPAS_FORMA.includes($('#fEtapa').value) ? $('#fEtapa').value : 'en_curso', avance: avanceForma($('#fAvance').value),
            lat: numONulo($('#fLat').value), lng: numONulo($('#fLng').value),
-           cliente_nombre: $('#fClienteNombre').value.trim(), encargado: $('#fEncargado').value.trim(), fecha_inicio: $('#fFechaInicio').value || '' };
+           cliente_nombre: '',   // el nombre del cliente ES el nombre del proyecto (no hay dos nombres)
+           encargado: $('#fEncargado').value.trim(), fecha_inicio: $('#fFechaInicio').value || '' };
 }
 function llenarForma(t){
   $('#fCliente').value = t ? (t.cliente || '') : ''; $('#fDireccion').value = t ? (t.direccion || '') : '';

@@ -86,7 +86,7 @@ export function pintar(){
   const masIc = (attr, label) => `<button type="button" class="pdet-ed" ${attr} aria-label="${label}">${IC('mas-circ')}</button>`;
   c.innerHTML = `<div class="pdet-cab"><h2>Project Details</h2><button type="button" class="pdet-cerrar" data-det-cerrar aria-label="Close">✕</button></div>${aviso}
     <section class="pdet-card"><div class="pdet-t"><h3>Customer</h3>${editarIc('data-det-editar', 'Edit customer')}</div>
-      <div class="pdet-cliente"><span class="pdet-persona">${IC('persona')}</span><div><b>${esc(T.cliente)}</b><span>${esc(T.direccion || '')}</span>${T.cliente_nombre && T.cliente_nombre !== T.cliente ? '<span>' + esc(T.cliente_nombre) + '</span>' : ''}
+      <div class="pdet-cliente"><span class="pdet-persona">${IC('persona')}</span><div><b>${esc(T.cliente)}</b><span>${esc(T.direccion || '')}</span>
       ${tel ? `<a href="tel:${esc(tel)}">${esc(T.telefono)}</a>` : ''}${T.correo ? `<a href="mailto:${esc(T.correo)}">${esc(T.correo)}</a>` : ''}</div></div></section>
     <section class="pdet-card"><div class="pdet-t"><h3>Project Users (${MIEMBROS.length})</h3>${puedeEscogerGente() ? editarIc('data-det-usuarios', 'Choose project users') : ''}</div>${usuariosHtml(MIEMBROS, nom)}</section>
     <section class="pdet-card"><div class="pdet-t"><h3>Collaborators</h3>${masIc('data-det-colab', 'Add collaborator')}</div>

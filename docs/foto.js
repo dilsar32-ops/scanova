@@ -104,7 +104,7 @@ function pintarPanel(){
   const nom = (u) => fotos.nombreDe(u) || '';
   p.innerHTML = `<div class="fv-h-fila"><h2 class="fv-h">Photo Details</h2><button type="button" class="fv-cerrar-tel" data-fv-cerrar-detalles aria-label="Close">✕</button></div>
     <div class="fv-grupo">
-      <div class="fv-doble">${fila('persona', esc(T.cliente_nombre || T.cliente || ''))}${fila('calendario', esc(fechaLarga(cuando)) + '<br>' + esc(horaLarga(cuando)) + '<small>by ' + esc(nom(F.created_by) || 'Team') + '</small>')}</div>
+      <div class="fv-doble">${fila('persona', esc(T.cliente || ''))}${fila('calendario', esc(fechaLarga(cuando)) + '<br>' + esc(horaLarga(cuando)) + '<small>by ' + esc(nom(F.created_by) || 'Team') + '</small>')}</div>
       ${fila('pin', esc(T.direccion || 'No address'))}
     </div>
     <button type="button" class="fv-grupo fv-lugar" data-fv-mover>${fila('casa', l.nivel ? esc(l.nivel) + (l.cuarto ? ' ' + IC('chev-der') + ' ' + esc(l.cuarto) : '') : '<span class="fv-gris">Choose level &amp; room</span>', IC('chev'))}</button>

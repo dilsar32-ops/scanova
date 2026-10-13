@@ -87,17 +87,18 @@ export function actividadDetalles(tareas, coms, nombreDe){
   return out.filter(x => !isNaN(x.cuando));
 }
 export function cabeceraHtml(t, portada, manager){
-  const pm = t.encargado ? '<span class="largo">Project Manager</span><span class="corto">PM</span>: ' + esc(t.encargado) : '';
-  const meta1 = [t.cliente_nombre ? 'Client: ' + esc(t.cliente_nombre) : '', pm].filter(Boolean).map(x => '<span class="pm-i">' + x + '</span>').join('<span class="sep">|</span>');
-  const meta2 = t.fecha_inicio ? 'Start Date: ' + esc(fechaCortaEn(t.fecha_inicio)) : 'Created: ' + esc(fechaCortaEn(t.created_at));
+  // Su diseño: nombre; dirección; "PM · Created" en una línea; y abajo las etiquetas. La foto mide lo mismo que el texto.
+  const pm = t.encargado ? 'PM: ' + esc(t.encargado) : '';
+  const fecha = 'Created: ' + esc(fechaCortaEn(t.created_at));   // su pedido: junto a PM, la fecha en que se creó el proyecto
+  // El cliente ya sale en Project Details (Customer); aquí se repetía junto al nombre del proyecto.
+  const meta = [pm, fecha].filter(Boolean).map(x => '<span class="pm-i">' + x + '</span>').join('<span class="sep">|</span>');
   return `<div class="pcab">
     <div class="portada">${portada ? '<img src="' + esc(portada) + '" alt="">' : IC('camara')}</div>
     <div class="pcab-datos">
       <h1 class="pcab-t">${esc(t.cliente)}</h1>
       <a class="pcab-dir" href="${esc(trabajos.mapsUrl(t.direccion))}" target="_blank" rel="noopener">${esc(t.direccion || 'No address')}</a>
+      <div class="pcab-meta">${meta}</div>
       <div class="pcab-etqs">${etiquetasHtml(t)}<button type="button" class="enlace-editar solo-compu" data-editar-etq>${IC('lapiz')}Edit Labels</button></div>
-      ${meta1 ? '<div class="pcab-meta">' + meta1 + '</div>' : ''}
-      <div class="pcab-meta">${meta2}</div>
       <button type="button" class="enlace-editar solo-movil-i" data-editar-etq>${IC('lapiz')}Edit Labels</button>
     </div>
     <div class="pcab-acc">
