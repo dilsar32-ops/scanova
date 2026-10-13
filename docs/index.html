@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
-<link rel="stylesheet" href="estilo.css?v=2026-10-13-13">
+<link rel="stylesheet" href="estilo.css?v=2026-10-14-1">
 <meta name="description" content="Scanova360: the smarter way to capture, organize, and manage restoration projects. Private workspace, by invitation only.">
 <style>
 /* ===== BIENVENIDA (la imagen aprobada hecha pagina; se ve solo sin sesion) ===== */
@@ -266,6 +266,8 @@ body.en-inicio{ overflow:hidden; }
       <!-- Home en la computadora: el Welcome sube aquí, a la altura del logo (su pedido). -->
       <div class="tope-bienv"><h1 class="bienv-t">Welcome, <span id="topeNombre"></span></h1><p class="bienv-sub">Capture. Plan. Restore. All in one place.</p><div class="bienv-fecha" id="topeFecha2"></div></div>
       <span class="tope-fecha" id="topeFecha"></span>
+      <!-- Back de un proyecto en la computadora: sube aquí, a la fila del buscador, para dejarle ese espacio al plano (su pedido del 14-oct). En el teléfono no se ve. -->
+      <button type="button" class="volver tope-volver" data-nav="atras"><svg class="ic"><use href="#i-atras"/></svg>Back</button>
       <label class="tope-buscar"><svg class="ic"><use href="#i-buscar"/></svg><input type="search" id="inBuscarTodo" placeholder="Search projects, clients, or addresses..." autocomplete="off"></label>
       <button type="button" class="tope-btn" id="btnCampana" aria-label="Notifications"><svg class="ic"><use href="#i-campana"/></svg><span class="punto" id="campanaPunto" hidden></span></button>
       <span translate="no" class="avatar avatar-azul avatar-tope" id="avatarBarra">·</span>
@@ -662,6 +664,6 @@ body.en-inicio{ overflow:hidden; }
     <div class="visor-pie"><span id="visorPie"></span><button type="button" class="btn btn-outline btn-rojo" id="visorBorrar" hidden><svg class="ic"><use href="#i-archivo"/></svg>Papelera</button></div>
   </div>
 </div>
-<script type="module" src="app.js?v=2026-10-13-13"></script>
+<script type="module" src="app.js?v=2026-10-14-1"></script>
 </body>
 </html>

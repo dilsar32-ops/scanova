@@ -1533,3 +1533,11 @@ body.fv-editando .fv-asa{ visibility:hidden; }
   .pcab .pcab-meta .pm-corto{ display:inline; }
   .pcab .pcab-etqs{ order:4; margin:6px 0 0; }
 }
+
+/* 14-oct, su pedido: en la computadora el Back del proyecto sube a la fila del buscador (el hueco de arriba a la
+   izquierda) y su renglón de abajo desaparece, así el plano gana ese alto. El teléfono no cambia. */
+.tope .tope-volver{ display:none; }
+@media (min-width:900px){
+  body:has(#pTrabajo:not([hidden])) .tope .tope-volver{ display:inline-flex; margin-right:auto; margin-left:max(0px, calc((100% - 1560px) / 2)); padding:0; align-self:center; }   /* misma orilla que el proyecto (centrado, máx. 1560) */
+  body:has(#pTrabajo:not([hidden])) .ptrabajo-main > .volver{ display:none; }
+}

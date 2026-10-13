@@ -2,8 +2,8 @@
 // (el mismo escáner de Field Reports, que ya viene dentro de la app: plugin RoomScan) y se dibuja con el
 // mismo código de Field Reports (plano.js, copiado por tools/extraer_plano.py). Un escaneo por piso;
 // un escaneo nuevo no borra el anterior (queda de historial), se ve el más reciente.
-import * as plano from './plano.js?v=2026-10-13-13';
-import { authFetch, esAparato } from './app.js?v=2026-10-13-13';
+import * as plano from './plano.js?v=2026-10-14-1';
+import { authFetch, esAparato } from './app.js?v=2026-10-14-1';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
@@ -33,11 +33,20 @@ export const planoDe = (planos, nivelId) => (planos || []).find(p => (p.nivel_id
 // recibirlo (sus pasos, en el mismo orden): girarlo a escuadra, escuadrar paredes, juntar las paredes que son
 // la misma, cerrar esquinas chicas. Su queja del 13-oct: "los planos salen de lado". Se hace sobre una copia
 // (nunca se toca lo guardado) y se recuerda, así no se repite en cada dibujo.
+const sinAcento = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z ]+/g, ' ').replace(/\s+/g, ' ').trim();
+const ORDENES = ['nuevo cuarto', 'cuarto nuevo', 'otro cuarto', 'siguiente cuarto', 'otro nivel', 'es nuevo', 'el siguiente', 'el que sigue', 'new room', 'next room', 'another room'];
+export function esOrdenDeCuarto(nombre){ const k = sinAcento(nombre); return ORDENES.some(o => k === o || k.startsWith(o + ' ') || k.endsWith(' ' + o)); }
 const LISTOS = new WeakMap();
 export function prepararPlano(data){
   if(!data || typeof data !== 'object') return data;
   if(LISTOS.has(data)) return LISTOS.get(data);
   const d = JSON.parse(JSON.stringify(data));
+  // El nombre que el personal dijo (o tocó) al escanear cada cuarto viene en voiceName; Field Reports lo
+  // copia a roomName al recibir el escaneo y Scanova no lo hacía, por eso salían "ROOM 1/2" (su pedido del
+  // 14-oct). Un nombre puesto después a mano (roomName) siempre gana.
+  // "Nuevo cuarto"/"Otro cuarto" es la orden de pasar al siguiente, no un nombre: el iPhone lo guardaba como
+  // nombre (ya arreglado en el aparato) y esos cuartos se quedan como Room N hasta que les pongan uno.
+  (d.rooms || []).forEach(r => { const v = String(r && r.voiceName || '').trim(); if(r && !String(r.roomName || '').trim() && v && !esOrdenDeCuarto(v)){ r.roomName = v; r._namedByVoice = true; } });
   try{
     plano.floorplanAlignRooms(d);
     if(!d._handEdited){ plano.floorplanRectifyWalls(d); plano.floorplanRefineGeometry(d); plano.floorplanCloseCorners(d); }
@@ -179,6 +188,10 @@ function medir(){
   }
   const arriba = l.getBoundingClientRect().top + (m ? m.scrollTop : window.scrollY);   // dónde queda el cuadro con la página arriba del todo
   l.style.height = Math.max(380, Math.round(window.innerHeight - arriba - 18)) + 'px';
+  // Su pedido (14-oct): en la computadora tampoco se mueve la página. El borde de la tarjeta del plano y el margen de
+  // abajo de la pantalla no entraban en la cuenta (sobraban ~65 px): lo que todavía sobresalga se le quita al cuadro.
+  const sobra = m ? m.scrollHeight - m.clientHeight : 0;
+  if(sobra > 0){ l.style.height = Math.max(380, l.clientHeight - sobra) + 'px'; if(m) m.scrollTop = 0; }
 }
 if(typeof window !== 'undefined') window.addEventListener('resize', () => medir());
 // La foto de la cabecera llega después y cambia el alto: se vuelve a medir para que todo siga cabiendo.

@@ -39,6 +39,18 @@ ok('la hoja después de la vista limpia sigue completa (el modo no se queda pega
   ok('el escaneo nuevo se guarda ya derecho', /const d = prepararPlano\(r\)/.test(src) && /data: d, area_sqft/.test(src));
   ok('teléfono: la página del plano queda quieta si todo cabe (pl-fijo)', /classList\.add\('pl-fijo'\)/.test(src) && /pl-fijo/.test(fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8')));
 }
+// Su pedido del 14-oct: el nombre que el personal dice al escanear (voiceName) es el que sale en el plano.
+{ const v = JSON.parse(JSON.stringify(data)); v.rooms.forEach(r => { delete r.roomName; delete r._namedByVoice; }); v.rooms[0].voiceName = 'Sala de juegos'; v.rooms[1].voiceName = 'Cocina'; v.rooms[2].roomName = 'Pasillo'; v.rooms[2].voiceName = 'Otro';
+  const lv = PL.svgDelPlano(v, {}, true);
+  ok('el nombre dicho al escanear sale en el plano', /SALA DE JUEGOS/.test(lv) && /COCINA/.test(lv));
+  ok('un nombre puesto a mano gana sobre el dicho', /PASILLO/.test(lv) && !/>OTRO</.test(lv));
+  ok('ponerle el nombre no toca lo guardado', !v.rooms[0].roomName && PL.prepararPlano(v).rooms[0].roomName === 'Sala de juegos');
+  const ord = JSON.parse(JSON.stringify(v)); ord.rooms[0].voiceName = 'Nuevo cuarto'; ord.rooms[1].voiceName = 'cuarto nuevo';
+  const lo = PL.svgDelPlano(ord, {}, true);
+  ok('"Nuevo cuarto" es la orden de pasar, no un nombre: sale Room N', !/NUEVO CUARTO/i.test(lo) && /ROOM 1/.test(lo) && /ROOM 2/.test(lo));
+  ok('un nombre de verdad con "cuarto" sí pasa', !PL.esOrdenDeCuarto('Cuarto de lavado') && !PL.esOrdenDeCuarto('Cuarto de Chucho') && PL.esOrdenDeCuarto('Otro cuarto'));
+  const sin = JSON.parse(JSON.stringify(v)); sin.rooms.forEach(r => { delete r.roomName; delete r.voiceName; });
+  ok('sin nombre dicho sigue saliendo Room N (no inventa)', /ROOM 1/.test(PL.svgDelPlano(sin, {}, true))); }
 const L = [{ id:'a', nivel_id:'n1', created_at:'2026-10-13' }, { id:'b', nivel_id:'n1', created_at:'2026-10-12' }, { id:'c', nivel_id:null }];
 ok('de cada piso se ve el escaneo más reciente; los viejos quedan de historial', PL.planoDe(L, 'n1').id === 'a' && PL.planoDe(L, 'sin').id === 'c' && PL.planoDe(L, 'n2') === null);
 ok('pestañas: Photos, Floor Plan, Measurements… (Floor Plan después de Photos)', /data-ptab="fotos".*data-ptab="plano".*data-ptab="medidas"/.test(PR.tabsHtml('plano', { fotos: 3 })) && /Floor Plan/.test(PR.tabsHtml('plano', { fotos: 3 })));

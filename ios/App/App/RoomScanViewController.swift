@@ -2541,10 +2541,21 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
             return .logEquipment(found)
         }
 
+        // Las ordenes de pasar de cuarto NUNCA son un nombre. "Nuevo cuarto"
+        // lleva la palabra "cuarto" y pasaba como nombre conocido ("cuarto de
+        // Chucho"): en Scanova salieron dos cuartos llamados "Nuevo cuarto"
+        // (14-oct). Mientras escanea se ignora; al terminar el cuarto se
+        // contesta arriba como "otro cuarto".
+        if Self.isMoveOnPhrase(lower) { return .ignored }
         if let name = cleanVoiceRoomName(raw) {
             return .roomName(name)
         }
         return .ignored
+    }
+    static func isMoveOnPhrase(_ lower: String) -> Bool {
+        let key = normalizedName(lower)
+        let frases = ["nuevo cuarto", "cuarto nuevo", "otro cuarto", "siguiente cuarto", "otro nivel", "es nuevo", "el siguiente", "el que sigue"]
+        return frases.contains(where: { key == normalizedName($0) || key.hasPrefix(normalizedName($0) + " ") || key.hasSuffix(" " + normalizedName($0)) })
     }
 
     // Looks a few words back from a keyword's position for a number word
@@ -2879,7 +2890,8 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
             // telefono, y si se quitara, decir "otro nivel" caeria hasta el
             // clasificador de nombres y bautizaria el cuarto "Otro nivel".
             if lower.contains("otro nivel") { scanAnotherLevelTapped(); return }
-            if lower.contains("otro cuarto") || lower.contains("siguiente cuarto") { scanAnotherTapped(); return }
+            if lower.contains("otro cuarto") || lower.contains("siguiente cuarto") ||
+               lower.contains("nuevo cuarto") || lower.contains("cuarto nuevo") { scanAnotherTapped(); return }
             if wordCount <= 3, (lower.contains("terminar") || lower.contains("terminamos") || lower.contains("termina el plano")) {
                 finishTapped()
                 return
