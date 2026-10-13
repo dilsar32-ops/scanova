@@ -382,6 +382,7 @@ function pintarPanel(){
 export async function copiaFinal(){
   // La ORIGINAL (máxima calidad); si no se puede leer (formato raro o red), la de 1600 px, para no quedarse sin guardar.
   let url, im;
+  if(!E.urlOriginal && E.firmarOriginal){ try{ E.urlOriginal = await E.firmarOriginal(); }catch(e){ console.warn('firmar original', e); } }
   for(const fuente of [E.urlOriginal, E.urlWeb].filter(Boolean)){
     try{ const r = await bajar(fuente); if(!r.ok) throw new Error('HTTP ' + r.status); url = URL.createObjectURL(await r.blob()); im = await cargarImg(url); break; }
     catch(e){ if(url){ URL.revokeObjectURL(url); url = null; } if(fuente === E.urlWeb || !E.urlWeb) throw e; }

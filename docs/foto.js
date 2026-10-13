@@ -3,12 +3,12 @@
 // Arriba: Download, Share, •••, Edit Photo y Save a Copy. El panel se esconde y se vuelve a sacar con la flechita.
 // Datos: la nota de la foto (fotos_fotos.nota), sus etiquetas (fotos_etiquetas + fotos_foto_etiquetas) y sus comentarios
 // (fotos_comentarios) ya existían desde fotos-01; las tareas de la foto usan fotos_tareas (sql/fotos-06-foto.sql).
-import { $, $$, authFetch, irA, atras, esManager, PERFIL, esAparato } from './app.js?v=2026-10-13-4';
-import * as trabajos from './trabajos.js?v=2026-10-13-4';
-import * as fotos from './fotos.js?v=2026-10-13-4';
-import * as proyecto from './proyecto.js?v=2026-10-13-4';
-import * as panel from './panel.js?v=2026-10-13-4';
-import * as editor from './editor.js?v=2026-10-13-4';
+import { $, $$, authFetch, irA, atras, esManager, PERFIL, esAparato } from './app.js?v=2026-10-13-5';
+import * as trabajos from './trabajos.js?v=2026-10-13-5';
+import * as fotos from './fotos.js?v=2026-10-13-5';
+import * as proyecto from './proyecto.js?v=2026-10-13-5';
+import * as panel from './panel.js?v=2026-10-13-5';
+import * as editor from './editor.js?v=2026-10-13-5';
 
 const esc = (v) => trabajos.esc(v);
 const IC = (n) => '<svg class="ic"><use href="#i-' + n + '"/></svg>';
@@ -253,13 +253,19 @@ async function comentar(){
   catch(err){ aviso('Could not post the comment. ' + err.message); }
 }
 // Editar: las herramientas salen donde estaba "Photo Details"; "Save a Copy" sube la foto editada como una nueva.
+// La de 1600 px ya viene firmada (la ventana firma toda la lista), así que el editor abre al instante;
+// la ORIGINAL solo hace falta al guardar y se firma ahí (firmarOriginal).
+let ABRIENDO = false;
 async function editar(){
-  const f = F; if(!f) return; aviso('');
-  const [w, o] = await Promise.all([fotos.urlsFirmadas([f.id], 'web'), fotos.urlsFirmadas([f.id], 'original')]);
-  if(!w[f.id]){ aviso('Could not open the photo to edit.'); return; }
+  const f = F; if(!f || ABRIENDO) return; aviso('');
+  ABRIENDO = true; $('#fvEditar').classList.add('on');
+  let w = {};
+  try{ w = await fotos.urlsFirmadas([f.id], 'web'); } finally { ABRIENDO = false; }
+  if(F !== f){ $('#fvEditar').classList.remove('on'); return; }
+  if(!w[f.id]){ $('#fvEditar').classList.remove('on'); aviso('Could not open the photo to edit. Check your connection and try again.'); return; }
   document.body.classList.remove('fv-oculto'); detalles(false);
-  $('#fvEditar').classList.add('on');
-  editor.abrir({ foto: f, tel: esTelefono(), bandeja: $('#edTel'), cajaHoja: $('#edHoja'), velo: $('#fvVelo'), img: $('#fvImg'), panel: $('#fvPanel'), urlWeb: w[f.id], urlOriginal: o[f.id] || w[f.id],
+  editor.abrir({ foto: f, tel: esTelefono(), bandeja: $('#edTel'), cajaHoja: $('#edHoja'), velo: $('#fvVelo'), img: $('#fvImg'), panel: $('#fvPanel'), urlWeb: w[f.id],
+    firmarOriginal: async () => (await fotos.urlsFirmadas([f.id], 'original'))[f.id] || null,
     guardar: (archivo) => fotos.subirCopia(archivo, { nivel_id: f.nivel_id, cuarto_id: f.cuarto_id }),
     alGuardar: (nueva) => { if(nueva && nueva.id) fotos.abrirVisor(nueva.id); },
     alSalir: () => { $('#fvEditar').classList.remove('on'); const img = $('#fvImg'); img.dataset.id = ''; if(F) { pintarFoto(); pintarTira(); pintarPanel(); } } });
