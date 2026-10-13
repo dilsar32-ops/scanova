@@ -1524,3 +1524,12 @@ body.fv-editando .fv-asa{ visibility:hidden; }
   body.pl-fijo #main{ overflow:hidden; }
   body.pl-fijo .pl-lienzo.ajustado{ touch-action:none; }
 }
+/* 14-oct, su pedido: en la computadora la cabecera va IGUAL que en el teléfono: nombre, dirección,
+   "PM: x | Created: fecha" en una línea, y las etiquetas con Edit Labels abajo. */
+@media (min-width:900px){
+  .pcab .pcab-meta{ order:3; flex-direction:row; flex-wrap:wrap; align-items:baseline; gap:0; }
+  .pcab .pcab-meta .sep{ display:inline; margin:0 8px; }
+  .pcab .pcab-meta .pm-largo{ display:none; }
+  .pcab .pcab-meta .pm-corto{ display:inline; }
+  .pcab .pcab-etqs{ order:4; margin:6px 0 0; }
+}

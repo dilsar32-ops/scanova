@@ -1,13 +1,13 @@
 // Scanova · la ficha de un proyecto (diseño de Amilcar, 12 oct 2026): portada, nombre, dirección, etapa, cliente,
 // encargado y fecha; pestañas Rooms · Photos · Measurements · Notes · Documents · Activity.
 // Rooms = niveles (Basement, First Floor…) y sus cuartos (Kitchen…). Photos = las fotos por nivel y por cuarto.
-import { $, $$, authFetch, irA, atras, esManager, PERFIL } from './app.js?v=2026-10-13-12';
-import * as trabajos from './trabajos.js?v=2026-10-13-12';
-import * as fotos from './fotos.js?v=2026-10-13-12';
-import * as panel from './panel.js?v=2026-10-13-12';
-import * as planos from './planos.js?v=2026-10-13-12';
-import * as camara from './camara.js?v=2026-10-13-12';
-import * as detalles from './detalles.js?v=2026-10-13-12';
+import { $, $$, authFetch, irA, atras, esManager, PERFIL } from './app.js?v=2026-10-13-13';
+import * as trabajos from './trabajos.js?v=2026-10-13-13';
+import * as fotos from './fotos.js?v=2026-10-13-13';
+import * as panel from './panel.js?v=2026-10-13-13';
+import * as planos from './planos.js?v=2026-10-13-13';
+import * as camara from './camara.js?v=2026-10-13-13';
+import * as detalles from './detalles.js?v=2026-10-13-13';
 
 const esc = (v) => trabajos.esc(v);
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -101,7 +101,7 @@ export function actividadDetalles(tareas, coms, nombreDe){
   return out.filter(x => !isNaN(x.cuando));
 }
 export function cabeceraHtml(t, portada, manager){
-  // Su diseño (13-oct): nombre; dirección; etiquetas; y abajo "Project Manager" y "Created", cada uno en su línea.
+  // 14-oct, su pedido: en la computadora igual que en el teléfono: nombre; dirección; "PM: x | Created" en una línea; etiquetas abajo (el orden lo pone el CSS).
   // En el teléfono se queda como lo aprobó: "PM: x | Created" en una línea (ahí se acomoda por posición, no por orden).
   const pm = t.encargado ? '<span class="pm-largo">Project Manager: </span><span class="pm-corto">PM: </span>' + esc(t.encargado) : '';
   const fecha = 'Created: ' + esc(fechaCortaEn(t.created_at));   // su pedido: junto a PM, la fecha en que se creó el proyecto
