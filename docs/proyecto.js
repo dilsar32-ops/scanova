@@ -1,12 +1,12 @@
 // Scanova · la ficha de un proyecto (diseño de Amilcar, 12 oct 2026): portada, nombre, dirección, etapa, cliente,
 // encargado y fecha; pestañas Rooms · Photos · Measurements · Notes · Documents · Activity.
 // Rooms = niveles (Basement, First Floor…) y sus cuartos (Kitchen…). Photos = las fotos por nivel y por cuarto.
-import { $, $$, authFetch, irA, atras, esManager, PERFIL } from './app.js?v=2026-10-13-5';
-import * as trabajos from './trabajos.js?v=2026-10-13-5';
-import * as fotos from './fotos.js?v=2026-10-13-5';
-import * as panel from './panel.js?v=2026-10-13-5';
-import * as camara from './camara.js?v=2026-10-13-5';
-import * as detalles from './detalles.js?v=2026-10-13-5';
+import { $, $$, authFetch, irA, atras, esManager, PERFIL } from './app.js?v=2026-10-13-6';
+import * as trabajos from './trabajos.js?v=2026-10-13-6';
+import * as fotos from './fotos.js?v=2026-10-13-6';
+import * as panel from './panel.js?v=2026-10-13-6';
+import * as camara from './camara.js?v=2026-10-13-6';
+import * as detalles from './detalles.js?v=2026-10-13-6';
 
 const esc = (v) => trabajos.esc(v);
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';

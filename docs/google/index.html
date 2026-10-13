@@ -27,9 +27,9 @@ body{ margin:0; min-height:100vh; display:grid; place-items:center; background:v
   <p class="msg" id="msg">Conectando con Google…</p>
 </div>
 <script type="module">
-import { SUPABASE_URL, ANON_KEY } from '../config.js?v=2026-10-13-5';
+import { SUPABASE_URL, ANON_KEY } from '../config.js?v=2026-10-13-6';
 import { GOOGLE_CLIENT_ID, CLAVE_GOOGLE, azar, sha256hex, dirPagina, estadoNuevo, esDeApp, urlGoogleDirecto,
-  leerGoogle, fragmentoSesion, fragmentoError, errorLegible, urlSalida } from '../google.js?v=2026-10-13-5';
+  leerGoogle, fragmentoSesion, fragmentoError, errorLegible, urlSalida } from '../google.js?v=2026-10-13-6';
 
 const aqui = dirPagina(location.origin, location.pathname);
 const msg = t => { document.getElementById('msg').textContent = t; };

@@ -50,5 +50,8 @@ import fs from 'node:fs';
 const idx = fs.readFileSync(new URL('../docs/index.html', import.meta.url), 'utf8');
 const pc = idx.slice(idx.indexOf('id="pCuarto"'), idx.indexOf('</section>', idx.indexOf('id="pCuarto"')));
 ok('Add Room: primero el Level, luego Room Name, Room Type y Notes; Save Room y Done', pc.indexOf('id="cNivel"') < pc.indexOf('id="cNombre"') && pc.indexOf('id="cNombre"') < pc.indexOf('id="cTipos"') && pc.indexOf('id="cTipos"') < pc.indexOf('id="cNotas"') && /id="btnCuartoListo"/.test(pc) && /id="cHechos"/.test(pc));
+const app = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+const irA = app.slice(app.indexOf('export function irA('), app.indexOf('export function atras('));
+ok('cambiar de pantalla cierra Edit Labels / datos del cliente / escoger cuarto', /#detHoja/.test(irA) && /#hojaCuarto/.test(irA) && /\.hidden = true/.test(irA));
 console.log(`\nproyecto: ${pass} ok, ${fail} fallas`);
 if(fail) process.exit(1);
