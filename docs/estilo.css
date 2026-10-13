@@ -1362,3 +1362,13 @@ body.fv-editando .fv-asa{ visibility:hidden; }
 .pcuartos-cab{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin:0 0 12px; }
 .pcuartos-cab .sec-t{ margin:0; }
 .pcuartos-cab .volver{ padding:4px 0; }
+
+/* 13-oct, su pedido: en el teléfono la vista de CUADROS pone todas las fotos en cuadros, 4 por fila (como la galería).
+   La vista de LISTA no cambia. Mover/Borrar siguen al abrir la foto (•••) o con Select. */
+@media (max-width:899px){
+  .pgrid.grid{ grid-template-columns:repeat(4, minmax(0,1fr)); gap:3px; }
+  .pgrid.grid .pfoto .ffoto{ aspect-ratio:1 / 1; border-radius:4px; }
+  .pgrid.grid .pfoto-pie{ display:none; }
+  .pgrupo h4{ margin:4px 0 8px; }
+}
+.pfoto .pfoto-check .ic{ position:static; transform:none; top:auto; left:auto; color:#fff; }   /* la palomita de Select no la mueve la regla de iconos de la foto */
