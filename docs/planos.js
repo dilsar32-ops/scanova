@@ -2,8 +2,8 @@
 // (el mismo escáner de Field Reports, que ya viene dentro de la app: plugin RoomScan) y se dibuja con el
 // mismo código de Field Reports (plano.js, copiado por tools/extraer_plano.py). Un escaneo por piso;
 // un escaneo nuevo no borra el anterior (queda de historial), se ve el más reciente.
-import * as plano from './plano.js?v=2026-10-14-3';
-import { authFetch, esAparato } from './app.js?v=2026-10-14-3';
+import * as plano from './plano.js?v=2026-10-14-4';
+import { authFetch, esAparato } from './app.js?v=2026-10-14-4';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
@@ -43,10 +43,11 @@ export function prepararPlano(data){
   const d = JSON.parse(JSON.stringify(data));
   // El nombre que el personal dijo (o tocó) al escanear cada cuarto viene en voiceName; Field Reports lo
   // copia a roomName al recibir el escaneo y Scanova no lo hacía, por eso salían "ROOM 1/2" (su pedido del
-  // 14-oct). Un nombre puesto después a mano (roomName) siempre gana.
+  // 14-oct). Un nombre puesto después a mano (roomName) siempre gana. En el plano sale EN INGLÉS (13-oct):
+  // "Sí, en la cocina" -> Kitchen, con la misma tabla de Field Reports.
   // "Nuevo cuarto"/"Otro cuarto" es la orden de pasar al siguiente, no un nombre: el iPhone lo guardaba como
   // nombre (ya arreglado en el aparato) y esos cuartos se quedan como Room N hasta que les pongan uno.
-  (d.rooms || []).forEach(r => { const v = String(r && r.voiceName || '').trim(); if(r && !String(r.roomName || '').trim() && v && !esOrdenDeCuarto(v)){ r.roomName = v; r._namedByVoice = true; delete r._labelOffsetPx; } });
+  (d.rooms || []).forEach(r => { const v = String(r && r.voiceName || '').trim(); if(r && !String(r.roomName || '').trim() && v && !esOrdenDeCuarto(v)){ r.roomName = plano.fpNombreDeCuartoEnIngles(v); r._namedByVoice = true; delete r._labelOffsetPx; } });
   // Clósets, baños chicos y lavandería: los nombra fpReconocerClosets (el mismo código de Field Reports), más abajo.
   try{
     plano.floorplanAlignRooms(d);
@@ -260,10 +261,12 @@ async function escanear(){
   const RS = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.RoomScan;
   if(!RS){ avisar('Scanning works in the Scanova360 app on an iPhone Pro (it needs the LiDAR camera). On the computer you can view and export the plans.'); return; }
   try{ const s = await RS.isSupported(); if(s && s.value === false){ avisar('This iPhone has no LiDAR camera, so it cannot scan a floor plan. It works on the iPhone Pro models (12 Pro and newer).'); return; } }catch(e){}
-  const niv = nivelElegido(); OCUPADO = true; avisar('');
+  let niv = nivelElegido(); OCUPADO = true; avisar('');
   try{
-    const r = await RS.scan({ nivelBase: niv && niv.id !== SIN_NIVEL ? niv.nombre : '' });
+    // Los niveles REALES del trabajo viajan a la bandeja de la cámara; el que se escoja ahí es el que manda.
+    const r = await RS.scan({ nivelBase: niv && niv.id !== SIN_NIVEL ? niv.nombre : '', niveles: NIVELES.map(n => n.nombre) });
     if(!r || r.cancelled){ OCUPADO = false; if(r && r.error) avisar(r.error); return; }
+    if(r.nivelBase){ const m = NIVELES.find(n => n.nombre === r.nivelBase); if(m) niv = m; }
     r.job = { client: T.cliente || '', address: T.direccion || '', date: new Date().toISOString().slice(0, 10) };
     const d = prepararPlano(r);   // se guarda ya derecho
     const res = resumenPlano(d);

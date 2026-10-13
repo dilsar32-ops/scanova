@@ -11,7 +11,9 @@ ROOTS = ['buildFloorplanSvg', 'buildFloorplanSvgUnmerged', 'floorplanLevels', 'f
          # lo que Field Reports le hace a cada escaneo al recibirlo: enderezarlo, escuadrarlo, cerrar esquinas
          'floorplanAlignRooms', 'floorplanRectifyWalls', 'floorplanRefineGeometry', 'floorplanCloseCorners',
          # reconocer clósets/rincones (su pedido del 14-oct): la misma detección de Field Reports
-         'floorplanDetectSubAreas', 'fpReconocerClosets']
+         'floorplanDetectSubAreas', 'fpReconocerClosets',
+         # el nombre dicho al escanear sale en inglés (su pedido del 13-oct)
+         'fpNombreDeCuartoEnIngles']
 ROOTS += [r for r in (sys.argv[2].split(',') if len(sys.argv) > 2 else []) if r]
 defs = {}   # nombre -> (orden, texto)
 SIG = re.compile(r'\n  (?=[A-Za-z_$/])')

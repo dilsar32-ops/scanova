@@ -48,9 +48,12 @@ ok('exportar lleva abajo la tabla de medidas (como Field Reports); la pantalla n
 // Su pedido del 14-oct: el nombre que el personal dice al escanear (voiceName) es el que sale en el plano.
 { const v = JSON.parse(JSON.stringify(data)); v.rooms.forEach(r => { delete r.roomName; delete r._namedByVoice; }); v.rooms[0].voiceName = 'Sala de juegos'; v.rooms[1].voiceName = 'Cocina'; v.rooms[2].roomName = 'Pasillo'; v.rooms[2].voiceName = 'Otro';
   const lv = PL.svgDelPlano(v, {}, true);
-  ok('el nombre dicho al escanear sale en el plano', /SALA DE JUEGOS/.test(lv) && /COCINA/.test(lv));
+  // 13-oct: en el plano sale EN INGLÉS.
+  ok('el nombre dicho al escanear sale en el plano, en inglés', /GAME ROOM/.test(lv) && /KITCHEN/.test(lv) && !/COCINA/.test(lv));
   ok('un nombre puesto a mano gana sobre el dicho', /PASILLO/.test(lv) && !/>OTRO</.test(lv));
-  ok('ponerle el nombre no toca lo guardado', !v.rooms[0].roomName && PL.prepararPlano(v).rooms[0].roomName === 'Sala de juegos');
+  ok('ponerle el nombre no toca lo guardado', !v.rooms[0].roomName && PL.prepararPlano(v).rooms[0].roomName === 'Game Room');
+  const w = JSON.parse(JSON.stringify(v)); w.rooms[1].voiceName = 'Sí, en la cocina';
+  ok('las muletillas no entran al nombre ("Sí, en la cocina" -> Kitchen)', PL.prepararPlano(w).rooms[1].roomName === 'Kitchen');
   const ord = JSON.parse(JSON.stringify(v)); ord.rooms[0].voiceName = 'Nuevo cuarto'; ord.rooms[1].voiceName = 'cuarto nuevo';
   const lo = PL.svgDelPlano(ord, {}, true);
   ok('"Nuevo cuarto" es la orden de pasar, no un nombre: sale Room N', !/NUEVO CUARTO/i.test(lo) && /ROOM 1/.test(lo) && /ROOM 2/.test(lo));

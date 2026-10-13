@@ -1,9 +1,109 @@
 // GENERADO por tools/extraer_plano.py desde Field Reports (no editar a mano: se vuelve a generar).
-// Dibuja el plano igual que Field Reports. 110 piezas.
+// Dibuja el plano igual que Field Reports. 114 piezas.
 /* eslint-disable */
 const document = (typeof globalThis !== "undefined" && globalThis.document) || undefined;
   const $ = (sel, el) => { const d = el || (typeof document !== 'undefined' ? document : null); return d && d.querySelector ? d.querySelector(sel) : null; };
   function esc(str){ return String(str == null ? '' : str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+  const ROOM_OPTIONS = [
+    {value:'Living Room', label:'Sala / Living Room'},
+    {value:'Family Room', label:'Cuarto Familiar / Family Room'},
+    {value:'Kitchen', label:'Cocina / Kitchen'},
+    {value:'Dining Room', label:'Comedor / Dining Room'},
+    {value:'Master Bedroom', label:'Recámara Principal / Master Bedroom'},
+    {value:'Bedroom', label:'Recámara / Bedroom'},
+    {value:'Bathroom', label:'Baño / Bathroom'},
+    {value:'Master Bathroom', label:'Baño Principal / Master Bathroom'},
+    {value:'Hallway', label:'Pasillo / Hallway'},
+    {value:'Laundry Room', label:'Lavandería / Laundry Room'},
+    {value:'Garage', label:'Garaje / Garage'},
+    {value:'Basement', label:'Sótano / Basement'},
+    {value:'Attic', label:'Ático / Attic'},
+    {value:'Office', label:'Oficina / Office'},
+    {value:'Closet', label:'Clóset / Closet'},
+    // Los de sótano, que faltaban: "ya se sabe que puede haber TV room o baños".
+    {value:'TV Room', label:'Cuarto de TV / TV Room'},
+    {value:'Storage Room', label:'Bodega / Storage Room'},
+    {value:'Utility Room', label:'Cuarto de Máquinas / Utility Room'},
+    {value:'Stairs', label:'Escaleras / Stairs'},
+    {value:'Kids Bedroom', label:'Cuarto de los Niños / Kids Bedroom'},
+    {value:'Guest Bedroom', label:'Cuarto de Visitas / Guest Bedroom'},
+    {value:'Guest Bathroom', label:'Baño de Visitas / Guest Bathroom'},
+    {value:'Half Bathroom', label:'Medio Baño / Half Bathroom'},
+    // Dos que faltaban y se dicen todo el tiempo: el gimnasio del sótano y la
+    // despensa de la cocina. Estaban en la tabla de traducción sin estar en la
+    // lista, así que "gimnasio" se traducía a un nombre que después no se podía
+    // escoger en la tarjeta - caía en "Otro" con el texto a mano.
+    {value:'Gym', label:'Gimnasio / Gym'},
+    {value:'Pantry', label:'Despensa / Pantry'},
+    {value:'Other', label:'Otro / Other'}
+  ];
+  const MED_CUARTO_ES_EN = {
+    'recamara principal':'Master Bedroom', 'cuarto principal':'Master Bedroom',
+    'recamara':'Bedroom', 'dormitorio':'Bedroom', 'habitacion':'Bedroom', 'alcoba':'Bedroom',
+    'bano principal':'Master Bathroom', 'bano':'Bathroom', 'sanitario':'Bathroom',
+    'medio bano':'Half Bathroom', 'cocina':'Kitchen', 'sala':'Living Room',
+    'sala familiar':'Family Room', 'cuarto familiar':'Family Room', 'comedor':'Dining Room',
+    'pasillo':'Hallway', 'corredor':'Hallway', 'sotano':'Basement', 'atico':'Attic',
+    'closet':'Closet', 'ropero':'Closet', 'armario':'Closet',
+    'lavanderia':'Laundry Room', 'cuarto de lavado':'Laundry Room',
+    'garaje':'Garage', 'cochera':'Garage', 'oficina':'Office', 'estudio':'Office',
+    'cuarto de los ninos':'Kids Bedroom', 'cuarto de ninos':'Kids Bedroom',
+    'cuarto de visitas':'Guest Bedroom', 'cuarto de huespedes':'Guest Bedroom',
+    // La tabla decia "cuarto de los ninos" pero no "RECAMARA de los ninos", y
+    // las dos se dicen igual de seguido. Un nombre que no casa no se pierde
+    // - se respeta tal cual - pero entonces va al reporte del seguro en
+    // español, y el ajustador lee inglés.
+    'recamara de los ninos':'Kids Bedroom', 'recamara de ninos':'Kids Bedroom',
+    'cuarto de los muchachos':'Kids Bedroom',
+    'recamara de visitas':'Guest Bedroom', 'recamara de huespedes':'Guest Bedroom',
+    'bano de visitas':'Guest Bathroom', 'bano de huespedes':'Guest Bathroom',
+    'cuarto de tv':'TV Room', 'sala de tv':'TV Room', 'cuarto de television':'TV Room',
+    'bodega':'Storage Room', 'cuarto de bodega':'Storage Room',
+    'cuarto de maquinas':'Utility Room', 'cuarto de servicio':'Utility Room',
+    'escaleras':'Stairs', 'escalera':'Stairs', 'gimnasio':'Gym', 'despensa':'Pantry',
+    // Los que se dicen al escanear (13-oct): el plano sale en inglés.
+    'cuarto de juegos':'Game Room', 'sala de juegos':'Game Room', 'entrada':'Entry', 'recibidor':'Foyer',
+    'vestibulo':'Foyer', 'vestidor':'Walk-in Closet', 'bano de la recamara':'Master Bathroom',
+    'cocineta':'Kitchenette', 'patio':'Patio', 'terraza':'Deck', 'porche':'Porch', 'balcon':'Balcony',
+    'cuarto':'Room', 'lavado':'Laundry Room', 'clóset':'Closet', 'sala comedor':'Living / Dining Room',
+    'cuarto de la caldera':'Utility Room', 'cuarto del calentador':'Utility Room'
+  };
+  function medAInglesElCuarto(nombre){
+    const crudo = String(nombre || '').trim();
+    if(!crudo) return '';
+    const pelado = crudo.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+    // ¿Ya es uno de los nuestros? (comparando sin acentos ni mayúsculas)
+    const oficial = ROOM_OPTIONS.find(o => o.value.toLowerCase() === pelado);
+    if(oficial) return oficial.value;
+    // ¿Trae un número al final? "Recámara 2" -> "Bedroom 2".
+    const m = pelado.match(/^(.*?)\s*(\d+)$/);
+    const base = m ? m[1].trim() : pelado;
+    const num  = m ? (' ' + m[2]) : '';
+    if(MED_CUARTO_ES_EN[base]) return MED_CUARTO_ES_EN[base] + num;
+    const oficialBase = ROOM_OPTIONS.find(o => o.value.toLowerCase() === base);
+    if(oficialBase) return oficialBase.value + num;
+    // No se pudo traducir: se respeta lo que él escribió. El campo libre lo
+    // acepta, y es preferible su nombre a perder el cuarto.
+    return crudo;
+  }
+  function fpNombreDeCuartoEnIngles(nombre){
+    const original = String(nombre || '').trim();
+    let t = original;
+    for(let i = 0; i < 5; i++){
+      const antes = t;
+      t = t.replace(/^[\s,.;:¡!¿?]+/, '')
+           .replace(/^(s[ií]|no|ok|okay|bueno|pues|ya|ahora|eh)(?=[\s,.]|$)[\s,.]*/i, '')
+           .replace(/^(ahora\s+)?(estoy|estamos)\s+en\s+((la|el)\s+)?/i, '')
+           .replace(/^(esto\s+es|es|vamos\s+a)\s+(la|el|al)\s+/i, '')
+           .replace(/^(en\s+)?(la|el)\s+/i, '');
+      if(t === antes) break;
+    }
+    t = t.replace(/[\s,.;:¡!¿?]+$/, '');
+    if(!t) return original;
+    const en = medAInglesElCuarto(t);
+    const out = en || t;
+    return out.charAt(0).toUpperCase() + out.slice(1);
+  }
   const FP_PLANTAS = ['Basement', '1st Floor', '2nd Floor', '3rd Floor', 'Attic'];
   function fpPlantaDeNivel(data, lvl){
     const n = Math.max(1, +lvl || 1);
@@ -2677,4 +2777,4 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
     return data.merged ? buildFloorplanSvgMerged(data, level) : buildFloorplanSvgUnmerged(data, level);
   }
   export function ponerVista(limpia){ fpEstiloVista = true; fpSheetExport = false; fpConTablaMedidas = !limpia; }
-export { buildFloorplanSvg, buildFloorplanSvgUnmerged, floorplanLevels, fpRoomDisplayAreaSqFt, fpDisplayTotalAreaSqFt, fpOrderedRoomPolygon, fpPolygonAreaSqFt, fpFeetInches, fpPlanMeasurements, fpRoomMeasurements, floorplanIsExteriorWall, floorplanAlignRooms, floorplanRectifyWalls, floorplanRefineGeometry, floorplanCloseCorners, floorplanDetectSubAreas, fpReconocerClosets };
+export { buildFloorplanSvg, buildFloorplanSvgUnmerged, floorplanLevels, fpRoomDisplayAreaSqFt, fpDisplayTotalAreaSqFt, fpOrderedRoomPolygon, fpPolygonAreaSqFt, fpFeetInches, fpPlanMeasurements, fpRoomMeasurements, floorplanIsExteriorWall, floorplanAlignRooms, floorplanRectifyWalls, floorplanRefineGeometry, floorplanCloseCorners, floorplanDetectSubAreas, fpReconocerClosets, fpNombreDeCuartoEnIngles };

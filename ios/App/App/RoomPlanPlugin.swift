@@ -69,6 +69,8 @@ public class RoomPlanPlugin: CAPPlugin, CAPBridgedPlugin, QLPreviewControllerDat
             // La camara la dice en la barra y en la voz; el plano la guarda para
             // que Medidas sepa que cuartos son de ese piso.
             vc.nivelBase = call.getString("nivelBase") ?? ""
+            // Los niveles REALES del proyecto, para la bandeja de la cámara.
+            if let lista = call.getArray("niveles", String.self) { vc.nivelesDelProyecto = lista }
             vc.onFinish = { [weak self, weak vc] outcome in
                 self?.scanInProgress = false
                 guard let vc = vc else { return }
@@ -82,6 +84,8 @@ public class RoomPlanPlugin: CAPPlugin, CAPBridgedPlugin, QLPreviewControllerDat
                         self?.lastStructure = structure
                         var dict = FloorPlanEncoder.encodeStructure(rooms: rooms, merged: merged, levels: levels, voiceNames: voiceNames, equipment: equipment, deletedIndices: deletedIndices, surfaceAnswers: surfaceAnswers)
                         if let inspection = inspection { dict["inspection"] = inspection }
+                        // El nivel que escogió en la bandeja (puede no ser el que mandó la web).
+                        if !vc.nivelBase.isEmpty { dict["nivelBase"] = vc.nivelBase }
                         call.resolve(dict)
                     }
                 }

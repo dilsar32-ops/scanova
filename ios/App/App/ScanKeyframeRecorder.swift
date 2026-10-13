@@ -59,6 +59,8 @@ final class ScanKeyframeRecorder {
         let dir: URL
         let maxThermal: ProcessInfo.ThermalState
         let suppressedSecPerRoom: [Int: Double]
+        // Camino 2 ("segundo cerebro"): lo que la sonda de la malla vio.
+        let meshProbe: [String: Any]
     }
 
     private let arSessionProvider: () -> ARSession?
@@ -107,6 +109,23 @@ final class ScanKeyframeRecorder {
     private var backoffMultiplier: Double = 1
     private var hitCriticalThisRoom = false
     private var kfCounter = 0
+    // SONDA DE LA MALLA (camino 2). Solo MIRA y CUENTA: cada 5 s, mientras
+    // se escanea y sin calor, lee las anclas que ARKit ya trae en el cuadro
+    // (malla del LiDAR con su etiqueta por cara, y planos con la suya) para
+    // saber si RoomPlan nos deja ver puertas y ventanas por segunda vía.
+    // Nunca crea, cambia ni quita nada de la sesión.
+    private var meshTicks = 0
+    private var meshSamples = 0
+    private var meshFramesWithMesh = 0
+    private var meshMaxAnchors = 0
+    private var meshMaxFaces = 0
+    private var meshClassified = false
+    private var meshDepthSeen = false
+    private var meshMaxMs: Double = 0
+    private var meshFacesBest: [String: Int] = [:]
+    private var meshPlanesBest: [String: Int] = [:]
+    private var meshPerRoom: [Int: [String: Int]] = [:]
+    static let meshClassNames = ["none", "wall", "floor", "ceiling", "table", "seat", "window", "door"]
     private var rachaStuds = 0                       // fotos seguidas con maderas, en el cuarto actual
     private var rachaCuarto = -1                     // el cuarto al que pertenece la racha
     private var cuartosConAvisoDeStuds = Set<Int>()  // a los que ya se les avisó
@@ -215,7 +234,8 @@ final class ScanKeyframeRecorder {
             self.permitirDetector = false
             self.onStudsSeen = nil
             completion(Trace(poses: self.poses, keyframes: self.keyframes, dir: self.dir,
-                             maxThermal: self.maxThermal, suppressedSecPerRoom: self.suppressedSecPerRoom))
+                             maxThermal: self.maxThermal, suppressedSecPerRoom: self.suppressedSecPerRoom,
+                             meshProbe: self.meshProbeSummary()))
         }
     }
 
@@ -257,6 +277,11 @@ final class ScanKeyframeRecorder {
         )
         let poseIndex = poses.count
         poses.append(record)
+
+        if scanning && thermal.rawValue < ProcessInfo.ThermalState.serious.rawValue {
+            meshTicks += 1
+            if meshTicks % 10 == 1 { probeMesh(frame) }
+        }
 
         if !encodeInFlight && shouldKeepPhoto(frame: frame, thermal: thermal) {
             // Bookkeeping updates NOW (optimistically) - if the encode
@@ -391,6 +416,78 @@ final class ScanKeyframeRecorder {
     // caer en un píxel de ruido): en una pared abierta los studs son lo más
     // cercano; en una pared normal el percentil 8 es la misma pared.
     static let parcheProfundidad = 15   // radio: 31x31
+    // MARK: - Sonda de la malla (always on `queue`)
+
+    private func probeMesh(_ frame: ARFrame) {
+        let t0 = CACurrentMediaTime()
+        meshSamples += 1
+        if frame.sceneDepth != nil || frame.smoothedSceneDepth != nil { meshDepthSeen = true }
+        var anchors = 0, faces = 0
+        var counts = [Int](repeating: 0, count: Self.meshClassNames.count)
+        var planes: [String: Int] = [:]
+        var budget = 400_000 // caras leídas como máximo por muestra
+        for a in frame.anchors {
+            if let m = a as? ARMeshAnchor {
+                anchors += 1
+                let g = m.geometry
+                faces += g.faces.count
+                if let c = g.classification, budget > 0 {
+                    meshClassified = true
+                    let n = min(c.count, budget)
+                    budget -= n
+                    let base = c.buffer.contents().advanced(by: c.offset)
+                    for i in 0..<n {
+                        let v = Int(base.advanced(by: i * c.stride).assumingMemoryBound(to: UInt8.self).pointee)
+                        if v >= 0 && v < counts.count { counts[v] += 1 }
+                    }
+                }
+            } else if let p = a as? ARPlaneAnchor {
+                planes[Self.planeName(p.classification), default: 0] += 1
+            }
+        }
+        if anchors > 0 { meshFramesWithMesh += 1 }
+        meshMaxAnchors = max(meshMaxAnchors, anchors)
+        var dict: [String: Int] = [:]
+        for (i, n) in counts.enumerated() where n > 0 { dict[Self.meshClassNames[i]] = n }
+        if faces >= meshMaxFaces {
+            meshMaxFaces = faces
+            meshFacesBest = dict
+        }
+        if planes.values.reduce(0, +) >= meshPlanesBest.values.reduce(0, +) { meshPlanesBest = planes }
+        if !dict.isEmpty { meshPerRoom[roomIndex] = dict }
+        meshMaxMs = max(meshMaxMs, (CACurrentMediaTime() - t0) * 1000)
+    }
+
+    private static func planeName(_ c: ARPlaneAnchor.Classification) -> String {
+        switch c {
+        case .wall: return "wall"
+        case .floor: return "floor"
+        case .ceiling: return "ceiling"
+        case .table: return "table"
+        case .seat: return "seat"
+        case .window: return "window"
+        case .door: return "door"
+        default: return "none"
+        }
+    }
+
+    private func meshProbeSummary() -> [String: Any] {
+        var perRoom: [String: [String: Int]] = [:]
+        for (k, v) in meshPerRoom { perRoom[String(k)] = v }
+        return [
+            "samples": meshSamples,
+            "framesWithMesh": meshFramesWithMesh,
+            "maxAnchors": meshMaxAnchors,
+            "maxFaces": meshMaxFaces,
+            "classified": meshClassified,
+            "sceneDepth": meshDepthSeen,
+            "faces": meshFacesBest,
+            "planes": meshPlanesBest,
+            "perRoom": perRoom,
+            "maxMs": (meshMaxMs * 10).rounded() / 10
+        ]
+    }
+
     static func centerHit(frame: ARFrame) -> SIMD3<Float>? {
         let t = frame.camera.transform
         let pos = SIMD3<Float>(t.columns.3.x, t.columns.3.y, t.columns.3.z)
