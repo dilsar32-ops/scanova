@@ -64,5 +64,13 @@ ok('Add Room: primero el Level, luego Room Name, Room Type y Notes; Save Room y 
 const app = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
 const irA = app.slice(app.indexOf('export function irA('), app.indexOf('export function atras('));
 ok('cambiar de pantalla cierra Edit Labels / datos del cliente / escoger cuarto', /#detHoja/.test(irA) && /#hojaCuarto/.test(irA) && /\.hidden = true/.test(irA));
+{ const pj = fs.readFileSync(new URL('../docs/proyecto.js', import.meta.url), 'utf8');
+  ok('teléfono: flechita junto al título cuando hay un nivel escogido, y regresa un paso', /ptitulo-atras solo-movil" data-filtro-atras/.test(pj) && /FILTRO\.nivel !== 'todos' \? `<button type="button" class="ptitulo-atras/.test(pj) && /if\(FILTRO\.cuarto !== 'todos'\) FILTRO\.cuarto = 'todos'; else FILTRO = \{ nivel:'todos', cuarto:'todos' \}/.test(pj)); }
+{ const nom = (l) => P.ordenarNiveles(l.map((n, i) => ({ id:'n' + i, nombre:n }))).map(x => x.nombre).join(' / ');
+  ok('niveles del más alto al más bajo aunque se creen desordenados (su proyecto Harold)', nom(['First Floor', 'Second Floor', 'Basement', 'Third Floor']) === 'Third Floor / Second Floor / First Floor / Basement');
+  ok('niveles en español y con ático, techo y otros al final', nom(['Ático', 'Segundo piso', 'Garage', 'Sótano', 'Primer piso', 'Techo']) === 'Techo / Ático / Segundo piso / Primer piso / Sótano / Garage');
+  ok('niveles con número y Main / Crawl Space', nom(['Level 2', 'Crawl Space', 'Main Level', 'Floor 3']) === 'Floor 3 / Level 2 / Main Level / Crawl Space');
+  ok('nombres que no son pisos se quedan en el orden en que se crearon', nom(['Exterior', 'Garage', 'Shed']) === 'Exterior / Garage / Shed');
+  ok('"Living Room" o "cuarto" no se confunden con un piso', P.rangoNivel('Cuarto de lavado') === 100 && P.rangoNivel('Living Room') === 100); }
 console.log(`\nproyecto: ${pass} ok, ${fail} fallas`);
 if(fail) process.exit(1);

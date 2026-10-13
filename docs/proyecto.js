@@ -1,12 +1,12 @@
 // Scanova · la ficha de un proyecto (diseño de Amilcar, 12 oct 2026): portada, nombre, dirección, etapa, cliente,
 // encargado y fecha; pestañas Rooms · Photos · Measurements · Notes · Documents · Activity.
 // Rooms = niveles (Basement, First Floor…) y sus cuartos (Kitchen…). Photos = las fotos por nivel y por cuarto.
-import { $, $$, authFetch, irA, atras, esManager, PERFIL } from './app.js?v=2026-10-13-9';
-import * as trabajos from './trabajos.js?v=2026-10-13-9';
-import * as fotos from './fotos.js?v=2026-10-13-9';
-import * as panel from './panel.js?v=2026-10-13-9';
-import * as camara from './camara.js?v=2026-10-13-9';
-import * as detalles from './detalles.js?v=2026-10-13-9';
+import { $, $$, authFetch, irA, atras, esManager, PERFIL } from './app.js?v=2026-10-13-10';
+import * as trabajos from './trabajos.js?v=2026-10-13-10';
+import * as fotos from './fotos.js?v=2026-10-13-10';
+import * as panel from './panel.js?v=2026-10-13-10';
+import * as camara from './camara.js?v=2026-10-13-10';
+import * as detalles from './detalles.js?v=2026-10-13-10';
 
 const esc = (v) => trabajos.esc(v);
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -150,6 +150,28 @@ export function destinoActual(){
 }
 export const nombreDestino = (d) => d && d.cuarto_id ? nombreNivel(d.nivel_id) + ' › ' + nombreCuarto(d.cuarto_id) : d && d.nivel_id ? nombreNivel(d.nivel_id) : 'No room';
 
+// Su pedido (13-oct): los niveles siempre en orden de edificio, aunque la cuadrilla los cree en otro orden:
+// del más alto al más bajo (su decisión): techo -> ático -> tercero -> segundo -> primero -> sótano; los que no son pisos (Garage, Exterior…) al final.
+// Se reconoce por el nombre (inglés o español); empates y nombres raros se quedan en el orden en que se crearon.
+export function rangoNivel(nombre){
+  const n = String(nombre || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+  if(/crawl|sub.?basement|semi.?sotano/.test(n)) return -2;
+  if(/basement|sotano|cellar|lower level|bajo tierra/.test(n)) return -1;
+  if(/attic|atico|altillo|loft|buhardilla/.test(n)) return 50;
+  if(/\broof|techo|azotea/.test(n)) return 60;
+  if(/\b(first|1st|main|ground)\b|primer|planta baja|piso principal/.test(n)) return 1;
+  if(/\b(second|2nd)\b|segundo/.test(n)) return 2;
+  if(/\b(third|3rd)\b|tercer/.test(n)) return 3;
+  if(/\b(fourth|4th)\b|cuarto piso/.test(n)) return 4;
+  if(/\b(fifth|5th)\b|quinto/.test(n)) return 5;
+  const m = n.match(/\b(?:floor|level|piso|nivel)\s*(\d{1,2})\b|\b(\d{1,2})(?:st|nd|rd|th)?\s*(?:floor|level|piso)\b/);
+  if(m) return Number(m[1] || m[2]);
+  return 100;
+}
+export function ordenarNiveles(lista){
+  const clave = (r) => r === 100 ? Infinity : -r;   // más alto primero; lo que no es piso, al final
+  return (lista || []).map((x, i) => ({ x, i, r: rangoNivel(x.nombre) })).sort((a, b) => clave(a.r) - clave(b.r) || a.i - b.i).map(o => o.x);
+}
 async function cargarCuartos(){
   if(!T) return;
   const id = T.id;
@@ -158,7 +180,7 @@ async function cargarCuartos(){
     authFetch('/rest/v1/fotos_cuartos?trabajo_id=eq.' + encodeURIComponent(id) + '&select=*&order=orden.asc,created_at.asc'),
   ]);
   if(!T || T.id !== id) return;
-  NIVELES = rn.ok ? await rn.json() : []; CUARTOS = rc.ok ? await rc.json() : [];
+  NIVELES = ordenarNiveles(rn.ok ? await rn.json() : []); CUARTOS = rc.ok ? await rc.json() : [];
   if(rn.status === 404) aviso('Esta parte todavía no está instalada en el servidor: falta correr sql/fotos-04-niveles.sql.');
   pintarTodo();
 }
@@ -272,7 +294,7 @@ export function pintarFotos(urls){
   const barraSel = MODO_SEL ? `<div class="psel-barra"><b>${SEL.size} selected</b><button type="button" class="btn btn-outline btn-chico" data-sel-accion="mover"${SEL.size ? '' : ' disabled'}>${IC('carpeta')}Move to room</button><button type="button" class="btn btn-outline btn-chico btn-rojo" data-sel-accion="papelera"${SEL.size ? '' : ' disabled'}>${IC('archivo')}Delete</button></div>` : '';
   caja.classList.toggle('pmodo-sel', MODO_SEL);
   caja.innerHTML = destino + fotos.tandaHtml() + herr + porNivel + barraSel +
-    `<div class="sec-cab ptitulo"><h2 class="sec-t">${esc(titulo)} (${fs.length})</h2>${todas.length ? `<button type="button" class="ver-por" id="btnVerPor" aria-haspopup="menu">View by: ${VER_TXT[VER_POR]}${IC('chev')}</button>` : ''}</div>` + cuerpo;
+    `<div class="sec-cab ptitulo"><h2 class="sec-t">${FILTRO.nivel !== 'todos' ? `<button type="button" class="ptitulo-atras solo-movil" data-filtro-atras aria-label="Back">${IC('atras')}</button>` : ''}${esc(titulo)} (${fs.length})</h2>${todas.length ? `<button type="button" class="ver-por" id="btnVerPor" aria-haspopup="menu">View by: ${VER_TXT[VER_POR]}${IC('chev')}</button>` : ''}</div>` + cuerpo;
   if(TAB === 'cuartos') pintarCuartos();
 }
 
@@ -322,7 +344,7 @@ async function crearNivel(nombre){
   const r = await authFetch('/rest/v1/fotos_niveles', { method:'POST', headers:{ Prefer:'return=representation' }, body: JSON.stringify({ trabajo_id: T.id, nombre, orden: NIVELES.length }) });
   if(!r.ok) throw new Error(r.status === 404 ? 'falta correr sql/fotos-04-niveles.sql' : 'HTTP ' + r.status);
   const fila = (await r.json())[0]; if(!fila) throw new Error('the database did not return the level');
-  NIVELES.push(fila); pintarTodo(); return fila;
+  NIVELES = ordenarNiveles(NIVELES.concat(fila)); pintarTodo(); return fila;
 }
 async function crearCuarto(nivel_id, nombre, tipo){
   const r = await authFetch('/rest/v1/fotos_cuartos', { method:'POST', headers:{ Prefer:'return=representation' }, body: JSON.stringify({ trabajo_id: T.id, nivel_id, nombre, tipo: tipo || null, orden: cuartosDe(nivel_id).length }) });
@@ -378,6 +400,7 @@ async function guardarNivel(){
     if(!r.ok) throw new Error(r.status === 404 ? 'falta correr sql/fotos-04-niveles.sql' : 'HTTP ' + r.status + ' ' + (await r.text()).slice(0, 160));
     const fila = (await r.json())[0]; if(!fila) throw new Error('the database did not return the level');
     if(EDIT_NIVEL){ const i = NIVELES.findIndex(x => x.id === fila.id); if(i >= 0) NIVELES[i] = fila; } else NIVELES.push(fila);
+    NIVELES = ordenarNiveles(NIVELES);
     SUBTAB = 'niveles'; atras(); irTab('cuartos');
   }catch(e){ av.textContent = 'Could not save. ' + String(e && e.message || e); }
   b.disabled = false;
@@ -539,6 +562,8 @@ export function conectar(){
     if(q('[data-etq-guardar]')){ guardarEtiquetas(); return; }
     if((el = q('[data-ver-nivel]')) && !q('.mas-btn')){ NIVEL_CUARTOS = el.dataset.verNivel; SUBTAB = 'cuartos'; pintarCuartos(); return; }
     if((el = q('[data-ver-cuarto]')) && !q('.mas-btn')){ const c = CUARTOS.find(x => x.id === el.dataset.verCuarto); if(c){ FILTRO = { nivel:c.nivel_id, cuarto:c.id }; irTab('fotos'); } return; }
+    // Su pedido: en el teléfono, la flechita junto al título regresa un paso (del cuarto al nivel, del nivel a todas las fotos).
+    if(q('[data-filtro-atras]')){ if(FILTRO.cuarto !== 'todos') FILTRO.cuarto = 'todos'; else FILTRO = { nivel:'todos', cuarto:'todos' }; pintarFotos(); return; }
     if((el = q('[data-filtro-nivel]'))){ FILTRO = { nivel: el.dataset.filtroNivel, cuarto:'todos' }; pintarFotos(); return; }
     if((el = q('[data-vista]'))){ VISTA = el.dataset.vista; pintarFotos(); return; }
     if(q('#btnVerPor')){ e.stopPropagation(); panel.abrirMenuEn(q('#btnVerPor'), menuVerPorHtml(VER_POR, ORDEN)); return; }

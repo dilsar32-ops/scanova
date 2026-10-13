@@ -1372,3 +1372,10 @@ body.fv-editando .fv-asa{ visibility:hidden; }
   .pgrupo h4{ margin:4px 0 8px; }
 }
 .pfoto .pfoto-check .ic{ position:static; transform:none; top:auto; left:auto; color:#fff; }   /* la palomita de Select no la mueve la regla de iconos de la foto */
+
+/* 13-oct, su pedido: flechita junto a "First Floor Photos (2)" en el teléfono para regresar a todas las fotos */
+.ptitulo .sec-t{ display:flex; align-items:center; gap:6px; }
+.ptitulo-atras{ display:inline-grid; place-items:center; width:32px; height:32px; margin-left:-6px; border:0; border-radius:50%; background:none; color:var(--accent); cursor:pointer; flex:none; }
+.ptitulo-atras .ic{ width:20px; height:20px; stroke-width:2.4; }
+.ptitulo-atras:active{ background:var(--bg2); }
+@media (min-width:900px){ .ptitulo-atras{ display:none !important; } }
