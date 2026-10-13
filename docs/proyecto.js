@@ -1,12 +1,13 @@
 // Scanova · la ficha de un proyecto (diseño de Amilcar, 12 oct 2026): portada, nombre, dirección, etapa, cliente,
 // encargado y fecha; pestañas Rooms · Photos · Measurements · Notes · Documents · Activity.
 // Rooms = niveles (Basement, First Floor…) y sus cuartos (Kitchen…). Photos = las fotos por nivel y por cuarto.
-import { $, $$, authFetch, irA, atras, esManager, PERFIL } from './app.js?v=2026-10-13-10';
-import * as trabajos from './trabajos.js?v=2026-10-13-10';
-import * as fotos from './fotos.js?v=2026-10-13-10';
-import * as panel from './panel.js?v=2026-10-13-10';
-import * as camara from './camara.js?v=2026-10-13-10';
-import * as detalles from './detalles.js?v=2026-10-13-10';
+import { $, $$, authFetch, irA, atras, esManager, PERFIL } from './app.js?v=2026-10-13-11';
+import * as trabajos from './trabajos.js?v=2026-10-13-11';
+import * as fotos from './fotos.js?v=2026-10-13-11';
+import * as panel from './panel.js?v=2026-10-13-11';
+import * as planos from './planos.js?v=2026-10-13-11';
+import * as camara from './camara.js?v=2026-10-13-11';
+import * as detalles from './detalles.js?v=2026-10-13-11';
 
 const esc = (v) => trabajos.esc(v);
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -14,7 +15,7 @@ const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href=
 // ---------- lo puro ----------
 export const NIVELES_RAPIDOS = ['Basement', 'First Floor', 'Second Floor', 'Third Floor', 'Attic', 'Other'];
 export const TIPOS_CUARTO = ['Living Room', 'Kitchen', 'Bedroom', 'Bathroom', 'Hallway', 'Other'];
-export const TABS = [['cuartos', 'Rooms'], ['fotos', 'Photos'], ['medidas', 'Measurements'], ['notas', 'Notes'], ['documentos', 'Documents'], ['actividad', 'Activity']];
+export const TABS = [['cuartos', 'Rooms'], ['fotos', 'Photos'], ['plano', 'Floor Plan'], ['medidas', 'Measurements'], ['notas', 'Notes'], ['documentos', 'Documents'], ['actividad', 'Activity']];
 const fechaF = (f) => f.tomada_at || f.subida_at || '';
 export const fechaHora = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) + ' ' + d.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' }); };
 export const fechaCortaEn = (iso) => { if(!iso) return ''; const d = new Date(String(iso).length === 10 ? iso + 'T12:00:00' : iso); return isNaN(d) ? '' : d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }); };
@@ -203,8 +204,11 @@ function irTab(k){
   $$('#trabajoFicha .tab-panel').forEach(p => { p.hidden = p.dataset.panel !== k; });
   const b = $('#fichaTabs .ptab.on'); if(b && b.scrollIntoView) b.scrollIntoView({ block:'nearest', inline:'center' });
   pintarTodo();
+  if(k === 'plano') planos.enfocar();
 }
-function pintarTodo(){ pintarCuartos(); pintarFotos(); pintarNotas(); pintarActividad(); pintarPronto(); camara.pintarCuarto(); }
+function pintarTodo(){ pintarCuartos(); pintarFotos(); pintarNotas(); pintarActividad(); pintarPronto(); pintarPlano(); camara.pintarCuarto(); }
+// Floor Plan (su diseño): solo se dibuja cuando la pestaña está abierta (el plano pesa).
+function pintarPlano(){ if(TAB === 'plano' && T) planos.abrir(T, NIVELES, () => abrirFormaNivel(null)); }
 
 // ---------- Rooms ----------
 function miniDe(lista){ const f = ordenarFotos(lista, 'nuevas')[0]; return f ? (URLS[f.id] || '') : ''; }
@@ -502,6 +506,7 @@ async function guardarEtiquetas(){
 }
 
 export function conectar(){
+  planos.conectar();
   trabajos.usarFicha(abrir);
   detalles.usarNombres(fotos.nombreDe, fotos.cargarNombres);
   detalles.alCambiar(() => { if(T) pintarActividad(); });

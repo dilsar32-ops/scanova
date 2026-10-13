@@ -1379,3 +1379,143 @@ body.fv-editando .fv-asa{ visibility:hidden; }
 .ptitulo-atras .ic{ width:20px; height:20px; stroke-width:2.4; }
 .ptitulo-atras:active{ background:var(--bg2); }
 @media (min-width:900px){ .ptitulo-atras{ display:none !important; } }
+
+/* ---------- 13-oct: pestaña Floor Plan (su diseño: Levels | plano | Plan Details; en el teléfono, piso arriba y botones abajo) ---------- */
+.pl-cab{ display:flex; align-items:flex-end; justify-content:space-between; gap:12px; flex-wrap:wrap; margin:4px 0 14px; }
+.pl-cab-t .sec-t{ margin:0; font-size:22px; }
+.pl-cab-t p{ margin:2px 0 0; color:var(--ink-soft); font-size:14px; }
+.pl-cab-acc{ display:flex; gap:10px; flex-wrap:wrap; }
+.pl-cab-acc .btn, .pl-tel-acc .btn{ display:inline-flex; align-items:center; justify-content:center; gap:8px; }
+.pl-cab-acc .btn .ic, .pl-tel-acc .btn .ic{ width:18px; height:18px; }
+.pl-cuerpo{ display:grid; grid-template-columns:220px minmax(0,1fr) 230px; gap:16px; align-items:start; }
+.pl-col{ background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; min-width:0; }
+.pl-col h3{ margin:0 0 10px; font-size:16px; font-weight:700; }
+.pl-nivel{ display:flex; flex-direction:column; align-items:flex-start; gap:2px; width:100%; text-align:left; font:inherit; background:none; border:0; border-left:3px solid transparent; border-radius:8px; padding:9px 12px; cursor:pointer; color:var(--ink); }
+.pl-nivel + .pl-nivel{ margin-top:2px; }
+.pl-nivel b{ font-size:15px; font-weight:600; }
+.pl-nivel small{ color:var(--ink-soft); font-size:13px; }
+.pl-nivel.on{ background:var(--bg2); border-left-color:var(--accent); }
+.pl-nivel.on b{ color:var(--accent); }
+.pl-mas-nivel{ margin-top:12px; display:inline-flex; align-items:center; justify-content:center; gap:6px; color:var(--accent); }
+.pl-visor{ padding:0; overflow:hidden; }
+.pl-visor-cab{ display:flex; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+.pl-visor-cab b{ font-size:15px; }
+.pl-fecha{ color:var(--ink-soft); font-size:13px; padding-left:10px; border-left:1px solid var(--line); }
+.pl-esp{ flex:1; }
+.pl-seg{ display:inline-flex; background:var(--bg2); border-radius:9px; padding:3px; }
+.pl-seg button{ font:inherit; font-size:13px; font-weight:600; border:0; background:none; color:var(--ink-soft); padding:6px 14px; border-radius:7px; cursor:pointer; }
+.pl-seg button.on{ background:var(--accent); color:#fff; }
+.pl-rej{ display:inline-flex; align-items:center; gap:6px; font:inherit; font-size:13px; font-weight:600; border:0; background:none; color:var(--ink-soft); cursor:pointer; padding:6px 4px; }
+.pl-rej.on{ color:var(--ink); }
+.pl-rej .ic{ width:18px; height:18px; }
+.pl-zoomer{ display:inline-flex; align-items:center; border:1px solid var(--line); border-radius:9px; background:var(--card); }
+.pl-zoomer button{ width:32px; height:32px; border:0; background:none; cursor:pointer; color:var(--ink); display:grid; place-items:center; }
+.pl-zoomer .ic{ width:16px; height:16px; }
+.pl-zoomer span{ min-width:46px; text-align:center; font-size:13px; font-weight:600; }
+.pl-grande-btn{ width:34px; height:34px; border:1px solid var(--line); border-radius:9px; background:var(--card); display:grid; place-items:center; cursor:pointer; color:var(--ink); }
+.pl-grande-btn .ic{ width:17px; height:17px; }
+.pl-lienzo{ overflow:auto; max-height:70vh; padding:10px; background:#fff; }
+.pl-lienzo.rejilla{ background-color:#fff; background-image:linear-gradient(#eef2f8 1px, transparent 1px), linear-gradient(90deg, #eef2f8 1px, transparent 1px); background-size:22px 22px; }
+.pl-zoom{ margin:0 auto; min-width:100%; }
+.pl-zoom svg{ display:block; width:100%; height:auto; }
+.pl-vacio{ display:flex; flex-direction:column; align-items:center; text-align:center; gap:6px; padding:56px 20px; color:var(--ink-soft); }
+.pl-vacio h3{ margin:4px 0 0; color:var(--ink); font-size:17px; }
+.pl-vacio p{ margin:0; max-width:360px; }
+.pl-vacio-ic{ width:44px; height:44px; color:var(--accent); }
+.pl-det{ display:flex; justify-content:space-between; gap:10px; padding:11px 0; border-bottom:1px solid var(--line); font-size:14px; }
+.pl-det span{ color:var(--ink-soft); }
+.pl-det b{ font-weight:600; }
+.pl-detalles .btn{ margin-top:16px; display:inline-flex; align-items:center; justify-content:center; gap:8px; color:var(--accent); }
+.pl-detalles .btn .ic{ width:18px; height:18px; }
+.pl-nada{ color:var(--ink-soft); font-size:14px; margin:0; }
+.pl-tel-barra, .pl-tel-resumen, .pl-tel-acc, .pl-tel-flota{ display:none; }
+.pl-grande{ position:absolute; inset:0; z-index:40; background:#fff; display:flex; flex-direction:column; }
+.pl-grande[hidden]{ display:none !important; }
+.pl-grande-cab{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 16px; border-bottom:1px solid var(--line); }
+.pl-grande-x{ width:38px; height:38px; border:0; border-radius:50%; background:var(--bg2); font-size:18px; cursor:pointer; }
+.pl-grande-lienzo{ flex:1; overflow:auto; padding:10px; }
+.pl-grande-lienzo svg{ display:block; width:100%; height:auto; min-width:700px; }
+#panel-plano .aviso.ok{ color:#15803d; }
+@media (max-width:1180px) and (min-width:900px){ .pl-cuerpo{ grid-template-columns:190px minmax(0,1fr); } .pl-detalles{ grid-column:1 / -1; } }
+@media (max-width:899px){
+  .pl-cab, .pl-niveles, .pl-detalles, .pl-visor-cab{ display:none; }
+  .pl-cuerpo{ display:block; }
+  .pl-tel-barra{ display:flex; align-items:center; gap:10px; margin:2px 0 12px; }
+  .pl-sel{ flex:1; }
+  .pl-visor{ position:relative; border-radius:16px; }
+  .pl-lienzo{ max-height:none; min-height:260px; padding:8px; }
+  .pl-tel-flota{ display:flex; flex-direction:column; gap:8px; position:absolute; right:10px; top:10px; z-index:2; }
+  .pl-tel-flota .pl-zoomer{ flex-direction:column; }
+  .pl-tel-flota .pl-zoomer span{ display:none; }
+  .pl-tel-flota .pl-zoomer button, .pl-tel-flota .pl-grande-btn{ width:40px; height:40px; }
+  .pl-tel-resumen{ display:flex; flex-direction:column; gap:3px; background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px 16px; margin:12px 0; }
+  .pl-tel-resumen b{ font-size:18px; }
+  .pl-tel-resumen span{ color:var(--ink-soft); font-size:14px; }
+  .pl-tel-resumen small{ color:var(--ink-mute); font-size:12.5px; }
+  .pl-tel-acc{ display:flex; flex-direction:column; gap:10px; }
+  .pl-tel-dos{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .pl-chips{ display:flex; gap:8px; overflow-x:auto; padding-bottom:4px; scrollbar-width:none; }
+  .pl-chips::-webkit-scrollbar{ display:none; }
+  .pl-chip{ flex:none; font:inherit; font-size:14px; font-weight:600; padding:9px 16px; border:1px solid var(--line); border-radius:10px; background:var(--card); color:var(--ink); cursor:pointer; white-space:nowrap; display:inline-flex; align-items:center; gap:6px; }
+  .pl-chip.on{ background:#e8f0fe; border-color:var(--accent); color:var(--accent); }
+  .pl-chip-mas{ border-style:dashed; color:var(--accent); }
+  .pl-chip .ic{ width:15px; height:15px; }
+}
+
+/* 13-oct, su pedido: en la computadora el plano tiene la prioridad: entra completo en lo que queda de pantalla, columnas de los lados más angostas */
+@media (min-width:900px){
+  .pl-cuerpo{ grid-template-columns:190px minmax(0,1fr) 200px; gap:12px; }
+  .pl-col{ padding:12px; }
+  .pl-lienzo{ max-height:none; height:max(380px, calc(100vh - 520px)); padding:8px; }
+  .pl-lienzo.ajustado{ overflow:hidden; }
+  .pl-lienzo.ajustado .pl-zoom{ width:100%; height:100%; }
+  .pl-lienzo.ajustado .pl-zoom svg{ width:100%; height:100%; }
+  .pl-cab{ margin:0 0 10px; }
+}
+@media (max-width:1180px) and (min-width:900px){ .pl-cuerpo{ grid-template-columns:170px minmax(0,1fr); } }
+
+/* 13-oct, su pedido (cuadro azul): en la computadora los botones del plano suben a la derecha de la barra de pestañas
+   y el renglón del título se quita, para que el plano suba y aproveche el espacio. Los botones no tapan las pestañas. */
+@media (min-width:1180px){
+  #panel-plano .pl-cab{ margin:-56px 0 10px; min-height:0; justify-content:flex-end; pointer-events:none; position:relative; z-index:3; }
+  #panel-plano .pl-cab-t{ display:none; }
+  #panel-plano .pl-cab-acc{ pointer-events:auto; }
+  #panel-plano .pl-cab-acc .btn{ min-height:38px; padding-top:6px; padding-bottom:6px; }
+}
+
+/* 13-oct, su diseño del teléfono + "en esta vista solo el plano, lo más visible posible":
+   el plano llena su cuadro y queda centrado (en todos los tamaños), + arriba de −, y el ••• con la cuadrícula. */
+.pl-lienzo.ajustado{ overflow:hidden; }
+.pl-lienzo.ajustado .pl-zoom{ width:100%; height:100%; }
+.pl-lienzo.ajustado .pl-zoom svg{ width:100%; height:100%; }
+.pl-mas-wrap{ position:relative; display:none; }
+.pl-mas-btn{ width:44px; height:38px; border:1px solid var(--line); border-radius:10px; background:var(--card); color:var(--ink-soft); font:inherit; font-size:14px; letter-spacing:1px; cursor:pointer; }
+.pl-menu{ position:absolute; right:0; top:44px; z-index:5; min-width:190px; background:var(--card); border:1px solid var(--line); border-radius:12px; box-shadow:0 12px 28px rgba(15,30,60,.16); padding:6px; display:flex; flex-direction:column; }
+.pl-menu[hidden]{ display:none; }
+.pl-menu button{ display:flex; align-items:center; gap:10px; font:inherit; font-size:14px; font-weight:600; color:var(--ink); background:none; border:0; border-radius:8px; padding:11px 12px; text-align:left; cursor:pointer; }
+.pl-menu button:hover{ background:var(--bg2); }
+.pl-menu .ic{ width:17px; height:17px; color:var(--ink-soft); }
+@media (max-width:899px){
+  .pl-mas-wrap{ display:block; }
+  .pl-tel-barra .pl-seg button{ padding:7px 18px; }
+  .pl-lienzo{ min-height:0; }
+  .pl-tel-flota .pl-zoomer{ flex-direction:column-reverse; }
+}
+/* Expandido: el plano entero a toda la pantalla (sin la hoja del PDF). */
+.pl-grande-lienzo{ display:flex; min-height:0; }
+.pl-grande-lienzo svg{ width:100%; height:100%; min-width:0; }
+/* 13-oct (su foto, lo azul "muy grande"): el resumen y los botones del teléfono más compactos, como su diseño. */
+@media (max-width:899px){
+  #panel-plano .pl-tel-resumen{ gap:1px; padding:10px 14px; margin:10px 0 8px; border-radius:12px; }
+  #panel-plano .pl-tel-resumen b{ font-size:16px; }
+  #panel-plano .pl-tel-resumen span{ font-size:13px; }
+  #panel-plano .pl-tel-resumen small{ font-size:12px; }
+  #panel-plano .pl-tel-acc{ gap:8px; }
+  #panel-plano .pl-tel-acc .btn{ min-height:0; height:40px; padding-top:0; padding-bottom:0; font-size:14.5px; }
+  #panel-plano .pl-tel-dos{ gap:8px; }
+  #panel-plano .pl-chips .pl-chip{ font-size:13px; padding:6px 13px; border-radius:9px; }
+}
+/* 13-oct: el plano se acerca con los dedos; acercado, un dedo lo mueve (no la página). */
+.pl-lienzo.ajustado, .pl-grande-lienzo{ touch-action:pan-y; }
+.pl-lienzo.ajustado.pz-cerca, .pl-grande-lienzo.pz-cerca{ touch-action:none; }
+.pl-grande-lienzo{ overflow:hidden; }
