@@ -3,12 +3,12 @@
 // Arriba: Download, Share, •••, Edit Photo y Save a Copy. El panel se esconde y se vuelve a sacar con la flechita.
 // Datos: la nota de la foto (fotos_fotos.nota), sus etiquetas (fotos_etiquetas + fotos_foto_etiquetas) y sus comentarios
 // (fotos_comentarios) ya existían desde fotos-01; las tareas de la foto usan fotos_tareas (sql/fotos-06-foto.sql).
-import { $, $$, authFetch, irA, atras, esManager, PERFIL, esAparato } from './app.js';
-import * as trabajos from './trabajos.js';
-import * as fotos from './fotos.js';
-import * as proyecto from './proyecto.js';
-import * as panel from './panel.js';
-import * as editor from './editor.js';
+import { $, $$, authFetch, irA, atras, esManager, PERFIL, esAparato } from './app.js?v=2026-10-13-4';
+import * as trabajos from './trabajos.js?v=2026-10-13-4';
+import * as fotos from './fotos.js?v=2026-10-13-4';
+import * as proyecto from './proyecto.js?v=2026-10-13-4';
+import * as panel from './panel.js?v=2026-10-13-4';
+import * as editor from './editor.js?v=2026-10-13-4';
 
 const esc = (v) => trabajos.esc(v);
 const IC = (n) => '<svg class="ic"><use href="#i-' + n + '"/></svg>';
@@ -63,9 +63,14 @@ async function pintarFoto(){
   const img = $('#fvImg'); const mini = fotos.urlsMini()[f.id];
   if(img.dataset.id !== f.id){ img.src = mini || ''; img.dataset.id = f.id; }
   $('#fvFav').hidden = !f.favorita;
-  const u = await fotos.urlsFirmadas([f.id], 'web');
+  // Rapidez: se firman TODAS las fotos de la lista en una sola llamada (antes una por foto, medio segundo cada vez)
+  // y se adelantan la anterior y la siguiente, así las flechas cambian al instante.
+  const ids = lista.map(x => x.id);
+  const u = await fotos.urlsFirmadas(ids, 'web');
   if(F === f && u[f.id]) img.src = u[f.id];
+  [i - 1, i + 1].forEach(k => { const g = lista[(k + lista.length) % lista.length]; if(g && u[g.id] && !PRECARGA.has(u[g.id])){ PRECARGA.add(u[g.id]); const pi = new Image(); pi.decoding = 'async'; pi.src = u[g.id]; } });
 }
+const PRECARGA = new Set();
 function pintarTira(){
   const lista = fotos.visorLista(); const urls = fotos.urlsMini(); const i = fotos.visorIndice();
   const t = $('#fvTira');
@@ -150,7 +155,7 @@ async function equipo(){ if(!EQUIPO.length){ const r = await authFetch('/rest/v1
 async function blobDe(f){
   const u = (await fotos.urlsFirmadas([f.id], 'original'))[f.id] || (await fotos.urlsFirmadas([f.id], 'web'))[f.id];
   if(!u) throw new Error('no link for this photo');
-  const r = await fetch(u); if(!r.ok) throw new Error('HTTP ' + r.status);
+  const r = await editor.bajar(u); if(!r.ok) throw new Error('HTTP ' + r.status);   // sin la copia guardada del navegador (CORS)
   return r.blob();
 }
 function nombreDeFoto(f){ const T = trabajos.proyectoAbierto() || {}; const l = lugarDe(f); return nombreArchivo(T.cliente, l.cuarto || l.nivel, f.tomada_at || f.subida_at); }

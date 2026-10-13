@@ -131,6 +131,9 @@ function hacerMarco(img, rot, max){
   ctx.setTransform(1, 0, 0, 1, 0, 0);   // sin esto, todo lo que se pinta después (las marcas de la copia) sale corrido medio cuadro
   return c;
 }
+// Bajar la foto de la nube SIN la copia que guardó el navegador al enseñarla: esa copia no trae el permiso (CORS) y el
+// fetch falla ("Failed to fetch"). Fue lo que no dejaba editar en vivo (13 oct 2026).
+export const bajar = (url) => fetch(url, { cache:'no-store' });
 function cargarImg(url){ return new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => rej(new Error('the image did not load')); im.src = url; if(im.complete && im.naturalWidth) res(im); }); }
 
 // ---------- el editor en la página ----------
@@ -149,7 +152,7 @@ export async function abrir(op){
         mat: 'Drywall', valor: '', estado: '', estadoFijo: false, cargando: true };
   document.body.classList.add('fv-editando'); if(E.tel){ E.bandeja.hidden = false; } pintarPanel();
   try{
-    const r = await fetch(op.urlWeb); if(!r.ok) throw new Error('HTTP ' + r.status);
+    const r = await bajar(op.urlWeb); if(!r.ok) throw new Error('HTTP ' + r.status);
     const url = URL.createObjectURL(await r.blob()); const im = await cargarImg(url);
     if(!E){ URL.revokeObjectURL(url); return; }
     E.fuente = im; E.urlFuente = url; E.marco = hacerMarco(im, 0); E.cargando = false;
@@ -377,8 +380,12 @@ function pintarPanel(){
 
 // Pinta todo sobre la foto ORIGINAL (girada, ajustada, con sus marcas y recortada; máximo 4032 px) y devuelve el JPEG.
 export async function copiaFinal(){
-  const r = await fetch(E.urlOriginal || E.urlWeb); if(!r.ok) throw new Error('HTTP ' + r.status);
-  const url = URL.createObjectURL(await r.blob()); const im = await cargarImg(url);
+  // La ORIGINAL (máxima calidad); si no se puede leer (formato raro o red), la de 1600 px, para no quedarse sin guardar.
+  let url, im;
+  for(const fuente of [E.urlOriginal, E.urlWeb].filter(Boolean)){
+    try{ const r = await bajar(fuente); if(!r.ok) throw new Error('HTTP ' + r.status); url = URL.createObjectURL(await r.blob()); im = await cargarImg(url); break; }
+    catch(e){ if(url){ URL.revokeObjectURL(url); url = null; } if(fuente === E.urlWeb || !E.urlWeb) throw e; }
+  }
   const marco = hacerMarco(im, E.rot, 4032); const w = marco.width, h = marco.height; const ctx = marco.getContext('2d');
   calidezYNitidez(ctx, w, h, E.aj);
   const f = factores(E.aj, E.filtro);

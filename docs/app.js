@@ -1,15 +1,15 @@
 // Scanova · arranque, sesión y navegación. Las pantallas viven en index.html; lo de trabajos en trabajos.js.
-import { SUPABASE_URL, ANON_KEY, APP_BUILD } from './config.js';
-import { ESQUEMA_APARATO, urlEntrarGoogle } from './google.js';
-import * as trabajos from './trabajos.js';
-import * as personas from './personas.js';
-import * as fotos from './fotos.js';
-import * as panel from './panel.js';
-import * as camara from './camara.js';
-import * as direccion from './direccion.js';
-import * as proyecto from './proyecto.js';
-import * as foto from './foto.js';
-import * as editor from './editor.js';
+import { SUPABASE_URL, ANON_KEY, APP_BUILD } from './config.js?v=2026-10-13-4';
+import { ESQUEMA_APARATO, urlEntrarGoogle } from './google.js?v=2026-10-13-4';
+import * as trabajos from './trabajos.js?v=2026-10-13-4';
+import * as personas from './personas.js?v=2026-10-13-4';
+import * as fotos from './fotos.js?v=2026-10-13-4';
+import * as panel from './panel.js?v=2026-10-13-4';
+import * as camara from './camara.js?v=2026-10-13-4';
+import * as direccion from './direccion.js?v=2026-10-13-4';
+import * as proyecto from './proyecto.js?v=2026-10-13-4';
+import * as foto from './foto.js?v=2026-10-13-4';
+import * as editor from './editor.js?v=2026-10-13-4';
 
 export const $ = (s, r = document) => r.querySelector(s);
 export const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
