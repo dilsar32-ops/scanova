@@ -2076,3 +2076,33 @@ body.pie-atras .tab-inicio svg.tab-atras{ display:block; }
 .dl-eq-ok span{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .dl-eq-otro{ flex:none; padding:6px 10px; border:1px solid var(--accent); border-radius:99px; background:var(--card); color:var(--accent); font:inherit; font-size:12.5px; font-weight:700; cursor:pointer; }
 .dl-eq-otro.pend{ background:var(--accent); color:#fff; }
+
+/* Lectura (14-oct, su pedido): "Retake" pasa a una pastilla sobre la foto; abajo solo "+ Add another reading" y "Continue". */
+.dl-lec .dl-visor-foto{ position:relative; }
+.dl-lec .dl-retomar{ position:absolute; right:10px; bottom:10px; display:inline-flex; align-items:center; gap:6px; padding:7px 12px; border:0; border-radius:999px; background:rgba(0,0,0,.6); color:#fff; font:inherit; font-size:13px; font-weight:600; cursor:pointer; -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px); }
+.dl-lec .dl-retomar .ic{ width:16px; height:16px; }
+.dl-lec .dl-lec-acc{ display:flex; flex-direction:column; gap:10px; }
+.dl-lec .dl-lec-acc .aviso:empty{ display:none; }
+.dl-lec .dl-lec-acc .dl-botones .btn{ display:inline-flex; align-items:center; justify-content:center; gap:6px; white-space:nowrap; font-size:15px; }
+.dl-lec .dl-lec-acc .dl-botones .btn .ic{ width:18px; height:18px; flex:none; }
+
+/* Invitar por enlace (14-oct, su pedido): en Personas el manager crea el enlace; en Crear cuenta se dice quién invita. */
+.invitar-sub{ margin:-4px 0 10px; font-size:14px; color:var(--ink-soft); line-height:1.4; }
+.invitar-fila{ display:flex; gap:8px; }
+.invitar-fila input{ flex:1; min-width:0; }
+.invitar-fila .btn{ display:inline-flex; align-items:center; gap:6px; white-space:nowrap; flex:none; }
+.invitar-fila .btn .ic, .invitar-botones .btn .ic{ width:18px; height:18px; }
+.invitar-hecho{ margin-top:12px; padding:12px; border-radius:12px; background:color-mix(in srgb, var(--accent) 8%, transparent); border:1px solid color-mix(in srgb, var(--accent) 25%, transparent); display:flex; flex-direction:column; gap:10px; }
+.invitar-hecho[hidden]{ display:none; }
+.invitar-hecho-t{ margin:0; font-weight:600; font-size:14px; }
+.invitar-enlace input{ width:100%; font-size:13px; }
+.invitar-botones{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.invitar-botones .btn{ display:inline-flex; align-items:center; justify-content:center; gap:6px; }
+#listaInvitaciones:not(:empty){ margin-top:12px; }
+.estado-chip.inv-valida{ background:color-mix(in srgb, var(--accent) 12%, transparent); color:var(--accent); }
+.estado-chip.inv-usada{ background:color-mix(in srgb, #1e9e4a 14%, transparent); color:#1e9e4a; }
+.estado-chip.inv-vencida, .estado-chip.inv-anulada{ opacity:.7; }
+.invitacion-aviso{ display:flex; gap:10px; align-items:flex-start; padding:10px 12px; margin-bottom:12px; border-radius:12px; background:color-mix(in srgb, var(--accent) 10%, transparent); color:var(--ink, inherit); font-size:14px; line-height:1.4; text-align:left; }
+.invitacion-aviso[hidden]{ display:none; }
+.invitacion-aviso .ic{ width:20px; height:20px; color:var(--accent); flex:none; margin-top:1px; }
+#crCodigoCampo[hidden]{ display:none; }

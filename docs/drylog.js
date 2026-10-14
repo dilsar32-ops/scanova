@@ -6,11 +6,11 @@
 // TELÉFONO (su diseño del 14-oct): Dry Logs abre con la cámara prendida. Arriba "Dry Logs" y en qué cuarto va
 // (Room 1 of 4), luego Level y Room para escoger dónde, y la cámara llena lo que sobra. El botón azul de cámara de
 // abajo (el de siempre) toma la foto directo. Lo que sigue después de la foto espera su siguiente diseño.
-import { $, $$, authFetch, registrarAtras } from './app.js?v=2026-10-14-13';
-import { RESTRICCIONES, errorCamara, puedeCamaraPropia } from './camara.js?v=2026-10-14-13';
-import * as fotos from './fotos.js?v=2026-10-14-13';
-import { leerPantalla } from './lector.js?v=2026-10-14-13';
-import * as R from './registro.js?v=2026-10-14-13';
+import { $, $$, authFetch, registrarAtras } from './app.js?v=2026-10-14-14';
+import { RESTRICCIONES, errorCamara, puedeCamaraPropia } from './camara.js?v=2026-10-14-14';
+import * as fotos from './fotos.js?v=2026-10-14-14';
+import { leerPantalla } from './lector.js?v=2026-10-14-14';
+import * as R from './registro.js?v=2026-10-14-14';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -287,28 +287,43 @@ let PUNTO_ABIERTO = false;
 function lecturaHtml(){
   const r = FOTO && FOTO.lectura, valor = r ? r.texto : '';
   const cuarto = nombreDe(CUARTOS, FOTO ? FOTO.cuarto : CUARTO);
-  const abierto = PUNTO_ABIERTO || !UBIC;
   return `<div class="dl-tel">
     <div class="dl-tel-cab"><h2>Dry Logs</h2>${barritaCuartos()}</div>
     <div class="card dl-lec">
       <div class="dl-tel-sel">${selectoresHtml()}</div>
       <h3 class="dl-lec-t">Scan ${esc(cuarto || 'this room')}</h3>
       <p class="dl-lec-sub">Point the camera at your moisture meter and take a photo.</p>
-      <div class="dl-visor dl-visor-foto">${FOTO ? `<img src="${FOTO.url}" alt="Meter reading photo">` : ''}</div>
+      <div class="dl-visor dl-visor-foto">${FOTO ? `<img src="${FOTO.url}" alt="Meter reading photo">` : ''}<button type="button" class="dl-retomar" data-dl-cam="otra-foto">${IC('girar-der')}Retake</button></div>
       <div class="dl-det${r ? '' : ' sin'}">
         <span class="dl-det-ic">${r ? IC('check') : '!'}</span>
         <div class="dl-det-txt"><b>${r ? 'Reading detected' : 'Type the reading'}</b>${compararHtml(valor) || ''}<small class="dl-det-sub">${r ? 'Moisture meter value captured successfully.' : 'Could not read the meter. Type the number you see.'}</small></div>
         <label class="dl-num dl-det-n"><input id="dlValor" type="text" inputmode="decimal" autocomplete="off" maxlength="6" value="${esc(valor)}" aria-label="Reading"><span>%</span></label>
       </div>
-      ${abierto ? `<div class="dl-mat">
-        <label class="dl-mini"><small>Material</small><select id="dlMaterial">${(MATERIALES_DL.includes(MATERIAL) ? MATERIALES_DL : [MATERIAL, ...MATERIALES_DL]).map(m => `<option${m === MATERIAL ? ' selected' : ''}>${esc(m)}</option>`).join('')}</select></label>
-        <label class="dl-mini"><small>Where</small><input id="dlUbic" type="text" maxlength="120" placeholder="East wall" value="${esc(UBIC)}"></label>
-      </div>` : `<button type="button" class="dl-punto" data-dl-punto>${IC('dl-leer')}<span>${esc(R.nombrePunto({ material: MATERIAL, ubicacion: UBIC }))}</span><b>${IC('lapiz')}Edit</b></button>`}
-      <p class="aviso" id="dlAviso"></p>
-      <div class="dl-botones"><button type="button" class="btn btn-outline" data-dl-cam="otra-foto">${IC('girar-der')}Retake</button><button type="button" class="btn btn-accent" data-dl-guardar>Save Reading</button></div>
+      <div class="dl-lec-acc">${accionesLecturaHtml()}</div>
     </div>
   </div>`;
 }
+// Lo de abajo de la lectura (su pedido del 14-oct): "Continue" (guarda y va al equipo) y "+ Add another reading".
+// Material y dónde solo salen cuando hacen falta: al tocar "Add another reading", cuando ya hay otra lectura de hoy en
+// el cuarto (para distinguir los puntos) o, del día 2, ya escritos en una línea con el punto de la visita anterior.
+const campoPunto = () => {
+  const cuarto = FOTO ? FOTO.cuarto : CUARTO, otroHoy = R.lecturasDelDia(LECT, cuarto, HOY()).length > 0;
+  return { campos: PUNTO_ABIERTO || otroHoy, linea: !PUNTO_ABIERTO && !otroHoy && !!(FOTO && FOTO.prellenado) };
+};
+function accionesLecturaHtml(){
+  const { campos, linea } = campoPunto(), cuarto = FOTO ? FOTO.cuarto : CUARTO;
+  const quedan = R.puntosPendientes(LECT, cuarto, HOY()).filter(p => p.clave !== R.clavePunto({ material: MATERIAL, ubicacion: UBIC }));
+  const otro = campos || linea
+    ? `<button type="button" class="btn btn-outline" data-dl-siguiente>${IC('camara')}${quedan.length ? 'Next point' : 'Take next reading'}</button>`
+    : `<button type="button" class="btn btn-outline" data-dl-otra>${IC('mas')}Add another reading</button>`;
+  return `${campos ? `<div class="dl-mat">
+      <label class="dl-mini"><small>Material</small><select id="dlMaterial">${(MATERIALES_DL.includes(MATERIAL) ? MATERIALES_DL : [MATERIAL, ...MATERIALES_DL]).map(m => `<option${m === MATERIAL ? ' selected' : ''}>${esc(m)}</option>`).join('')}</select></label>
+      <label class="dl-mini"><small>Where</small><input id="dlUbic" type="text" maxlength="120" placeholder="East wall" value="${esc(UBIC)}"></label>
+    </div>` : linea ? `<button type="button" class="dl-punto" data-dl-otra>${IC('dl-leer')}<span>${esc(R.nombrePunto({ material: MATERIAL, ubicacion: UBIC }))}</span><b>${IC('lapiz')}Edit</b></button>` : ''}
+    <p class="aviso" id="dlAviso"></p>
+    <div class="dl-botones">${otro}<button type="button" class="btn btn-accent" data-dl-guardar>Continue</button></div>`;
+}
+function pintarAcciones(){ const a = $('#panel-secado .dl-lec-acc'); if(a){ a.innerHTML = accionesLecturaHtml(); medirTel(); } }
 // Lo que marcó la vez pasada este mismo punto (material + dónde): "Last: 45% on Oct 13 ▼ 5".
 function compararHtml(valorTxt){
   const cuarto = FOTO ? FOTO.cuarto : CUARTO, ant = cuarto && R.lecturaAnterior(LECT, cuarto, MATERIAL, UBIC, HOY()); if(!ant) return '<span class="dl-compara" hidden></span>';
@@ -406,7 +421,7 @@ function equipoHtml(){
     <div class="card dl-eq">
       <div class="dl-tel-sel">${selectoresHtml()}</div>
       ${GUARDADA && GUARDADA.cuarto_id === CUARTO ? (() => { const pend = R.puntosPendientes(LECT, CUARTO, HOY());
-        return `<div class="dl-eq-ok">${IC('check')}<span>Saved <b>${esc(GUARDADA.texto)}%</b> · ${esc(R.nombrePunto(GUARDADA))}${tendGuardada(GUARDADA)}</span><button type="button" class="dl-eq-otro${pend.length ? ' pend' : ''}" data-dl-otro>${pend.length ? 'Next point' : '+ Reading'}</button></div>${pend.length ? `<p class="dl-eq-nota">Still to measure here: ${esc(pend.map(p => p.nombre).join(', '))}</p>` : ''}`; })() : ''}
+        return `<div class="dl-eq-ok">${IC('check')}<span>Saved <b>${esc(GUARDADA.texto)}%</b> · ${esc(R.nombrePunto(GUARDADA))}${tendGuardada(GUARDADA)}</span>${pend.length ? '<button type="button" class="dl-eq-otro pend" data-dl-otro>Next point</button>' : ''}</div>${pend.length ? `<p class="dl-eq-nota">Still to measure here: ${esc(pend.map(p => p.nombre).join(', '))}</p>` : ''}`; })() : ''}
       ${EQ.previo && EQ.previo < HOY() ? `<p class="dl-eq-nota">On site since the last visit (${esc(R.fechaCorta(EQ.previo))}). Change only what moved.</p>` : ''}
       <div class="dl-eq-lista">${equipoFilasHtml()}</div>
       <p class="aviso" id="dlAviso"></p>
@@ -591,10 +606,10 @@ function ponerFoto(blob, lectura){
   PUNTO_ABIERTO = false;
   // Día 2 en adelante: el punto que toca (el de la visita anterior) ya viene escrito; se puede cambiar.
   const pend = R.puntosPendientes(LECT, CUARTO, HOY())[0];
-  if(pend){ MATERIAL = MATERIALES_DL.includes(pend.material) ? pend.material : (pend.material ? pend.material : MATERIAL); UBIC = pend.ubicacion || ''; }
+  if(pend){ MATERIAL = pend.material || MATERIAL; UBIC = pend.ubicacion || ''; }
   else UBIC = '';   // un punto nuevo: el "dónde" se escribe (no se arrastra el del cuarto o el punto anterior)
   if(FOTO && FOTO.url) URL.revokeObjectURL(FOTO.url);
-  FOTO = { blob, url: URL.createObjectURL(blob), nivel: NIVEL, cuarto: CUARTO, lectura: lectura || null };
+  FOTO = { blob, url: URL.createObjectURL(blob), nivel: NIVEL, cuarto: CUARTO, lectura: lectura || null, prellenado: !!pend };
   apagarCam(); PANTALLA = 'lectura'; pintarAqui();
   const inp = $('#dlValor'); if(inp){ anchoNumero(inp); if(!FOTO.lectura) inp.focus(); }
 }
@@ -620,26 +635,36 @@ async function enviarTel(tabla, fila){
 }
 const avisarTel = (t) => { $$('#panel-secado #dlAviso').forEach(a => { a.className = 'aviso'; a.textContent = t; }); };
 export function valorDe(txt){ const t = String(txt || '').trim().replace(',', '.'); if(!/^\d{1,3}(\.\d)?$/.test(t)) return null; const n = Number(t); return n <= 1000 ? n : null; }
-async function guardarLectura(){
+async function guardarLectura(siguiente){
   if(OCUPADO_TEL || !FOTO) return;
   const valor = valorDe($('#dlValor').value);
   if(valor == null){ avisarTel('Type the reading as a number (like 18 or 18.5).'); $('#dlValor').focus(); return; }
   if($('#dlMaterial')) MATERIAL = $('#dlMaterial').value; if($('#dlUbic')) UBIC = ($('#dlUbic').value || '').trim();
-  OCUPADO_TEL = true; const b = $('[data-dl-guardar]'); if(b){ b.disabled = true; b.textContent = 'Saving…'; }
+  // Material y dónde solo si se vieron (si no, la lectura queda como "Reading": no se inventa un material).
+  const { campos, linea } = campoPunto(), conPunto = campos || linea;
+  const mat = conPunto ? MATERIAL : null, ubi = conPunto ? (UBIC || null) : null;
+  // Dos lecturas de hoy en el mismo punto: la segunda taparía la primera en el reporte. Se pide decir dónde.
+  if(R.lecturasDelDia(LECT, FOTO.cuarto, HOY()).some(f => R.clavePunto(f) === R.clavePunto({ material: mat, ubicacion: ubi }))){
+    if(!campos){ PUNTO_ABIERTO = true; pintarAcciones(); }
+    avisarTel('This room already has a reading here today. Write where this one is (like North wall).'); const u = $('#dlUbic'); if(u) u.focus(); return;
+  }
+  OCUPADO_TEL = true; const bot = siguiente ? '[data-dl-siguiente]' : '[data-dl-guardar]', b = $(bot), antes = b ? b.innerHTML : ''; if(b){ b.disabled = true; b.textContent = 'Saving…'; }
   try{
     // La foto va a Photos, a su piso y cuarto: es la prueba de la lectura.
     const archivo = new File([FOTO.blob], 'dry-log-' + hoyLocal() + '-' + Date.now() + '.jpg', { type: 'image/jpeg', lastModified: Date.now() });
     const { foto } = await fotos.subirCopia(archivo, { nivel_id: FOTO.nivel, cuarto_id: FOTO.cuarto });
     const cuarto_nombre = nombreDe(CUARTOS, FOTO.cuarto) || null;
     const fila = await enviarTel('fotos_drylog_lecturas', { trabajo_id: T.id, dia: hoyLocal(), nivel_id: FOTO.nivel || null, cuarto_id: FOTO.cuarto || null, cuarto_nombre,
-      material: MATERIAL, ubicacion: UBIC || null, valor, unidad: '%', foto_id: foto ? foto.id : null,
+      material: mat, ubicacion: ubi, valor, unidad: '%', foto_id: foto ? foto.id : null,
       leido_texto: FOTO.lectura ? FOTO.lectura.texto : null, leido_por: FOTO.lectura ? 'scanova-lector' : null, corregido: !!(FOTO.lectura && FOTO.lectura.valor !== valor) });
     if(GUARDADA && GUARDADA.url && GUARDADA.url !== FOTO.url) URL.revokeObjectURL(GUARDADA.url);
     LECT.push(fila);
     GUARDADA = { ...fila, texto: String(valor), url: FOTO.url };
-    FOTO = null; abrirEquipo();   // su pedido (14-oct): de la lectura directo al equipo, sin pantalla de en medio
+    FOTO = null;
+    if(siguiente){ AVISO_TEL = 'Saved ' + fmtValor(valor) + '% · ' + R.nombrePunto(fila) + '. Take the next reading in ' + (cuarto_nombre || 'this room') + '.'; PANTALLA = 'cam'; pintarAqui(); }
+    else abrirEquipo();   // su pedido (14-oct): "Continue" va directo al equipo, sin pantalla de en medio
   }catch(e){ avisarTel('Not saved: ' + (e.message || e)); }
-  finally{ OCUPADO_TEL = false; const b2 = $('[data-dl-guardar]'); if(b2){ b2.disabled = false; b2.textContent = 'Save Reading'; } }
+  finally{ OCUPADO_TEL = false; const b2 = $(bot); if(b2){ b2.disabled = false; b2.innerHTML = antes; } }
 }
 // "No Equipment": se anota cero para el cuarto y se pasa al siguiente (su diseño).
 async function sinEquipo(){
@@ -700,8 +725,9 @@ export function conectar(){
     if((el = q('[data-dl-cam]'))){ const a = el.dataset.dlCam;
       if(a === 'telefono') camaraDelTelefono(); else if(a === 'otra') encenderCam(); else if(a === 'otra-foto'){ PANTALLA = 'cam'; AVISO_TEL = ''; pintarAqui(); }
       return; }
-    if(q('[data-dl-guardar]')){ guardarLectura(); return; }
-    if(q('[data-dl-punto]')){ PUNTO_ABIERTO = true; const v = ($('#dlValor') || {}).value; const p = q('[data-dl-punto]'); const tmp = document.createElement('div'); tmp.innerHTML = lecturaHtml(); const nuevo = tmp.querySelector('.dl-mat'); if(nuevo) p.replaceWith(nuevo); const i = $('#dlValor'); if(i && v != null) i.value = v; const u = $('#dlUbic'); if(u) u.focus(); return; }
+    if(q('[data-dl-guardar]')){ guardarLectura(false); return; }
+    if(q('[data-dl-siguiente]')){ guardarLectura(true); return; }
+    if(q('[data-dl-otra]')){ PUNTO_ABIERTO = true; pintarAcciones(); const u = $('#dlUbic'); if(u) u.focus(); return; }
     if(q('[data-dl-web-guardar]')){ guardarWeb(); return; }
     if((el = q('[data-dl-equipo]'))){ if(el.dataset.dlEquipo === 'no') sinEquipo(); else abrirEquipo(); return; }
     if((el = q('[data-eq-mas]'))){ cambiarEq(+el.dataset.eqMas, 1); return; }
