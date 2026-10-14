@@ -3,7 +3,7 @@
 //  - mientras escribe salen sugerencias: en la app del iPhone, de Apple Maps (las más cercanas primero);
 //    en la página web, de las direcciones de sus propios proyectos (no hay un servicio gratis para eso en la web).
 // Al escoger una sugerencia o usar el 📍 también se guarda el punto (lat/lng) del proyecto.
-import { $ } from './app.js?v=2026-10-14-16';
+import { $ } from './app.js?v=2026-10-14-18';
 
 // ---------- lo puro ----------
 const ESTADOS = { Alabama:'AL', Alaska:'AK', Arizona:'AZ', Arkansas:'AR', California:'CA', Colorado:'CO', Connecticut:'CT', Delaware:'DE', 'District of Columbia':'DC', Florida:'FL', Georgia:'GA', Hawaii:'HI', Idaho:'ID', Illinois:'IL', Indiana:'IN', Iowa:'IA', Kansas:'KS', Kentucky:'KY', Louisiana:'LA', Maine:'ME', Maryland:'MD', Massachusetts:'MA', Michigan:'MI', Minnesota:'MN', Mississippi:'MS', Missouri:'MO', Montana:'MT', Nebraska:'NE', Nevada:'NV', 'New Hampshire':'NH', 'New Jersey':'NJ', 'New Mexico':'NM', 'New York':'NY', 'North Carolina':'NC', 'North Dakota':'ND', Ohio:'OH', Oklahoma:'OK', Oregon:'OR', Pennsylvania:'PA', 'Rhode Island':'RI', 'South Carolina':'SC', 'South Dakota':'SD', Tennessee:'TN', Texas:'TX', Utah:'UT', Vermont:'VT', Virginia:'VA', Washington:'WA', 'West Virginia':'WV', Wisconsin:'WI', Wyoming:'WY' };
@@ -23,7 +23,7 @@ export function direccionDeMapa(a){
   const estado = [estadoCorto(a.state), a.postcode].filter(Boolean).join(' ');
   return [calle, ciudad, estado].filter(Boolean).join(', ');
 }
-export const notaPrecision = (m) => { const n = Math.round(Number(m)); return isFinite(n) && n > 0 ? 'Ubicado con ±' + n + ' m. Revise que sea la casa correcta (el GPS a veces da la de al lado).' : 'Revise que sea la casa correcta (el GPS a veces da la de al lado).'; };
+export const notaPrecision = (m) => { const n = Math.round(Number(m)); return isFinite(n) && n > 0 ? 'Located within ±' + n + ' m. Check that it is the right house (GPS sometimes gives the one next door).' : 'Check that it is the right house (GPS sometimes gives the one next door).'; };
 // Sugerencias de las direcciones de sus proyectos (sin repetir), las que contienen lo escrito.
 export function deSusProyectos(lista, texto, max = 3){
   const q = String(texto || '').trim().toLowerCase(); if(q.length < 2) return [];
@@ -33,11 +33,11 @@ export function deSusProyectos(lista, texto, max = 3){
 }
 export function errorUbicacion(e){
   const c = (e && (e.code || e.message)) || '';
-  if(c === 'gps_off') return 'El GPS está apagado en este teléfono.';
-  if(c === 'denied' || c === 1) return 'El permiso de ubicación está apagado. Actívelo en Ajustes del teléfono.';
-  if(c === 'timeout' || c === 3) return 'No se pudo encontrar la ubicación. Pruebe afuera del edificio.';
-  if(c === 'busy') return 'Ya se está buscando la ubicación.';
-  return 'No se pudo encontrar la ubicación.';
+  if(c === 'gps_off') return 'GPS is turned off on this phone.';
+  if(c === 'denied' || c === 1) return 'Location permission is off. Turn it on in the phone Settings.';
+  if(c === 'timeout' || c === 3) return 'Could not find the location. Try outside the building.';
+  if(c === 'busy') return 'Already looking for the location.';
+  return 'Could not find the location.';
 }
 
 // ---------- el campo ----------
@@ -59,7 +59,7 @@ function pintarSug(){
 }
 const esc = (s) => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 function cerrarSug(){ SUG = []; SEL = -1; const c = caja(); if(c){ c.hidden = true; c.innerHTML = ''; } }
-const filaUbicacion = { title:'Usar mi ubicación actual', subtitle:'Pone la dirección de donde está parado', ubicacion:true };
+const filaUbicacion = { title:'Use my current location', subtitle:'Fills in the address where you are standing', ubicacion:true };
 
 async function buscar(){
   const q = inp().value.trim(); const mio = ++SEQ;
@@ -89,7 +89,7 @@ async function escoger(i){
 // El 📍: la dirección exacta de donde está parado.
 export async function ubicar(){
   const b = $('#btnUbicar'); if(b.classList.contains('busy')) return;
-  b.classList.add('busy'); borrarNota(); nota().textContent = 'Buscando dónde está…';
+  b.classList.add('busy'); borrarNota(); nota().textContent = 'Finding where you are…';
   try{
     let r;
     const P = plugin();
@@ -103,7 +103,7 @@ export async function ubicar(){
     } else throw { code:'nada' };
     if(r && isFinite(r.lat)){ guardarFix(r.lat, r.lng); ponerPunto(r.lat, r.lng); }
     if(r && r.address){ inp().value = sinPais(r.address); nota().textContent = notaPrecision(r.accuracyM); }
-    else { nota().textContent = 'Se guardó el punto, pero no se encontró la dirección de ese lugar. Escríbala.'; }
+    else { nota().textContent = 'The spot was saved, but no address was found for it. Please type it.'; }
   }catch(e){ const n = nota(); n.textContent = errorUbicacion(e); n.classList.add('error'); }
   finally{ b.classList.remove('busy'); }
 }

@@ -1,6 +1,6 @@
 // Scanova · trabajos: la lista, crear, abrir, editar, archivar. De las fotos solo el conteo por ahora (paso 2).
-import { $, $$, authFetch, irA, atras, esManager, marcarLimpio } from './app.js?v=2026-10-14-16';
-import * as fotos from './fotos.js?v=2026-10-14-16';
+import { $, $$, authFetch, irA, atras, esManager, marcarLimpio } from './app.js?v=2026-10-14-18';
+import * as fotos from './fotos.js?v=2026-10-14-18';
 
 export const TIPOS = { agua:'Agua', moho:'Moho', fuego:'Fuego', contenidos:'Contenidos', mudanza:'Mudanza', otro:'Otro' };
 export const tipoTxt = (t) => TIPOS[t] || 'Otro';
@@ -18,10 +18,10 @@ export function filtrar(lista, estado, texto){
 }
 // Pura: lo que el formulario exige. Devuelve '' si está bien, o el aviso.
 export function validar(f){
-  if(!String(f.cliente || '').trim()) return 'Escriba el nombre del cliente.';
-  if(!String(f.direccion || '').trim()) return 'Escriba la dirección.';
-  if(!TIPOS[f.tipo]) return 'Escoja el tipo de trabajo.';
-  if(f.correo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.correo)) return 'Ese correo no se ve bien.';
+  if(!String(f.cliente || '').trim()) return 'Type the client name.';
+  if(!String(f.direccion || '').trim()) return 'Type the address.';
+  if(!TIPOS[f.tipo]) return 'Choose the job type.';
+  if(f.correo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.correo)) return 'That email does not look right.';
   return '';
 }
 export const fechaCorta = (iso) => { if(!iso) return ''; const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleDateString('es-US', { month:'short', day:'numeric', year:'numeric' }); };
@@ -109,12 +109,15 @@ function leerForma(){
            cliente_nombre: '',   // el nombre del cliente ES el nombre del proyecto (no hay dos nombres)
            encargado: $('#fEncargado').value.trim(), fecha_inicio: $('#fFechaInicio').value || '' };
 }
+// Pura: la fecha de hoy del teléfono (hora local, no UTC: de noche UTC ya es mañana) como AAAA-MM-DD.
+export const fechaDeHoy = (d = new Date()) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 function llenarForma(t){
   $('#fCliente').value = t ? (t.cliente || '') : ''; $('#fDireccion').value = t ? (t.direccion || '') : '';
   $('#fTelefono').value = t ? (t.telefono || '') : ''; $('#fCorreo').value = t ? (t.correo || '') : '';
   $('#fTipo').value = t ? (t.tipo || '') : ''; $('#fNotas').value = t ? (t.notas || '') : '';
   $('#fClienteNombre').value = t ? (t.cliente_nombre || '') : ''; $('#fEncargado').value = t ? (t.encargado || '') : '';
-  $('#fFechaInicio').value = t && t.fecha_inicio ? String(t.fecha_inicio).slice(0, 10) : '';
+  // Proyecto nuevo: la fecha de hoy ya puesta (se puede cambiar). Al editar se respeta lo guardado, aunque esté vacío.
+  $('#fFechaInicio').value = t ? (t.fecha_inicio ? String(t.fecha_inicio).slice(0, 10) : '') : fechaDeHoy();
   $('#fEtapa').value = t && ETAPAS_FORMA.includes(t.etapa) ? t.etapa : 'en_curso';
   $('#fLat').value = t && t.lat != null ? String(t.lat) : ''; $('#fLng').value = t && t.lng != null ? String(t.lng) : '';
   const nd = $('#fDireccionNota'); if(nd){ nd.textContent = ''; nd.classList.remove('error'); }
@@ -126,7 +129,7 @@ function llenarForma(t){
 async function guardarForma(){
   const f = leerForma(); const aviso = $('#formaAviso');
   const mal = validar(f); if(mal){ aviso.textContent = mal; return; }
-  const b = $('#btnFormaGuardar'); b.disabled = true; b.textContent = 'Guardando…';
+  const b = $('#btnFormaGuardar'); b.disabled = true; b.textContent = 'Saving…';
   try{
     const base = { cliente: f.cliente, direccion: f.direccion, telefono: f.telefono || null, correo: f.correo || null, tipo: f.tipo, notas: f.notas || null, lat: f.lat, lng: f.lng };
     const enviar = (cuerpo) => editando
@@ -145,14 +148,14 @@ async function guardarForma(){
       r = await enviar(cuerpo);
     }
     if(!r.ok) throw new Error('HTTP ' + r.status + ' ' + (await r.text()).slice(0, 200));
-    if(faltan.length) setTimeout(() => { const a = $('#fichaAviso'); if(a) a.textContent = 'Guardado. ' + (faltan.includes('04') ? 'Cliente, encargado y fecha todavía no se guardan (falta sql/fotos-04-niveles.sql). ' : '') + (faltan.includes('03') ? 'La etapa y el avance todavía no se guardan (falta sql/fotos-03-etapa.sql).' : ''); }, 50);
+    if(faltan.length) setTimeout(() => { const a = $('#fichaAviso'); if(a) a.textContent = 'Saved. ' + (faltan.includes('04') ? 'Client, project manager and date are not saved yet (sql/fotos-04-niveles.sql is missing). ' : '') + (faltan.includes('03') ? 'Stage and progress are not saved yet (sql/fotos-03-etapa.sql is missing).' : ''); }, 50);
     const filas = await r.json();
-    if(!Array.isArray(filas) || !filas.length) throw new Error('la base no devolvió la fila');
+    if(!Array.isArray(filas) || !filas.length) throw new Error('the database did not return the project');
     const t = filas[0];
     const i = LISTA.findIndex(x => x.id === t.id); if(i >= 0) LISTA[i] = t; else LISTA.unshift(t);
     marcarLimpio('pForma'); abrir(t, true);
-  }catch(e){ aviso.textContent = 'No se pudo guardar. ' + String(e && e.message || e); }
-  b.disabled = false; b.textContent = 'Guardar';
+  }catch(e){ aviso.textContent = 'Could not save. ' + String(e && e.message || e); }
+  b.disabled = false; b.textContent = 'Save';
 }
 
 // Abrir la forma para editar un proyecto (desde la ficha o desde el menú •••).

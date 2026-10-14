@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
-<link rel="stylesheet" href="estilo.css?v=2026-10-14-16">
+<link rel="stylesheet" href="estilo.css?v=2026-10-14-18">
 <meta name="description" content="Scanova360: the smarter way to capture, organize, and manage restoration projects. Private workspace, by invitation only.">
 <style>
 /* ===== BIENVENIDA (la imagen aprobada hecha pagina; se ve solo sin sesion) ===== */
@@ -504,48 +504,48 @@ body.en-inicio{ overflow:hidden; }
 
       <!-- NUEVO / EDITAR -->
       <section class="pantalla" id="pForma" hidden>
-        <button type="button" class="volver" data-nav="atras"><svg class="ic"><use href="#i-atras"/></svg>Volver</button>
+        <button type="button" class="volver" data-nav="atras"><svg class="ic"><use href="#i-atras"/></svg>Back</button>
         <div class="card forma">
-          <h1 class="titulo chico" id="formaTitulo">Trabajo nuevo</h1>
+          <h1 class="titulo chico" id="formaTitulo">New Project</h1>
           <div class="forma-grid">
             <div class="field"><label for="fCliente">Client name</label><input type="text" id="fCliente" autocomplete="off" placeholder="Lauren Harris"></div>
             <!-- Un proyecto es de UN cliente: su nombre es el del proyecto (su regla). Este campo aparte ya no se usa. -->
-            <div class="field" hidden><label for="fClienteNombre">Client <span class="hint">opcional</span></label><input type="text" id="fClienteNombre" autocomplete="off" placeholder="Harris Family"></div>
-            <div class="field"><label for="fTelefono">Teléfono</label><input type="tel" id="fTelefono" autocomplete="off" placeholder="(703) 555-0100"></div>
-            <div class="field ancho"><label for="fDireccion">Dirección</label>
+            <div class="field" hidden><label for="fClienteNombre">Client <span class="hint">optional</span></label><input type="text" id="fClienteNombre" autocomplete="off" placeholder="Harris Family"></div>
+            <div class="field"><label for="fTelefono">Phone</label><input type="tel" id="fTelefono" autocomplete="off" placeholder="(703) 555-0100"></div>
+            <div class="field ancho"><label for="fDireccion">Address</label>
               <div class="dir-campo">
-                <input type="text" id="fDireccion" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="Escriba la dirección o toque 📍">
-                <button type="button" class="dir-ubicar" id="btnUbicar" aria-label="Usar mi ubicación" title="Usar mi ubicación"><svg class="ic"><use href="#i-ubicacion"/></svg></button>
+                <input type="text" id="fDireccion" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="Type the address or tap 📍">
+                <button type="button" class="dir-ubicar" id="btnUbicar" aria-label="Use my location" title="Use my location"><svg class="ic"><use href="#i-ubicacion"/></svg></button>
                 <div class="dir-sug" id="fDireccionSug" hidden></div>
               </div>
               <input type="hidden" id="fLat"><input type="hidden" id="fLng">
               <p class="dir-nota" id="fDireccionNota"></p></div>
-            <div class="field"><label for="fEncargado">Project Manager <span class="hint">opcional</span></label><input type="text" id="fEncargado" autocomplete="off" placeholder="Amilcar"></div>
-            <div class="field"><label for="fFechaInicio">Start date <span class="hint">opcional</span></label><input type="date" id="fFechaInicio"></div>
-            <div class="field"><label for="fCorreo">Correo <span class="hint">opcional</span></label><input type="email" id="fCorreo" autocomplete="off"></div>
-            <div class="field"><label for="fTipo">Tipo de trabajo</label>
+            <div class="field"><label for="fEncargado">Project Manager <span class="hint">optional</span></label><input type="text" id="fEncargado" autocomplete="off" placeholder="Amilcar"></div>
+            <div class="field"><label for="fFechaInicio">Start date <span class="hint">optional</span></label><input type="date" id="fFechaInicio"></div>
+            <div class="field"><label for="fCorreo">Email <span class="hint">optional</span></label><input type="email" id="fCorreo" autocomplete="off"></div>
+            <div class="field"><label for="fTipo">Job type</label>
               <select id="fTipo">
-                <option value="">&mdash; escoja &mdash;</option>
-                <option value="agua">Agua</option>
-                <option value="moho">Moho</option>
-                <option value="fuego">Fuego</option>
-                <option value="contenidos">Contenidos</option>
-                <option value="mudanza">Mudanza</option>
-                <option value="otro">Otro</option>
+                <option value="">&mdash; choose &mdash;</option>
+                <option value="agua">Water</option>
+                <option value="moho">Mold</option>
+                <option value="fuego">Fire</option>
+                <option value="contenidos">Contents</option>
+                <option value="mudanza">Moving</option>
+                <option value="otro">Other</option>
               </select></div>
-            <div class="field"><label for="fEtapa">Etapa</label>
+            <div class="field"><label for="fEtapa">Stage</label>
               <select id="fEtapa">
-                <option value="planeacion">Planning · planeación</option>
-                <option value="en_curso">In Progress · en curso</option>
-                <option value="completado">Completed · terminado</option>
+                <option value="planeacion">Planning</option>
+                <option value="en_curso">In Progress</option>
+                <option value="completado">Completed</option>
               </select></div>
-            <div class="field"><label for="fAvance">Avance <span class="hint" id="fAvanceTxt">Not set</span></label>
-              <div class="avance-forma"><input type="range" id="fAvanceBarra" min="0" max="100" step="5" value="0" aria-label="Avance"><input type="number" id="fAvance" min="0" max="100" step="5" inputmode="numeric" placeholder="%"><button type="button" class="enlace-editar" id="btnAvanceQuitar">Quitar</button></div></div>
-            <div class="field ancho"><label for="fNotas">Notas <span class="hint">opcional</span></label><textarea id="fNotas"></textarea></div>
+            <div class="field"><label for="fAvance">Progress <span class="hint" id="fAvanceTxt">Not set</span></label>
+              <div class="avance-forma"><input type="range" id="fAvanceBarra" min="0" max="100" step="5" value="0" aria-label="Progress"><input type="number" id="fAvance" min="0" max="100" step="5" inputmode="numeric" placeholder="%"><button type="button" class="enlace-editar" id="btnAvanceQuitar">Clear</button></div></div>
+            <div class="field ancho"><label for="fNotas">Notes <span class="hint">optional</span></label><textarea id="fNotas"></textarea></div>
           </div>
           <div class="fila-botones">
-            <button type="button" class="btn btn-outline" id="btnFormaCancelar">Cancelar</button>
-            <button type="button" class="btn btn-accent" id="btnFormaGuardar">Guardar</button>
+            <button type="button" class="btn btn-outline" id="btnFormaCancelar">Cancel</button>
+            <button type="button" class="btn btn-accent" id="btnFormaGuardar">Save</button>
           </div>
           <p class="aviso" id="formaAviso"></p>
         </div>
@@ -724,6 +724,6 @@ body.en-inicio{ overflow:hidden; }
     <div class="visor-pie"><span id="visorPie"></span><button type="button" class="btn btn-outline btn-rojo" id="visorBorrar" hidden><svg class="ic"><use href="#i-archivo"/></svg>Papelera</button></div>
   </div>
 </div>
-<script type="module" src="app.js?v=2026-10-14-16"></script>
+<script type="module" src="app.js?v=2026-10-14-18"></script>
 </body>
 </html>
