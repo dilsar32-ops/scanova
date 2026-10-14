@@ -1893,3 +1893,186 @@ body.pie-atras .tab-inicio svg.tab-atras{ display:block; }
   .dl-tel .dl-caja-txt b{ font-size:13.5px; font-weight:600; }
   .dl-tel .dl-tel-sel{ gap:8px; }
 }
+
+/* ===== Dry Log · día 2 en adelante, varios puntos y el resumen del día (14-oct). Azul = baja (seca), ámbar = sube. ===== */
+.dl-prog-btn{ display:flex; align-items:center; gap:8px; margin-left:auto; padding:4px 0; background:none; border:0; font:inherit; color:inherit; cursor:pointer; min-width:0; }
+.dl-prog-btn .dl-prog{ flex:0 1 auto; min-width:0; overflow:hidden; }
+.dl-tel-cab h2{ flex:none; }
+.dl-antes{ display:flex; align-items:center; gap:8px; margin:0; padding:9px 12px; border-radius:10px; background:var(--bg2); color:var(--ink); font-size:13.5px; line-height:1.35; }
+.dl-antes .ic{ width:18px; height:18px; flex:none; color:var(--accent); }
+.dl-antes small{ color:var(--ink-soft); font-size:12px; }
+.dl-antes.listo{ background:var(--accent-soft); color:var(--accent); font-weight:600; }
+.dl-antes[hidden]{ display:none !important; }
+.dl-saltar{ position:absolute; top:10px; right:10px; z-index:2; display:inline-flex; align-items:center; gap:2px; padding:6px 8px 6px 12px; border:0; border-radius:99px; background:rgba(15,26,46,.55); color:#fff; font:inherit; font-size:13px; font-weight:600; cursor:pointer; }
+.dl-saltar .ic{ width:16px; height:16px; }
+.dl-compara{ display:block; margin-top:4px; font-size:13px; font-weight:600; color:var(--ink-soft); }
+.dl-compara[hidden]{ display:none !important; }
+.dl-compara.baja, .dl-tend.baja{ color:var(--accent); }
+.dl-compara.sube, .dl-tend.sube{ color:#b7791f; }
+.dl-tend{ font-style:normal; font-weight:700; }
+.dl-otro{ display:flex; align-items:center; gap:10px; width:100%; padding:11px 12px; border:1px dashed var(--line2); border-radius:12px; background:var(--card); font:inherit; color:var(--ink); text-align:left; cursor:pointer; }
+.dl-otro > .ic{ width:22px; height:22px; flex:none; color:var(--accent); }
+.dl-otro > .ic:last-child{ width:18px; height:18px; color:var(--ink-soft); margin-left:auto; }
+.dl-otro span{ display:flex; flex-direction:column; font-size:14.5px; font-weight:600; }
+.dl-otro small{ font-size:12px; font-weight:500; color:var(--ink-soft); }
+.dl-otro-pend{ border-style:solid; border-color:var(--accent); background:var(--accent-soft); }
+.dl-dia{ display:flex; flex-direction:column; gap:10px; padding:12px; }
+.dl-dia-res{ margin:0; font-size:13.5px; color:var(--ink-soft); font-weight:600; }
+.dl-dia-c{ border:1px solid var(--line); border-radius:12px; padding:8px 10px; display:flex; flex-direction:column; gap:6px; }
+.dl-dia-c.falta{ border-color:#f2d58a; background:#fffaf0; }
+.dl-dia-cab{ display:flex; align-items:center; gap:10px; width:100%; padding:2px 0; background:none; border:0; font:inherit; color:inherit; text-align:left; cursor:pointer; }
+.dl-dia-cab span{ display:flex; flex-direction:column; min-width:0; }
+.dl-dia-cab b{ font-size:15px; }
+.dl-dia-cab small{ font-size:12px; color:var(--ink-soft); }
+.dl-dia-ic{ width:24px; height:24px; flex:none; color:var(--ink); }
+.dl-dia-chev{ width:18px; height:18px; margin-left:auto; color:var(--ink-soft); flex:none; }
+.dl-dia-l{ display:flex; align-items:center; gap:8px; font-size:14px; padding:4px 0 4px 34px; border-top:1px solid var(--line); }
+.dl-dia-p{ flex:1; min-width:0; color:var(--ink-soft); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dl-dia-l b{ font-size:15px; font-variant-numeric:tabular-nums; }
+.dl-dia-l em{ font-size:12.5px; }
+.dl-dia-x{ flex:none; width:28px; height:28px; border:0; border-radius:50%; background:var(--bg2); color:var(--ink-soft); font-size:12px; cursor:pointer; }
+.dl-dia-falta{ margin:0; padding-left:34px; font-size:13.5px; font-weight:600; color:#b7791f; }
+.dl-dia-eq{ display:flex; align-items:center; gap:8px; margin:0; padding-left:34px; font-size:13px; color:var(--ink-soft); }
+.dl-dia-eq .ic{ width:16px; height:16px; flex:none; }
+.dl-dia-eq small{ font-size:12px; }
+
+/* ===== Documents (14-oct): los reportes del secado (Dry Log y Equipment) con su PDF. Azul = baja, ámbar = sube. ===== */
+.docs{ display:flex; flex-direction:column; gap:10px; padding:16px; }
+.docs .sec-t{ margin:0; }
+.doc-nota{ margin:0 0 4px; font-size:13.5px; color:var(--ink-soft); }
+.doc-fila{ display:flex; align-items:center; gap:12px; padding:12px; border:1px solid var(--line); border-radius:12px; background:var(--card); }
+.doc-ic{ flex:none; width:44px; height:44px; border-radius:10px; display:grid; place-items:center; background:var(--accent-soft); color:var(--accent); }
+.doc-ic .ic{ width:24px; height:24px; }
+.doc-txt{ flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.doc-txt b{ font-size:15.5px; }
+.doc-txt small{ font-size:12.5px; color:var(--ink-soft); }
+.doc-acc{ display:flex; gap:8px; flex:none; }
+.doc-acc .btn .ic{ width:16px; height:16px; }
+@media (max-width:899px){ .doc-fila{ flex-wrap:wrap; } .doc-acc{ width:100%; } .doc-acc .btn{ flex:1; } }
+.doc-vista{ display:flex; flex-direction:column; gap:12px; }
+.doc-vista-cab{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.doc-vista-cab .volver{ padding:4px 0; }
+.doc-vista-cab .btn .ic{ width:16px; height:16px; }
+@media (max-width:899px){ .doc-vista-cab{ justify-content:flex-end; } }
+.doc-hoja{ background:#fff; color:var(--ink); border:1px solid var(--line); border-radius:12px; padding:18px; box-shadow:var(--sombra); }
+.doc-enc{ display:flex; align-items:baseline; justify-content:space-between; gap:10px; padding-bottom:8px; border-bottom:2px solid var(--accent); }
+.doc-marca{ font-size:20px; font-weight:800; letter-spacing:-.02em; color:var(--ink); }
+.doc-marca span{ color:var(--accent); }
+.doc-titulo{ font-size:15px; font-weight:700; text-align:right; }
+.doc-datos{ display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:10px; margin:12px 0 4px; }
+.doc-datos small{ display:block; font-size:10.5px; letter-spacing:.04em; text-transform:uppercase; color:var(--ink-soft); }
+.doc-datos b{ font-size:13.5px; overflow-wrap:anywhere; }
+@media (max-width:899px){ .doc-datos{ grid-template-columns:repeat(2, minmax(0,1fr)); } .doc-hoja{ padding:12px; } }
+.doc-sub{ font-size:12.5px; color:var(--ink-soft); margin:10px 0; }
+.doc-sub .baja, .doc-tabla .baja{ color:var(--accent); font-weight:700; }
+.doc-sub .sube, .doc-tabla .sube{ color:#b7791f; font-weight:700; }
+.doc-sala{ margin:16px 0 6px; font-size:15px; font-weight:700; }
+.doc-sala small{ font-weight:500; color:var(--ink-soft); font-size:13px; }
+.doc-tabla{ overflow-x:auto; -webkit-overflow-scrolling:touch; }
+.doc-tabla table{ border-collapse:collapse; width:100%; font-size:13px; }
+.doc-tabla th{ background:#eef3fb; text-align:right; font-weight:700; padding:6px 8px; white-space:nowrap; }
+.doc-tabla th:first-child, .doc-tabla td:first-child{ text-align:left; }
+.doc-tabla th small{ display:block; font-weight:500; color:var(--ink-soft); font-size:11px; }
+.doc-tabla td{ padding:6px 8px; border-bottom:1px solid var(--line); text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; }
+.doc-tabla td:first-child{ white-space:normal; min-width:140px; }
+.doc-tabla td small{ margin-left:4px; font-size:11px; }
+.doc-tabla td.nada, .doc-tabla td.sigue{ color:var(--ink-mute); }
+.doc-tabla tr.total td{ border-bottom:0; font-weight:700; }
+.aviso.ok{ color:var(--accent); }
+
+/* Dry Log en la computadora: pasos 2 (la lectura) y 3 (el equipo), con el mismo estilo de los pasos de su diseño. */
+.dl-web .dl-tel-aviso, .dl-paso .dl-tel-aviso{ margin:0 0 4px; }
+.dl-web-forma{ display:grid; grid-template-columns:1.1fr 1.4fr .8fr 1.4fr; gap:12px; align-items:end; margin-top:6px; }
+.dl-web-n{ display:flex; align-items:center; gap:6px; }
+.dl-web-n input{ width:100%; font-weight:700; font-size:18px; }
+.dl-web-n span{ font-weight:700; color:var(--ink-soft); }
+.dl-web-foto input{ padding:9px 8px; font-size:13px; height:auto; }
+.dl-web-foto i{ font-style:normal; font-weight:500; color:var(--ink-mute); }
+.dl-web .dl-compara{ margin-top:2px; }
+.dl-web-hoy{ display:flex; flex-direction:column; gap:2px; padding:8px 12px; border:1px solid var(--line); border-radius:12px; }
+.dl-web-hoy small{ font-size:12px; font-weight:700; color:var(--ink-soft); text-transform:uppercase; letter-spacing:.04em; }
+.dl-web-hoy .dl-dia-l{ padding-left:0; }
+.dl-web-hoy .dl-dia-l:first-of-type{ border-top:0; }
+.dl-pie-der{ display:flex; gap:10px; margin-left:auto; }
+.dl-web-eq{ max-width:640px; }
+.dl-leido-hoy{ display:inline-flex; align-items:center; gap:4px; color:var(--accent); font-weight:600; }
+.dl-leido-hoy .ic{ width:14px; height:14px; }
+@media (max-width:1100px){ .dl-web-forma{ grid-template-columns:1fr 1fr; } }
+
+/* Documents · Dry Log con SU estilo ("Daily Drying Log", 14-oct): título grande, datos del trabajo, gráfica, tablas por nivel. */
+.dlr-top{ display:flex; align-items:baseline; justify-content:space-between; gap:10px; padding-bottom:8px; border-bottom:1px solid var(--line2); }
+.dlr-etq{ font-size:14px; font-weight:700; color:var(--ink-soft); }
+.dlr-t{ margin:14px 0 8px; font-size:28px; font-weight:800; letter-spacing:-.01em; color:var(--ink); }
+.dlr-info{ display:grid; grid-template-columns:1fr 1fr; gap:4px 16px; font-size:13.5px; margin-bottom:12px; }
+.dlr-info div{ display:flex; gap:8px; min-width:0; }
+.dlr-info b{ flex:none; width:88px; }
+.dlr-info span{ min-width:0; overflow-wrap:anywhere; }
+.dlr-graf{ border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:12px; }
+.dlr-graf h3{ margin:0 0 4px; font-size:15px; }
+.dlr-svg{ display:block; width:100%; height:auto; }
+.dlr-nivel{ margin:14px 0 0; padding:7px 10px; border-radius:6px 6px 0 0; background:#e8f0ff; color:var(--accent); font-weight:800; font-size:15px; }
+.dlr-tabla th{ text-align:left; }
+.dlr-tabla th.n, .dlr-tabla td.n{ text-align:center; }
+.dlr-tabla td{ text-align:left; }
+.dlr-foto{ width:52px; }
+.dlr-foto img, .dlr-sinfoto{ display:block; width:40px; height:28px; object-fit:cover; border-radius:3px; background:var(--bg2); }
+.dlr-foto small{ display:block; font-size:9.5px; color:var(--ink-soft); }
+.dlr-pie{ display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:14px; padding-top:10px; border-top:1px solid var(--line2); font-size:13px; }
+.dlr-pie > div + div{ border-left:1px solid var(--line2); padding-left:16px; }
+.dlr-pie p{ margin:4px 0 0; color:var(--ink); }
+.dlr-nota{ font-size:11.5px; color:var(--ink-soft); margin:12px 0 0; }
+@media (max-width:899px){ .dlr-t{ font-size:22px; } .dlr-info{ grid-template-columns:1fr; } .dlr-pie{ grid-template-columns:1fr; } .dlr-pie > div + div{ border-left:0; padding-left:0; } }
+
+/* Dry Log · la lectura con SU diseño (14-oct): "Scan <cuarto>", la foto, "Reading detected" con el número grande. */
+.dl-lec{ display:flex; flex-direction:column; gap:10px; padding:12px; }
+.dl-lec-t{ margin:6px 0 0; font-size:24px; font-weight:800; letter-spacing:-.01em; color:var(--ink); }
+.dl-lec-sub{ margin:-4px 0 2px; font-size:14px; color:var(--ink-soft); }
+.dl-lec .dl-visor-foto{ border-radius:12px; background:#000; }
+.dl-lec .dl-visor-foto img{ width:100%; height:100%; object-fit:cover; display:block; }
+.dl-det{ display:flex; align-items:center; gap:12px; padding:12px 14px; border-radius:12px; background:#ecf8f0; }
+.dl-det-ic{ flex:none; width:34px; height:34px; border-radius:50%; display:grid; place-items:center; background:#22a35a; color:#fff; font-weight:800; font-size:18px; }
+.dl-det-ic .ic{ width:20px; height:20px; stroke-width:3; }
+.dl-det-txt{ flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.dl-det-txt b{ font-size:16px; color:#15803d; }
+.dl-det-sub{ font-size:12.5px; color:var(--ink-soft); line-height:1.3; }
+.dl-det .dl-compara{ margin:0; font-size:12.5px; }
+.dl-det .dl-compara:not([hidden]) + .dl-det-sub{ display:none; }
+.dl-det-n{ flex:none; display:flex; align-items:baseline; padding-left:14px; border-left:1px solid #cfe9d8; }
+.dl-det-n input{ font-size:34px; font-weight:800; color:var(--ink); border:0; background:transparent; padding:0; width:2.4ch; text-align:right; font-variant-numeric:tabular-nums; }
+.dl-det-n span{ font-size:30px; font-weight:800; color:var(--ink); }
+.dl-det.sin{ background:#fff6e5; }
+.dl-det.sin .dl-det-ic{ background:#d97706; }
+.dl-det.sin .dl-det-txt b{ color:#b45309; }
+.dl-det.sin .dl-det-n{ border-left-color:#f3d9a8; }
+.dl-det.sin .dl-det-n input{ border-bottom:2px solid #d97706; }
+.dl-punto{ display:flex; align-items:center; gap:8px; width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:10px; background:var(--card); font:inherit; font-size:14px; color:var(--ink); text-align:left; cursor:pointer; }
+.dl-punto > .ic{ width:18px; height:18px; color:var(--accent); flex:none; }
+.dl-punto span{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dl-punto b{ display:inline-flex; align-items:center; gap:4px; color:var(--accent); font-size:13px; }
+.dl-punto b .ic{ width:14px; height:14px; }
+.dl-lec .dl-botones .btn .ic{ width:18px; height:18px; }
+.dl-lec .dl-mat{ grid-template-columns:minmax(0,1fr) minmax(0,1.3fr); }
+.dl-lec .dl-mini select, .dl-lec .dl-mini input{ width:100%; min-width:0; }
+.dl-lec .aviso:empty{ display:none; }
+.dl-det-txt b{ white-space:nowrap; font-size:15.5px; }
+.dl-det-sub{ font-size:12px; }
+.dl-det-n input{ font-size:30px; }
+.dl-det-n span{ font-size:26px; }
+/* Su pedido (14-oct): con la cabecera del cliente a la vista, la lectura se compacta para caber. */
+@media (max-width:899px){
+  .dl-lec{ gap:8px; padding:10px; }
+  .dl-lec-t{ font-size:20px; margin-top:2px; }
+  .dl-lec-sub{ font-size:13px; margin:-4px 0 0; }
+  .dl-det{ padding:9px 12px; }
+  .dl-lec .dl-mini select, .dl-lec .dl-mini input{ height:40px; }
+  .dl-lec .dl-botones .btn{ min-height:44px; }
+}
+/* Equipo justo después de guardar la lectura (su pedido del 14-oct): una línea con lo guardado y "otro punto". */
+.dl-eq-ok{ display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:10px; background:var(--accent-soft); color:var(--ink); font-size:13.5px; }
+.dl-eq-ok > .ic{ width:18px; height:18px; flex:none; color:var(--accent); stroke-width:3; }
+.dl-eq-ok span{ min-width:0; }
+.dl-eq .dl-otro{ padding:8px 10px; }
+.dl-eq .dl-otro span{ font-size:13.5px; }
+.dl-eq-ok span{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dl-eq-otro{ flex:none; padding:6px 10px; border:1px solid var(--accent); border-radius:99px; background:var(--card); color:var(--accent); font:inherit; font-size:12.5px; font-weight:700; cursor:pointer; }
+.dl-eq-otro.pend{ background:var(--accent); color:#fff; }

@@ -20,9 +20,9 @@ ok('el número escrito: 18, 18.5, "18,5"; nada raro (letras, dos decimales, más
 { const g = DL.guiaEnVideo(1920, 1080, 400, 400, { x: 56, y: 113, w: 288, h: 170 });   // video ancho en un cuadro cuadrado ("cover")
   ok('el cuadro guía se pasa bien a la foto (el video se ve recortado)', Math.abs(g.x - 571.2) < 1 && Math.abs(g.w - 777.6) < 1 && Math.abs(g.y - 305.1) < 1); }
 const js = fs.readFileSync(new URL('../docs/drylog.js', import.meta.url), 'utf8');
-ok('textos de su diseño: No dry logs yet / Start Dry Log / Step 1 of 3 / Where are you taking the reading?', ['No dry logs yet', 'Start by scanning the first meter reading for this project.', 'Start Dry Log', "You'll choose a level, room, material and measurement point next.", 'New Dry Log · Step 1 of 3', 'Where are you taking the reading?', 'First select a level, then choose a room to take a moisture reading.', '1. Select level', '2. Select room'].every(t => js.includes(t)));
+ok('textos de su diseño: No dry logs yet / Start Dry Log / Step 1 of 3 / Where are you taking the reading?', ['No dry logs yet', 'Start by scanning the first meter reading for this project.', 'Start Dry Log', "You'll choose a level, room, material and measurement point next.", 'New Dry Log · ', 'Step 1 of 3', 'Where are you taking the reading?', 'First select a level, then choose a room to take a moisture reading.', '1. Select level', '2. Select room'].every(t => js.includes(t)));
 ok('Continue apagado hasta escoger el cuarto; cambiar de nivel borra el cuarto escogido', /data-dl="paso2"\$\{CUARTO \? '' : ' disabled'\}/.test(js) && /if\(NIVEL !== el\.dataset\.dlNivel\)\{ NIVEL = el\.dataset\.dlNivel; CUARTO = null; \}/.test(js));
-ok('textos de sus diseños del teléfono', ['Reading detected:', 'Confirm the number matches the meter.', 'Retake Photo', 'Save Reading', 'Reading saved for', 'Saved Reading', 'Equipment for', 'Record equipment before moving to another room.', 'Add Equipment', 'No Equipment', 'records zero for'].every(t => js.includes(t)));
+ok('textos de sus diseños del teléfono', ['Reading detected', 'Moisture meter value captured successfully.', 'Point the camera at your moisture meter and take a photo.', 'Scan ', 'Retake', 'Save Reading', 'Reading saved for', 'Saved Reading', 'Equipment for', 'Record equipment before moving to another room.', 'Add Equipment', 'No Equipment', 'records zero for'].every(t => js.includes(t)));
 ok('el número lo lee NUESTRO lector (gratis, en el teléfono) y la persona lo puede corregir antes de guardar', /import \{ leerPantalla \} from '\.\/lector\.js/.test(js) && /id="dlValor"/.test(js) && /corregido: !!\(FOTO\.lectura && FOTO\.lectura\.valor !== valor\)/.test(js));
 ok('la foto de la lectura se guarda en Photos, en su piso y cuarto (es la prueba)', /fotos\.subirCopia\(archivo, \{ nivel_id: FOTO\.nivel, cuarto_id: FOTO\.cuarto \}\)/.test(js) && /foto_id: foto \? foto\.id : null/.test(js));
 ok('se comprueba que el servidor de verdad guardó', /if\(!filas\.length\) throw new Error/.test(js));
@@ -31,7 +31,9 @@ ok('cada paso tiene Back abajo', (js.match(/class="dl-atras"/g) || []).length >=
 const idx = fs.readFileSync(new URL('../docs/index.html', import.meta.url), 'utf8');
 ok('los íconos de los cuartos existen en la app', ['dl-hoja', 'dl-cocina', 'dl-comedor', 'dl-sofa', 'dl-puerta', 'dl-cama', 'dl-bano', 'dl-lavar', 'dl-cuarto'].every(n => idx.includes('id="i-' + n + '"')));
 const css = fs.readFileSync(new URL('../docs/estilo.css', import.meta.url), 'utf8').split('===== Dry Logs (14-oct')[1] || 'x';
-ok('el CSS de Dry Logs no usa verde ni position:fixed', !/#16a34a|green|var\(--ok\)|position:\s*fixed/.test(css));
+ok('el CSS de Dry Logs no usa position:fixed', !/position:\s*fixed/.test(css));
+// Su regla era "nada verde"; su diseño del 14-oct de la lectura pone verde SOLO en la caja "Reading detected" (.dl-det).
+ok('verde solo en "Reading detected" (su diseño), en ningún otro lado del Dry Log', !css.split('\n').filter(l => !/^\.dl-det/.test(l.trim())).some(l => /#16a34a|green|var\(--ok\)|#22a35a|#15803d|#ecf8f0/.test(l)));
 // Equipo del cuarto (su diseño del 14-oct, 4 of 5)
 { const filas = [
     { tipo:'Fans / Air Movers', cantidad:3, dia:'2026-10-14', created_at:'2026-10-14T15:00:00Z' },
