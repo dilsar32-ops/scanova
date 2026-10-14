@@ -6,11 +6,11 @@
 // TELÉFONO (su diseño del 14-oct): Dry Logs abre con la cámara prendida. Arriba "Dry Logs" y en qué cuarto va
 // (Room 1 of 4), luego Level y Room para escoger dónde, y la cámara llena lo que sobra. El botón azul de cámara de
 // abajo (el de siempre) toma la foto directo. Lo que sigue después de la foto espera su siguiente diseño.
-import { $, $$, authFetch, registrarAtras, preguntar } from './app.js?v=2026-10-14-18';
-import { RESTRICCIONES, errorCamara, puedeCamaraPropia } from './camara.js?v=2026-10-14-18';
-import * as fotos from './fotos.js?v=2026-10-14-18';
-import { leerPantalla } from './lector.js?v=2026-10-14-18';
-import * as R from './registro.js?v=2026-10-14-18';
+import { $, $$, authFetch, registrarAtras, preguntar } from './app.js?v=2026-10-14-24';
+import { RESTRICCIONES, errorCamara, puedeCamaraPropia } from './camara.js?v=2026-10-14-24';
+import * as fotos from './fotos.js?v=2026-10-14-24';
+import { leerPantalla } from './lector.js?v=2026-10-14-24';
+import * as R from './registro.js?v=2026-10-14-24';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -44,9 +44,10 @@ async function cargarRegistro(forzar){
   try{
     const q = (t) => authFetch('/rest/v1/' + t + '?trabajo_id=eq.' + encodeURIComponent(id) + '&order=dia.asc,created_at.asc&limit=5000').then(r => r.ok ? r.json() : []).catch(() => []);
     const [l, e] = await Promise.all([q('fotos_drylog_lecturas'), q('fotos_drylog_equipos')]);
-    if(!T || T.id !== id) return;
-    LECT = Array.isArray(l) ? l : []; EQUI = Array.isArray(e) ? e : []; REG_DE = id;
+    if(T && T.id === id){ LECT = Array.isArray(l) ? l : []; EQUI = Array.isArray(e) ? e : []; REG_DE = id; }
   }finally{ REG_CARGANDO = false; }
+  // Si mientras cargaba se cambió de proyecto, ahora se carga el que está abierto (antes se quedaba sin cargar).
+  if(T && T.id !== id){ cargarRegistro(); return; }
   if(T && T.id === id){ if(AUTO && PANTALLA === 'cam'){ CUARTO = null; } pintarAqui(); }
 }
 const HOY = () => hoyLocal();
@@ -60,6 +61,9 @@ const esCompu = () => typeof matchMedia === 'function' && matchMedia('(min-width
 // Su regla para la WEB: si en Photos ya se crearon niveles y cuartos, Dry Logs abre directo en escoger nivel y
 // cuarto (su foto 2). Sin cuartos todavía: "No dry logs yet" con solo Start Dry Log.
 export const abreEnPaso1 = (web, cuartos, volvio) => !!web && (cuartos || []).length > 0 && !volvio;
+// Su pedido (14-oct, "en la carpeta de Dry Log no veo los datos"): en la computadora, si el proyecto ya tiene algo
+// anotado, Dry Logs abre en EL REGISTRO (todos los días, cuarto por cuarto); "+ New Reading" lleva al paso 1.
+export const abreEnRegistro = (web, lect, equi) => !!web && ((lect || []).length + (equi || []).length) > 0;
 // TELÉFONO: con cuartos ya creados, Dry Logs abre directo en la cámara (su diseño); sin cuartos, la portada.
 export const abreEnCamara = (web, cuartos) => !web && (cuartos || []).length > 0;
 export const PASOS_TEL = 5;
@@ -85,6 +89,9 @@ export function pintar(t, niveles, cuartos){
 function pintarAqui(){
   const c = caja(); if(!c || !T) return;
   const web = esCompu();
+  // En la computadora se espera a saber si ya hay registro (si no, abría en el paso 1 y luego no se veían los datos).
+  if(PANTALLA === 'vacio' && web && REG_DE !== T.id){ c.dataset.dlPantalla = 'cargando'; c.innerHTML = '<div class="card dl-paso"><p class="dl-paso-sub">Loading dry log…</p></div>'; return; }
+  if(PANTALLA === 'vacio' && abreEnRegistro(web, LECT, EQUI)) PANTALLA = 'registro';
   if(PANTALLA === 'vacio' && abreEnPaso1(web, CUARTOS, VOLVIO)) PANTALLA = 'paso1';
   if(PANTALLA === 'vacio' && abreEnCamara(web, CUARTOS)) PANTALLA = 'cam';
   const TEL = ['cam', 'lectura', 'guardado', 'equipo', 'dia'];
@@ -105,7 +112,7 @@ function pintarAqui(){
   if(PANTALLA === 'lectura' && c.dataset.dlPantalla === 'lectura' && c.querySelector('#dlValor')) return;
   if(PANTALLA !== 'cam' && PANTALLA !== 'guardado') apagarCam();
   c.dataset.dlPantalla = PANTALLA;
-  c.innerHTML = PANTALLA === 'paso1' ? paso1Html() : PANTALLA === 'paso2' ? paso2Html() : PANTALLA === 'paso3' ? paso3Html() : PANTALLA === 'cam' ? camHtml() : PANTALLA === 'lectura' ? lecturaHtml() : PANTALLA === 'guardado' ? guardadoHtml() : PANTALLA === 'equipo' ? equipoHtml() : PANTALLA === 'dia' ? diaHtml() : vacioHtml();
+  c.innerHTML = PANTALLA === 'paso1' ? paso1Html() : PANTALLA === 'paso2' ? paso2Html() : PANTALLA === 'paso3' ? paso3Html() : PANTALLA === 'cam' ? camHtml() : PANTALLA === 'lectura' ? lecturaHtml() : PANTALLA === 'guardado' ? guardadoHtml() : PANTALLA === 'equipo' ? equipoHtml() : PANTALLA === 'dia' ? diaHtml() : PANTALLA === 'registro' ? registroHtml() : vacioHtml();
   if(PANTALLA === 'cam'){ medirTel(); encenderCam(); }
   else if(PANTALLA === 'lectura') medirTel();
   else if(PANTALLA === 'guardado'){
@@ -260,14 +267,22 @@ function camHtml(){
 // Del día 2 en adelante: qué punto toca medir (el de la visita anterior) y cuánto marcó, para medir en el mismo lugar.
 function antesHtml(){
   if(!CUARTO) return '<p class="dl-antes" hidden></p>';
-  const hoy = HOY(), pend = R.puntosPendientes(LECT, CUARTO, hoy), hechos = R.lecturasDelDia(LECT, CUARTO, hoy).length;
+  const hoy = HOY(), pend = R.puntosPendientes(LECT, CUARTO, hoy);
   if(pend.length){ const p = pend[0], v = R.visitaAnterior(LECT, CUARTO, hoy);
     return `<p class="dl-antes">${IC('dl-leer')}<span>Measure <b>${esc(p.nombre)}</b> · ${esc(fmtValor(p.valor))}% on ${esc(R.fechaCorta(v.dia))}${pend.length > 1 ? ` <small>+${pend.length - 1} more</small>` : ''}</span></p>`; }
-  if(hechos) return `<p class="dl-antes listo">${IC('check')}<span>${hechos} reading${hechos === 1 ? '' : 's'} taken here today</span></p>`;
   return '<p class="dl-antes" hidden></p>';
 }
 const fmtValor = (v) => (Math.round(Number(v) * 10) / 10).toString();
 // ---------- TELÉFONO: después de la foto (su diseño 2) y lectura guardada + equipo (su diseño 3) ----------
+// Pura (su pedido del 14-oct): en el teléfono se puede leer el MISMO material otra vez en el mismo cuarto el mismo día
+// (otra pared, otro lugar). Para que una lectura no tape a la otra, la segunda queda como "#2", la tercera "#3"…
+export function ubicLibre(lecturasHoy, material, ubic){
+  const usadas = new Set((lecturasHoy || []).map(f => R.clavePunto(f)));
+  const base = String(ubic || '').trim();
+  if(!usadas.has(R.clavePunto({ material, ubicacion: base }))) return base;
+  for(let n = 2; n < 100; n++){ const u = (base ? base + ' ' : '') + '#' + n; if(!usadas.has(R.clavePunto({ material, ubicacion: u }))) return u; }
+  return base + ' #' + Date.now();
+}
 export const MATERIALES_DL = ['Drywall', 'Baseboard', 'Studs', 'Plaster', 'Cabinet', 'Carpet', 'Carpet pad', 'Wood floor', 'Subfloor', 'Tile', 'Concrete', 'Insulation', 'Other'];
 const pad2 = (n) => String(n).padStart(2, '0');
 export const hoyLocal = (d = new Date()) => d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
@@ -287,8 +302,6 @@ let GUARDADA = null;  // la última lectura guardada (para la tarjeta "Saved Rea
 let MATERIAL = 'Drywall', UBIC = '', AVISO_TEL = '', OCUPADO_TEL = false;
 const nombreDe = (lista, id) => { const x = lista.find(y => y.id === id); return x ? x.nombre : ''; };
 // Su diseño (14-oct): "Scan <cuarto>", la foto, la caja "Reading detected" con el número grande, Retake / Save Reading.
-// Material y dónde (los necesita el reporte y el día 2) van en una línea; el día 1 sale abierta para escribirlos.
-let PUNTO_ABIERTO = false;
 function lecturaHtml(){
   const r = FOTO && FOTO.lectura, valor = r ? r.texto : '';
   const cuarto = nombreDe(CUARTOS, FOTO ? FOTO.cuarto : CUARTO);
@@ -308,25 +321,14 @@ function lecturaHtml(){
     </div>
   </div>`;
 }
-// Lo de abajo de la lectura (su pedido del 14-oct): "Continue" (guarda y va al equipo) y "+ Add another reading".
-// Material y dónde solo salen cuando hacen falta: al tocar "Add another reading", cuando ya hay otra lectura de hoy en
-// el cuarto (para distinguir los puntos) o, del día 2, ya escritos en una línea con el punto de la visita anterior.
-const campoPunto = () => {
-  const cuarto = FOTO ? FOTO.cuarto : CUARTO, otroHoy = R.lecturasDelDia(LECT, cuarto, HOY()).length > 0;
-  return { campos: PUNTO_ABIERTO || otroHoy, linea: !PUNTO_ABIERTO && !otroHoy && !!(FOTO && FOTO.prellenado) };
-};
+// Lo de abajo de la lectura (su diseño del 14-oct, la captura): Material siempre a la vista, "Take next reading"
+// (guarda y abre la lista de materiales) y "Continue" (guarda y va al equipo).
 function accionesLecturaHtml(){
-  const { campos, linea } = campoPunto(), cuarto = FOTO ? FOTO.cuarto : CUARTO;
-  const quedan = R.puntosPendientes(LECT, cuarto, HOY()).filter(p => p.clave !== R.clavePunto({ material: MATERIAL, ubicacion: UBIC }));
-  const otro = campos || linea
-    ? `<button type="button" class="btn btn-outline" data-dl-siguiente>${IC('camara')}${quedan.length ? 'Next point' : 'Take next reading'}</button>`
-    : `<button type="button" class="btn btn-outline" data-dl-otra>${IC('mas')}Add another reading</button>`;
-  return `${campos ? `<div class="dl-mat">
-      <label class="dl-mini"><small>Material</small><select id="dlMaterial">${(MATERIALES_DL.includes(MATERIAL) ? MATERIALES_DL : [MATERIAL, ...MATERIALES_DL]).map(m => `<option${m === MATERIAL ? ' selected' : ''}>${esc(m)}</option>`).join('')}</select></label>
-      <label class="dl-mini"><small>Where</small><input id="dlUbic" type="text" maxlength="120" placeholder="East wall" value="${esc(UBIC)}"></label>
-    </div>` : linea ? `<button type="button" class="dl-punto" data-dl-otra>${IC('dl-leer')}<span>${esc(R.nombrePunto({ material: MATERIAL, ubicacion: UBIC }))}</span><b>${IC('lapiz')}Edit</b></button>` : ''}
+  const ops = MATERIALES_DL.includes(MATERIAL) ? MATERIALES_DL : [MATERIAL, ...MATERIALES_DL];
+  return `<label class="dl-mat-sel"><small>Material</small><select id="dlMaterial"><option value="" disabled hidden>Choose material…</option>${ops.map(m => `<option${m === MATERIAL ? ' selected' : ''}>${esc(m)}</option>`).join('')}</select></label>
+    ${UBIC ? `<p class="dl-punto-txt">${IC('dl-leer')}Same point as last visit: <b>${esc(R.nombrePunto({ material: MATERIAL, ubicacion: UBIC }))}</b></p>` : ''}
     <p class="aviso" id="dlAviso"></p>
-    <div class="dl-botones">${otro}<button type="button" class="btn btn-accent" data-dl-guardar>Continue</button></div>`;
+    <div class="dl-botones"><button type="button" class="btn btn-outline" data-dl-siguiente>${IC('camara')}Take next reading</button><button type="button" class="btn btn-accent" data-dl-guardar>Continue</button></div>`;
 }
 function pintarAcciones(){ const a = $('#panel-secado .dl-lec-acc'); if(a){ a.innerHTML = accionesLecturaHtml(); medirTel(); } }
 // Lo que marcó la vez pasada este mismo punto (material + dónde): "Last: 45% on Oct 13 ▼ 5".
@@ -449,7 +451,7 @@ function avanzar(nombre, hecho){
   const sig = siguienteCuarto(NIVELES, CUARTOS, CUARTO, recorrido());
   GUARDADA = null;
   if(sig){ NIVEL = sig.nivel_id; CUARTO = sig.id; AVISO_TEL = hecho + ' Next: ' + sig.nombre + '.'; PANTALLA = 'cam'; }
-  else { AVISO_TEL = hecho; PANTALLA = 'dia'; }   // era el último cuarto: el resumen del día
+  else { AVISO_TEL = hecho; PANTALLA = esCompu() ? 'registro' : 'dia'; }   // era el último cuarto: el resumen del día (en la computadora, el registro)
   pintarAqui();
   const m = $('#main'); if(m && PANTALLA === 'dia') m.scrollTop = 0;
 }
@@ -497,6 +499,7 @@ function atrasTel(){
   if(PANTALLA === 'guardado'){ PANTALLA = 'cam'; pintarAqui(); return true; }
   if(PANTALLA === 'equipo'){ PANTALLA = 'cam'; AVISO_TEL = ''; pintarAqui(); return true; }
   if(PANTALLA === 'dia'){ PANTALLA = 'cam'; AVISO_TEL = ''; pintarAqui(); return true; }
+  if(PANTALLA === 'registro'){ PANTALLA = 'dia'; pintarAqui(); return true; }
   return false;
 }
 // ---------- TELÉFONO: el resumen del día (al terminar el último cuarto, o tocando "Room X of N") ----------
@@ -525,6 +528,40 @@ function diaHtml(){
     <div class="card dl-dia"><p class="dl-dia-res">${hechos} of ${lista.length} room${lista.length === 1 ? '' : 's'} read today</p>${filas || '<p class="vacio">No rooms yet.</p>'}</div>
     <p class="aviso" id="dlAviso"></p>
     <div class="dl-botones"><button type="button" class="btn btn-outline" data-dl-ir="cam">${esCompu() ? 'Back to rooms' : 'Back to camera'}</button><button type="button" class="btn btn-accent" data-dl-reporte>${IC('doc')}Dry Log Report</button></div>
+    ${R.diasDelRegistro(LECT, EQUI).length ? '<button type="button" class="enlace-editar dl-ver-todo" data-dl-ir="registro">See all days</button>' : ''}
+  </div>`;
+}
+// ---------- EL REGISTRO (computadora y teléfono): todos los días, nivel por nivel y cuarto por cuarto ----------
+// Cada punto de medida es una fila y cada día una columna (con cuánto bajó desde la visita anterior); abajo, el
+// equipo que había ese día. Los cuartos sin nada anotado se nombran al final, sin tabla vacía.
+export function registroHtml(){
+  const dias = R.diasDelRegistro(LECT, EQUI), porDia = R.equipoPorDia(EQUI), hoy = HOY(), web = esCompu();
+  const conDatos = (c) => LECT.some(f => f.cuarto_id === c.id) || !!porDia[c.id];
+  const rango = dias.length ? R.fechaLarga(dias[0].dia) + (dias.length > 1 ? ' – ' + R.fechaLarga(dias[dias.length - 1].dia) : '') : '';
+  const nCuartos = CUARTOS.filter(conDatos).length;
+  const cab = dias.map(d => `<th>Day ${d.n}<small>${esc(R.fechaCorta(d.dia))}</small></th>`).join('');
+  const tabla = (c) => {
+    const filas = R.puntosDeCuarto(LECT, c.id).map(p => { let ant = null;
+      return `<tr><td class="dl-reg-p">${esc(p.nombre)}</td>${dias.map(d => { const v = p.dias[d.dia]; if(!v) return `<td class="dl-reg-v nada" data-d="${esc(R.fechaCorta(d.dia))}">—</td>`;
+        const t = ant == null ? null : R.tendencia(ant, v.valor); ant = v.valor;
+        return `<td class="dl-reg-v" data-d="${esc(R.fechaCorta(d.dia))}"><b>${esc(fmtValor(v.valor))}%</b>${t && t.tipo !== 'igual' ? `<em class="dl-tend ${t.tipo}">${esc(t.texto)}</em>` : ''}</td>`; }).join('')}</tr>`; }).join('');
+    const eq = porDia[c.id] ? `<tr class="dl-reg-eq"><td class="dl-reg-p">${IC('dl-herramientas')}Equipment</td>${dias.map(d => { const e = R.equipoEnDia(porDia, c.id, d.dia);
+        return `<td data-d="${esc(R.fechaCorta(d.dia))}">${e ? esc(R.textoEquipo(e.cuentas) || 'None') : '—'}</td>`; }).join('')}</tr>` : '';
+    return `<div class="dl-reg-tabla-w"><table class="dl-reg-tabla"><thead><tr><th>Point</th>${cab}</tr></thead><tbody>${filas || `<tr><td class="dl-reg-p" colspan="${dias.length + 1}">No readings yet</td></tr>`}${eq}</tbody></table></div>`;
+  };
+  const niveles = NIVELES.map(n => { const cs = cuartosDeNivel(CUARTOS, n.id); const con = cs.filter(conDatos), sin = cs.filter(c => !conDatos(c));
+    if(!cs.length) return '';
+    return `<h3 class="dl-sec dl-reg-nivel">${esc(n.nombre)}</h3>${con.map(c => { const leido = R.lecturasDelDia(LECT, c.id, hoy).length;
+        return `<div class="dl-reg-cuarto"><div class="dl-reg-cu-cab">${IC(iconoCuarto(c), 'dl-op-ic')}<b>${esc(c.nombre)}</b>${leido ? `<small class="dl-leido-hoy">${IC('check')}Read today</small>` : '<small class="dl-reg-falta">Not read today</small>'}</div>${tabla(c)}</div>`; }).join('')}
+      ${sin.length ? `<p class="dl-reg-sin">Nothing logged yet: ${esc(sin.map(c => c.nombre).join(', '))}</p>` : ''}`; }).join('');
+  const acc = `<button type="button" class="btn btn-outline" data-dl-reporte>${IC('doc')}View Report</button><button type="button" class="btn btn-accent" data-dl="paso1">${IC('mas')}New Reading</button>`;
+  return `<div class="card dl-paso dl-reg">
+    <div class="dl-reg-cabeza"><div><p class="dl-paso-n">Dry Log · Day ${diaNum()}</p><h2 class="dl-paso-t">Drying record</h2>
+      <p class="dl-paso-sub">${esc(rango)} · ${nCuartos} room${nCuartos === 1 ? '' : 's'} · ${LECT.length} reading${LECT.length === 1 ? '' : 's'}</p></div>
+      ${web ? `<div class="dl-reg-acc">${acc}</div>` : ''}</div>
+    ${AVISO_TEL ? `<p class="dl-tel-aviso">${IC('check')}${esc(AVISO_TEL)}</p>` : ''}
+    ${niveles || '<p class="vacio">No levels yet.</p>'}
+    ${web ? '' : `<div class="dl-botones"><button type="button" class="btn btn-outline" data-dl-ir="dia">Back</button><button type="button" class="btn btn-accent" data-dl-reporte>${IC('doc')}Dry Log Report</button></div>`}
   </div>`;
 }
 async function borrarLectura(id){
@@ -550,8 +587,18 @@ function medirTel(){
   const panel = $('#panel-secado .dl-tel'), ultimo = panel && panel.lastElementChild;
   const resto = ultimo && ultimo !== v ? ultimo.getBoundingClientRect().bottom - v.getBoundingClientRect().bottom : 0;
   const pie = parseFloat(getComputedStyle(m).paddingBottom) || 0;
-  const cabe = Math.floor(m.clientHeight - arriba - resto - pie - 2);
+  let cabe = Math.floor(m.clientHeight - arriba - resto - pie - 2);
   const minimo = PANTALLA === 'lectura' ? 140 : 220;   // en la lectura (su diseño) la foto cede espacio a la caja del número y los botones
+  // Su pedido (14-oct): después de la foto la pantalla se queda QUIETA, sin subir. Si no cabe, primero se encoge la
+  // foto; si aun así no cabe, se quita la línea "Point the camera…" y se aprietan los espacios (solo en ese caso).
+  const card = PANTALLA === 'lectura' && $('#panel-secado .dl-lec');
+  if(card){
+    card.classList.remove('apretado', 'muy-apretado');
+    const medir = () => { const top = v.getBoundingClientRect().top - (m.getBoundingClientRect().top - m.scrollTop), r = ultimo.getBoundingClientRect().bottom - v.getBoundingClientRect().bottom; return Math.floor(m.clientHeight - top - r - pie - 2); };   // la foto sube cuando se quita la línea de arriba: se vuelve a medir todo
+    if(cabe < minimo){ card.classList.add('apretado'); cabe = medir(); }
+    if(cabe < 120){ card.classList.add('muy-apretado'); cabe = medir(); }
+    if(cabe >= 60){ v.style.height = cabe + 'px'; const sobra = m.scrollHeight - m.clientHeight; if(sobra > 0) v.style.height = Math.max(60, cabe - sobra) + 'px'; m.scrollTop = 0; return; }   // quieta: nunca sube
+  }
   if(cabe >= minimo){ v.style.height = cabe + 'px'; const sobra = m.scrollHeight - m.clientHeight - sube; if(sobra > 0) v.style.height = Math.max(minimo, cabe - sobra) + 'px'; m.scrollTop = sube; }
   else { document.body.classList.remove('dl-fijo'); v.style.height = (PANTALLA === 'lectura' ? minimo : 360) + 'px'; m.scrollTop = 0; }
 }
@@ -608,7 +655,7 @@ async function disparar(){
   ponerFoto(blob, lectura);
 }
 function ponerFoto(blob, lectura){
-  PUNTO_ABIERTO = false;
+  ESPERA_MAT = null;
   // Día 2 en adelante: el punto que toca (el de la visita anterior) ya viene escrito; se puede cambiar.
   const pend = R.puntosPendientes(LECT, CUARTO, HOY())[0];
   if(pend){ MATERIAL = pend.material || MATERIAL; UBIC = pend.ubicacion || ''; }
@@ -640,19 +687,25 @@ async function enviarTel(tabla, fila){
 }
 const avisarTel = (t) => { $$('#panel-secado #dlAviso').forEach(a => { a.className = 'aviso'; a.textContent = t; }); };
 export function valorDe(txt){ const t = String(txt || '').trim().replace(',', '.'); if(!/^\d{1,3}(\.\d)?$/.test(t)) return null; const n = Number(t); return n <= 1000 ? n : null; }
+// "Take next reading" (su pedido del 14-oct): la lectura se guarda y en ese mismo momento se abre la barra de Material
+// (la misma, sin pantalla nueva). Al escoger el material — aunque sea el mismo — vuelve la cámara.
+let ESPERA_MAT = null;
+function siguienteLectura(){
+  const sel = $('#dlMaterial');
+  if(!FOTO){ if(ESPERA_MAT && sel) abrirBarra(sel); return; }   // ya se guardó: solo se vuelve a abrir la barra
+  if(valorDe(($('#dlValor') || {}).value) == null || OCUPADO_TEL){ guardarLectura(true); return; }   // sin número: el mismo aviso de siempre
+  ESPERA_MAT = guardarLectura(true);   // lee el material de la barra ANTES de dejarla vacía
+  ESPERA_MAT.then(ok => { if(!ok){ ESPERA_MAT = null; if(sel) sel.value = MATERIAL; } });   // guardado por dentro: no se enseña nada (su pedido)
+  if(sel){ sel.value = ''; abrirBarra(sel); }
+}
+function abrirBarra(sel){ try{ if(typeof sel.showPicker === 'function'){ sel.showPicker(); return; } }catch{} try{ sel.focus({ preventScroll: true }); }catch{ sel.focus(); } const m = $('#main'); if(m && document.body.classList.contains('dl-fijo')) m.scrollTop = 0; }
 async function guardarLectura(siguiente){
   if(OCUPADO_TEL || !FOTO) return;
   const valor = valorDe($('#dlValor').value);
   if(valor == null){ avisarTel('Type the reading as a number (like 18 or 18.5).'); $('#dlValor').focus(); return; }
-  if($('#dlMaterial')) MATERIAL = $('#dlMaterial').value; if($('#dlUbic')) UBIC = ($('#dlUbic').value || '').trim();
-  // Material y dónde solo si se vieron (si no, la lectura queda como "Reading": no se inventa un material).
-  const { campos, linea } = campoPunto(), conPunto = campos || linea;
-  const mat = conPunto ? MATERIAL : null, ubi = conPunto ? (UBIC || null) : null;
-  // Dos lecturas de hoy en el mismo punto: la segunda taparía la primera en el reporte. Se pide decir dónde.
-  if(R.lecturasDelDia(LECT, FOTO.cuarto, HOY()).some(f => R.clavePunto(f) === R.clavePunto({ material: mat, ubicacion: ubi }))){
-    if(!campos){ PUNTO_ABIERTO = true; pintarAcciones(); }
-    avisarTel('This room already has a reading here today. Write where this one is (like North wall).'); const u = $('#dlUbic'); if(u) u.focus(); return;
-  }
+  if($('#dlMaterial')) MATERIAL = $('#dlMaterial').value;
+  // El material es el que se ve en la caja. El mismo material otra vez hoy en el cuarto no tapa al anterior: queda "#2".
+  const mat = MATERIAL, ubi = ubicLibre(R.lecturasDelDia(LECT, FOTO.cuarto, HOY()), mat, UBIC) || null;
   OCUPADO_TEL = true; const bot = siguiente ? '[data-dl-siguiente]' : '[data-dl-guardar]', b = $(bot), antes = b ? b.innerHTML : ''; if(b){ b.disabled = true; b.textContent = 'Saving…'; }
   try{
     // La foto va a Photos, a su piso y cuarto: es la prueba de la lectura.
@@ -666,9 +719,9 @@ async function guardarLectura(siguiente){
     LECT.push(fila);
     GUARDADA = { ...fila, texto: String(valor), url: FOTO.url };
     FOTO = null;
-    if(siguiente){ AVISO_TEL = 'Saved ' + fmtValor(valor) + '% · ' + R.nombrePunto(fila) + '. Take the next reading in ' + (cuarto_nombre || 'this room') + '.'; PANTALLA = 'cam'; pintarAqui(); }
+    if(siguiente){ AVISO_TEL = ''; return true; }   // su pedido (14-oct): se guarda por dentro, sin letrero; la cámara queda libre   // la barra de Material ya está abierta (ver data-dl-siguiente)
     else abrirEquipo();   // su pedido (14-oct): "Continue" va directo al equipo, sin pantalla de en medio
-  }catch(e){ avisarTel('Not saved: ' + (e.message || e)); }
+  }catch(e){ avisarTel('Not saved: ' + (e.message || e)); return false; }
   finally{ OCUPADO_TEL = false; const b2 = $(bot); if(b2){ b2.disabled = false; b2.innerHTML = antes; } }
 }
 // "No Equipment": se anota cero para el cuarto y se pasa al siguiente (su diseño).
@@ -716,7 +769,11 @@ export function conectar(){
   document.addEventListener('keydown', (e) => { if(e.key === 'Enter' && e.target && e.target.id === 'dlEqNuevo'){ e.preventDefault(); agregarTipo(); } });
   registrarAtras(atrasTel);
   document.addEventListener('input', (e) => { if(e.target && e.target.id === 'dlValor'){ if(e.target.closest('.dl-num')) anchoNumero(e.target); repintarComparar(); } if(e.target && e.target.id === 'dlUbic') repintarComparar(); });
-  document.addEventListener('change', (e) => { if(e.target && e.target.id === 'dlMaterial') repintarComparar(); });
+  document.addEventListener('change', (e) => { if(!e.target || e.target.id !== 'dlMaterial') return;
+    if(PANTALLA === 'lectura'){ if(!e.target.value) return; MATERIAL = e.target.value; const p = R.puntosPendientes(LECT, FOTO ? FOTO.cuarto : CUARTO, HOY()).find(x => String(x.material || '') === MATERIAL); UBIC = p ? (p.ubicacion || '') : '';
+      if(ESPERA_MAT){ const espera = ESPERA_MAT; espera.then(ok => { if(!ok || ESPERA_MAT !== espera) return; ESPERA_MAT = null; PANTALLA = 'cam'; pintarAqui(); }); return; }   // escogió el material de la siguiente: la cámara
+      pintarAcciones(); }
+    repintarComparar(); });
   document.addEventListener('visibilitychange', () => { if(document.hidden) apagarCam(); else if((PANTALLA === 'cam' || PANTALLA === 'guardado') && $('#dlVideo') && $('#dlVideo').offsetParent) encenderCam(); });
   // Al girar el teléfono (en los grandes, de lado ya es "computadora") se vuelve a escoger la pantalla que toca.
   let ancho = esCompu();
@@ -730,9 +787,8 @@ export function conectar(){
     if((el = q('[data-dl-cam]'))){ const a = el.dataset.dlCam;
       if(a === 'telefono') camaraDelTelefono(); else if(a === 'otra') encenderCam(); else if(a === 'otra-foto'){ PANTALLA = 'cam'; AVISO_TEL = ''; pintarAqui(); }
       return; }
-    if(q('[data-dl-guardar]')){ guardarLectura(false); return; }
-    if(q('[data-dl-siguiente]')){ guardarLectura(true); return; }
-    if(q('[data-dl-otra]')){ PUNTO_ABIERTO = true; pintarAcciones(); const u = $('#dlUbic'); if(u) u.focus(); return; }
+    if(q('[data-dl-guardar]')){ if(!FOTO && ESPERA_MAT){ ESPERA_MAT = null; abrirEquipo(); return; } guardarLectura(false); return; }
+    if(q('[data-dl-siguiente]')){ siguienteLectura(); return; }
     if(q('[data-dl-web-guardar]')){ guardarWeb(); return; }
     if((el = q('[data-dl-equipo]'))){ if(el.dataset.dlEquipo === 'no') sinEquipo(); else abrirEquipo(); return; }
     if((el = q('[data-eq-mas]'))){ cambiarEq(+el.dataset.eqMas, 1); return; }
@@ -751,7 +807,7 @@ export function conectar(){
     if((el = q('[data-dl]'))){
       const a = el.dataset.dl;
       if(a === 'paso2' && !CUARTO) return;
-      if(a === 'vacio'){ NIVEL = null; CUARTO = null; VOLVIO = true; }   // tocó Back: se queda en la portada hasta que toque Start
+      if(a === 'vacio'){ NIVEL = null; CUARTO = null; VOLVIO = true; if(abreEnRegistro(esCompu(), LECT, EQUI)){ PANTALLA = 'registro'; pintarAqui(); return; } }   // tocó Back: se queda en la portada hasta que toque Start
       if(a === 'paso1') VOLVIO = false;
       if(a === 'paso2'){ const p = R.puntosPendientes(LECT, CUARTO, HOY())[0]; if(p){ MATERIAL = p.material || MATERIAL; UBIC = p.ubicacion || ''; } }
       // Prueba en vivo (14-oct): en la computadora "Continue" tiraba la lectura escrita sin avisar. Si hay número, se guarda primero.

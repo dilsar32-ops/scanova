@@ -54,5 +54,12 @@ ok('verde solo en "Reading detected" (su diseño), en ningún otro lado del Dry 
   ok('equipo: los 7 de su diseño, en su orden', DL.EQUIPOS_DL.map(x => x[0]).join('|') === 'Fans / Air Movers|Dehumidifiers|HEPA Air Scrubber|Dry Mat|Air Duct|Heater|Poles');
   ok('equipo: sus íconos existen en la app', DL.EQUIPOS_DL.every(([, ic]) => idx.includes('id="i-' + ic + '"')) && idx.includes('id="i-mas-circulo"'));
 }
+ok('registro: en la computadora abre en el registro si ya hay lecturas o equipo', DL.abreEnRegistro(true, [{}], []) && DL.abreEnRegistro(true, [], [{}]) && !DL.abreEnRegistro(true, [], []) && !DL.abreEnRegistro(false, [{}], [{}]));
+ok('registro: "+ New Reading" lleva al paso 1 y Back del paso 1 regresa al registro', /data-dl="paso1">\$\{IC\('mas'\)\}New Reading/.test(js) && /abreEnRegistro\(esCompu\(\), LECT, EQUI\)\)\{ PANTALLA = 'registro'/.test(js));
+{ const hoy = [{ material:'Drywall', ubicacion:null }, { material:'Drywall', ubicacion:'#2' }, { material:'Studs', ubicacion:'East wall' }];
+  ok('mismo material otra vez hoy: no tapa al anterior, queda #2, #3', DL.ubicLibre([], 'Drywall', '') === '' && DL.ubicLibre(hoy.slice(0,1), 'Drywall', '') === '#2' && DL.ubicLibre(hoy, 'Drywall', '') === '#3');
+  ok('mismo material con lugar del día anterior: si ya se leyó, "East wall #2"; otro material sin cambio', DL.ubicLibre(hoy, 'Studs', 'East wall') === 'East wall #2' && DL.ubicLibre(hoy, 'Carpet', '') === ''); }
+ok('Take next reading guarda y abre la MISMA barra de Material (sin pantalla nueva); al escoger, la cámara', /ESPERA_MAT = guardarLectura\(true\)/.test(js) && /sel\.value = ''; abrirBarra\(sel\)/.test(js) && /ESPERA_MAT = null; PANTALLA = 'cam'; pintarAqui\(\)/.test(js) && !/materialHtml/.test(js));
+ok('después de la foto: Material a la vista + Take next reading + Continue', /<label class="dl-mat-sel"><small>Material<\/small><select id="dlMaterial">/.test(js) && /data-dl-siguiente>\$\{IC\('camara'\)\}Take next reading/.test(js));
 console.log(`\ndrylog: ${pass} ok, ${fail} fallas`);
 if(fail) process.exit(1);

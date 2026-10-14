@@ -2118,3 +2118,63 @@ button.pdestino{ border:0; background:none; padding:0; font:inherit; cursor:poin
 button.pdestino > .ic:nth-of-type(2){ width:13px; height:13px; color:var(--ink-mute); margin-left:-2px; }
 .pdestino-cambiar{ color:var(--accent); font-weight:600; margin-left:4px; }
 button.pdestino:hover .pdestino-cambiar{ text-decoration:underline; }
+
+/* Dry Logs · EL REGISTRO (14-oct): todos los días, cuarto por cuarto */
+.dl-reg-cabeza{ display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+.dl-reg-acc{ display:flex; gap:10px; flex-wrap:wrap; }
+.dl-reg-acc .btn{ width:auto; display:inline-flex; align-items:center; gap:6px; }
+.dl-reg-acc .ic{ width:17px; height:17px; }
+.dl-reg-nivel{ margin-top:18px; }
+.dl-reg-cuarto{ border:1px solid var(--line); border-radius:12px; padding:12px 14px 6px; margin:10px 0; background:var(--surface, #fff); }
+.dl-reg-cu-cab{ display:flex; align-items:center; gap:10px; margin-bottom:6px; }
+.dl-reg-cu-cab b{ font-size:16px; }
+.dl-reg-cu-cab small{ margin-left:auto; font-size:13px; }
+.dl-reg-cu-cab .dl-op-ic{ width:22px; height:22px; color:var(--accent); }
+.dl-reg-falta{ color:#b7791f; font-weight:600; }
+.dl-reg-tabla-w{ overflow-x:auto; -webkit-overflow-scrolling:touch; }
+.dl-reg-tabla{ width:100%; min-width:520px; table-layout:fixed; border-collapse:collapse; font-size:14px; font-variant-numeric:tabular-nums; }
+.dl-reg-tabla th:first-child{ width:34%; }
+.dl-reg-tabla th{ text-align:left; font-weight:600; color:var(--ink-soft); font-size:12.5px; padding:6px 10px 6px 0; border-bottom:1px solid var(--line); white-space:nowrap; }
+.dl-reg-tabla th small{ display:block; font-weight:500; color:var(--ink-mute); }
+.dl-reg-tabla td{ padding:7px 10px 7px 0; border-bottom:1px solid var(--line); vertical-align:top; }
+.dl-reg-tabla tr:last-child td{ border-bottom:0; }
+.dl-reg-p{ color:var(--ink-soft); }
+.dl-reg-v{ white-space:nowrap; }
+.dl-reg-v b{ font-size:15px; }
+.dl-reg-v em{ display:block; font-size:12px; }
+.dl-reg-v.nada{ color:var(--ink-mute); }
+.dl-reg-eq td{ font-size:13px; color:var(--ink-soft); }
+.dl-reg-eq .dl-reg-p{ display:flex; align-items:center; gap:6px; }
+.dl-reg-eq .ic{ width:15px; height:15px; }
+.dl-reg-sin{ color:var(--ink-mute); font-size:13.5px; margin:6px 0 0; }
+.dl-ver-todo{ display:block; margin:12px auto 0; }
+/* Registro en el teléfono: cada punto en su renglón y sus días uno al lado del otro (sin deslizar de lado) */
+@media (max-width:640px){
+  .dl-reg-tabla{ min-width:0; table-layout:auto; }
+  .dl-reg-tabla thead{ display:none; }
+  .dl-reg-tabla, .dl-reg-tabla tbody, .dl-reg-tabla tr{ display:block; width:100%; }
+  .dl-reg-tabla tr{ display:flex; flex-wrap:wrap; gap:4px 14px; padding:8px 0; border-bottom:1px solid var(--line); }
+  .dl-reg-tabla tr:last-child{ border-bottom:0; }
+  .dl-reg-tabla td{ display:block; border:0; padding:0; }
+  .dl-reg-tabla td.dl-reg-p{ flex:0 0 100%; color:var(--ink); font-weight:600; font-size:14px; }
+  .dl-reg-tabla td[data-d]::before{ content:attr(data-d); display:block; font-size:11.5px; font-weight:500; color:var(--ink-mute); }
+  .dl-reg-eq td[data-d]{ flex:1 1 30%; min-width:90px; font-size:12.5px; }
+}
+/* Dry Logs en el teléfono (su captura del 14-oct): Material a lo ancho arriba de "Take next reading" / "Continue" */
+.dl-mat-sel{ display:flex; flex-direction:column; gap:6px; margin:4px 0 12px; }
+.dl-mat-sel small{ color:var(--ink-soft); font-size:15px; }
+.dl-mat-sel select{ height:52px; font:inherit; font-size:18px; color:var(--ink); background:var(--card); border:1px solid var(--line2); border-radius:12px; padding:0 14px; }
+.dl-punto-txt{ display:flex; align-items:center; gap:6px; margin:-4px 0 10px; color:var(--ink-soft); font-size:13.5px; }
+.dl-punto-txt .ic{ width:15px; height:15px; color:var(--accent); flex:0 0 auto; }
+.dl-botones .btn .ic{ width:20px; height:20px; }
+.dl-lec-acc [data-dl-siguiente]{ background:var(--surface-2, #f1f3f7); }
+
+/* Lectura en el teléfono cuando el espacio no alcanza (su pedido del 14-oct: la pantalla no se mueve) */
+.dl-lec.apretado .dl-lec-sub{ display:none; }
+.dl-lec.apretado{ gap:6px; padding-top:8px; padding-bottom:8px; }
+.dl-lec.apretado .dl-lec-t{ font-size:19px; margin:0; }
+.dl-lec.muy-apretado .dl-mat-sel{ flex-direction:row; align-items:center; gap:10px; margin:0; }
+.dl-lec.muy-apretado .dl-mat-sel small{ flex:none; }
+.dl-lec.muy-apretado .dl-mat-sel select{ flex:1; min-width:0; height:44px; font-size:17px; }
+.dl-lec.muy-apretado .dl-det{ padding:6px 12px; }
+.dl-lec.muy-apretado .dl-det-sub{ display:none; }
