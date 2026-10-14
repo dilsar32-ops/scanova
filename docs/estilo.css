@@ -2316,3 +2316,88 @@ body.dl-barra .pie [data-nav="proyectos"], body.dl-barra .pie [data-nav="clients
 .dl-eq2 .dl-eq2-t > span{ min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .dl-eq2 .dl-eq-fotos{ flex:none; display:inline-flex; align-items:center; gap:4px; margin-left:auto; padding:2px 8px; border-radius:999px; background:var(--accent-soft); color:var(--accent); font-size:13px; font-weight:700; }
 .dl-eq2 .dl-eq-fotos .ic{ width:15px; height:15px; }
+
+/* ===== Su diseño (14-oct): la lista de Dry Logs en el teléfono (días → nivel → cuarto → lecturas y equipo) ===== */
+#panel-secado .dl-lista{ gap:12px; }
+#panel-secado .dl-lista .dl-lista-t{ margin:4px 0 2px; font-size:28px; font-weight:800; letter-spacing:-.02em; color:var(--ink); }
+.dl-lista details > summary{ list-style:none; display:flex; align-items:center; gap:12px; cursor:pointer; }
+.dl-lista details > summary::-webkit-details-marker{ display:none; }
+.dl-lista .dl-li-flecha{ flex:none; margin-left:auto; width:22px; height:22px; color:var(--ink-soft); transition:transform .15s; }
+.dl-lista details[open] > summary > .dl-li-flecha{ transform:rotate(180deg); }
+#panel-secado .dl-lista > .card.dl-li-dia{ margin:0; padding:14px 12px; border:1px solid var(--line); border-radius:16px; }
+.dl-li-dia > summary{ padding:2px 4px; }
+.dl-li-fecha{ font-size:23px; font-weight:800; letter-spacing:-.02em; color:var(--ink); }
+.dl-li-est{ padding:4px 12px; border-radius:8px; font-size:14px; font-weight:600; }
+.dl-li-est.ok{ background:#e7f7ec; color:#1f9a3c; }
+.dl-li-est.prox{ background:var(--accent-soft); color:var(--accent); }
+.dl-li-est.curso{ background:#fff3df; color:#b26a00; }
+.dl-li-in{ display:flex; flex-direction:column; gap:10px; padding-top:12px; }
+.dl-li-niv, .dl-li-cu{ border:1px solid var(--line); border-radius:12px; background:var(--card); }
+.dl-li-niv > summary, .dl-li-cu > summary{ padding:11px 12px; }
+.dl-li-niv > summary b, .dl-li-cu > summary b{ font-size:18px; font-weight:700; color:var(--ink); }
+.dl-li-niv > .dl-li-in{ padding:0 10px 10px; }
+.dl-li-cu > .dl-li-in{ padding:0 8px 8px; }
+.dl-li-ic{ flex:none; width:28px; height:28px; color:var(--ink); stroke-width:1.5; }
+.dl-li-lec{ display:flex; align-items:center; gap:14px; width:100%; padding:10px; border:1px solid var(--line); border-radius:12px; background:var(--card); font:inherit; text-align:left; cursor:pointer; }
+.dl-li-lec:disabled{ cursor:default; }
+.dl-li-mini{ flex:none; width:104px; height:88px; border-radius:9px; overflow:hidden; background:#e9eef5; display:grid; place-items:center; color:var(--ink-mute); }
+.dl-li-mini img{ width:100%; height:100%; object-fit:cover; display:block; }
+.dl-li-dat{ flex:1; min-width:0; display:flex; flex-direction:column; gap:1px; color:var(--ink-soft); font-size:16px; }
+.dl-li-dat b{ font-size:22px; font-weight:800; color:var(--ink); letter-spacing:-.01em; }
+.dl-li-dat small{ font-size:14px; color:var(--ink-mute); }
+.dl-li-chev{ flex:none; width:22px; height:22px; color:var(--ink-soft); }
+.dl-li-eq{ display:flex; flex-direction:column; gap:6px; padding:4px 4px 2px; border-top:1px solid var(--line); }
+.dl-li-eq > small{ padding-top:6px; color:var(--ink-mute); font-size:13px; }
+.dl-li-eq-f{ display:flex; align-items:center; }
+.dl-li-eq-i{ flex:1; min-width:0; display:flex; align-items:center; gap:8px; padding:0 8px; }
+.dl-li-eq-i + .dl-li-eq-i{ border-left:1px solid var(--line); }
+.dl-li-eq-i .dl-eq-img{ width:32px; height:32px; }
+.dl-li-eq-i > span{ display:flex; flex-direction:column; line-height:1.15; }
+.dl-li-eq-i small{ font-size:13px; color:var(--ink-soft); white-space:nowrap; }
+.dl-li-eq-i b{ font-size:17px; color:var(--ink); }
+.dl-li-eq-no{ flex:1; color:var(--ink-soft); font-size:14px; padding:0 8px; }
+.dl-li-eq-ir{ flex:none; display:grid; place-items:center; width:36px; height:36px; border:0; border-left:1px solid var(--line); background:none; color:var(--ink-soft); cursor:pointer; }
+.dl-li-eq-ir .ic{ width:22px; height:22px; }
+.dl-li-nada{ margin:0; padding:2px 4px; color:var(--ink-soft); font-size:14px; }
+.dl-li-vacio{ display:flex; align-items:center; gap:14px; padding:16px; border:1.5px dashed var(--line2); border-radius:12px; }
+.dl-li-vacio > .ic{ flex:none; width:30px; height:30px; color:var(--ink-soft); }
+.dl-li-vacio b{ display:block; font-size:16px; font-weight:600; color:var(--ink); }
+.dl-li-vacio small{ display:block; font-size:14px; color:var(--ink-soft); }
+#panel-secado .dl-lista .dl-lista-mas{ width:100%; min-height:50px; font-size:17px; font-weight:600; gap:12px; border-radius:10px; }
+.dl-lista-mas .ic{ width:24px; height:24px; }
+.dl-lista-nota{ margin:-4px 0 6px; text-align:center; font-size:13.5px; color:var(--ink-soft); }
+.dl-lista .aviso:empty{ display:none; }
+/* El cuarto en la lista (su pedido del 14-oct): sus lecturas, TODAS sus fotos de ese día y TODO el equipo */
+.dl-li-dat b .dl-tend{ margin-left:6px; font-size:14px; font-weight:700; white-space:nowrap; }
+.dl-li-fotos{ display:flex; flex-direction:column; gap:6px; padding:4px 4px 2px; border-top:1px solid var(--line); }
+.dl-li-fotos > small{ padding-top:6px; color:var(--ink-mute); font-size:13px; }
+.dl-li-fotos > small b{ color:var(--ink-soft); }
+.dl-li-tira{ display:flex; gap:8px; overflow-x:auto; overflow-y:hidden; touch-action:pan-x pan-y; scrollbar-width:none; padding-bottom:2px; }
+.dl-li-tira::-webkit-scrollbar{ display:none; }
+.dl-li-foto{ flex:none; width:78px; height:78px; padding:0; border:0; border-radius:9px; overflow:hidden; background:#e9eef5; cursor:pointer; }
+.dl-li-foto img{ width:100%; height:100%; object-fit:cover; display:block; }
+.dl-li-eq > small em{ font-style:normal; color:var(--ink-mute); }
+.dl-li-eq-f{ align-items:stretch; }
+.dl-li-eq-g{ flex:1; min-width:0; display:grid; grid-template-columns:repeat(auto-fill, minmax(112px, 1fr)); row-gap:10px; overflow:hidden; }
+/* Cuántos caben por fila depende del ancho (2 en el teléfono, 3 o más en la computadora): cada nombre cabe entero.
+   La raya entre uno y otro es una sombra a la izquierda; la de la primera columna queda fuera del cuadro y no se ve. */
+.dl-li-eq-i + .dl-li-eq-i{ border-left:0; }
+.dl-li-eq-g .dl-li-eq-i{ box-shadow:-1px 0 0 var(--line); padding:0 6px 0 7px; gap:6px; }
+.dl-li-eq-g .dl-li-eq-i .dl-eq-img{ width:30px; height:30px; }
+.dl-li-eq-i > span{ min-width:0; }
+.dl-li-eq-i small{ display:block; overflow:hidden; text-overflow:ellipsis; }
+.dl-li-eq-ir{ align-self:center; }
+/* La misma lista en la computadora: título con View Report y + New Reading; lecturas y cuartos en columnas */
+.dl-lista-cab{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+#panel-secado .dl-lista-cab .dl-lista-t{ margin-right:auto; }
+.dl-lista-acc{ display:flex; gap:10px; }
+.dl-lista-acc .btn{ width:auto; min-height:42px; }
+@media (min-width:900px){
+  #panel-secado .dl-lista-web{ gap:14px; max-width:1100px; }
+  .dl-lista-web .dl-li-dia > .dl-li-in{ padding-top:14px; }
+  .dl-lista-web .dl-li-niv > .dl-li-in{ display:grid; grid-template-columns:repeat(auto-fill, minmax(min(420px, 100%), 1fr)); align-items:start; gap:10px; }
+  .dl-lista-web .dl-li-niv > .dl-li-in > .dl-li-nada{ grid-column:1 / -1; }
+  .dl-lista-web .dl-lista-mas{ max-width:420px; align-self:center; }
+}
+/* Teléfonos chicos (375-389): la foto de la lectura un poco más angosta para que el texto no se parta tanto. */
+@media (max-width:389px){ .dl-li-lec{ gap:12px; } .dl-li-mini{ width:92px; height:80px; } }

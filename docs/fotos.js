@@ -2,8 +2,8 @@
 // por día y ver en grande. La página nunca ve las claves de R2: pide URLs firmadas a la función
 // fotos-subir, sube DIRECTO a R2 y luego confirma; la fila en fotos_fotos la escribe la función
 // solo cuando R2 ya tiene la foto completa (HEAD y tamaño).
-import { $, $$, authFetch, PERFIL, esManager } from './app.js?v=2026-10-14-44';
-import { esc, iniciales } from './trabajos.js?v=2026-10-14-44';
+import { $, $$, authFetch, PERFIL, esManager } from './app.js?v=2026-10-14-49';
+import { esc, iniciales } from './trabajos.js?v=2026-10-14-49';
 
 const FUNCION = '/functions/v1/fotos-subir';
 export const MAX_WEB = 1600, MAX_MINI = 320;
@@ -274,17 +274,26 @@ export function encolar(files, destino){
 // ---------- ver una foto ----------
 // Tocar una foto abre la VENTANA de la foto (foto.js: detalles, etiquetas, tareas, comentarios). La vista negra de
 // antes (#visor) se queda: es la PANTALLA COMPLETA (botón de expandir) y sigue con su papelera y sus flechas.
-const ordenVisor = () => ORDEN_FN ? ORDEN_FN(FOTOS) : porDia(FOTOS).flatMap(d => d.fotos);
+// Un visor con su propia lista (el Dry Log abre las fotos de UN cuarto ese día): no depende del filtro de Photos.
+let VISOR_IDS = null;
+const ordenVisor = () => {
+  if(VISOR_IDS){ const m = new Map(FOTOS.map(f => [f.id, f])); return VISOR_IDS.map(id => m.get(id)).filter(Boolean); }
+  return ORDEN_FN ? ORDEN_FN(FOTOS) : porDia(FOTOS).flatMap(d => d.fotos);
+};
 let AL_FOTO = null;
 export const alAbrirFoto = (fn) => { AL_FOTO = fn; };
 export const visorLista = () => ordenVisor();
 export const visorIndice = () => VISOR_I;
 export const fotoActual = () => ordenVisor()[VISOR_I] || null;
-export async function abrirVisor(fotoId){
-  const i = ordenVisor().findIndex(f => f.id === fotoId); if(i < 0) return;
+export async function abrirVisor(fotoId, ids){
+  const abierto = $('#pFoto') && !$('#pFoto').hidden;
+  if(Array.isArray(ids) && ids.length) VISOR_IDS = [...new Set(ids)];
+  else if(VISOR_IDS && abierto){ if(!VISOR_IDS.includes(fotoId)) VISOR_IDS.push(fotoId); }   // una copia editada entra a la misma lista
+  else VISOR_IDS = null;
+  const i = ordenVisor().findIndex(f => f.id === fotoId); if(i < 0) return false;
   VISOR_I = i;
-  if(AL_FOTO){ AL_FOTO(true); return; }
-  abrirGrande();
+  if(AL_FOTO){ AL_FOTO(true); return true; }
+  abrirGrande(); return true;
 }
 // Al entrar fotos nuevas la lista se corre: la ventana vuelve a buscar SU foto para no saltar a otra.
 export function fijarVisor(id){ const i = ordenVisor().findIndex(f => f.id === id); if(i >= 0) VISOR_I = i; return i; }

@@ -1,15 +1,15 @@
 // Scanova · arranque, sesión y navegación. Las pantallas viven en index.html; lo de trabajos en trabajos.js.
-import { SUPABASE_URL, ANON_KEY, APP_BUILD } from './config.js?v=2026-10-14-44';
-import { ESQUEMA_APARATO, urlEntrarGoogle } from './google.js?v=2026-10-14-44';
-import * as trabajos from './trabajos.js?v=2026-10-14-44';
-import * as personas from './personas.js?v=2026-10-14-44';
-import * as fotos from './fotos.js?v=2026-10-14-44';
-import * as panel from './panel.js?v=2026-10-14-44';
-import * as camara from './camara.js?v=2026-10-14-44';
-import * as direccion from './direccion.js?v=2026-10-14-44';
-import * as proyecto from './proyecto.js?v=2026-10-14-44';
-import * as foto from './foto.js?v=2026-10-14-44';
-import * as editor from './editor.js?v=2026-10-14-44';
+import { SUPABASE_URL, ANON_KEY, APP_BUILD } from './config.js?v=2026-10-14-49';
+import { ESQUEMA_APARATO, urlEntrarGoogle } from './google.js?v=2026-10-14-49';
+import * as trabajos from './trabajos.js?v=2026-10-14-49';
+import * as personas from './personas.js?v=2026-10-14-49';
+import * as fotos from './fotos.js?v=2026-10-14-49';
+import * as panel from './panel.js?v=2026-10-14-49';
+import * as camara from './camara.js?v=2026-10-14-49';
+import * as direccion from './direccion.js?v=2026-10-14-49';
+import * as proyecto from './proyecto.js?v=2026-10-14-49';
+import * as foto from './foto.js?v=2026-10-14-49';
+import * as editor from './editor.js?v=2026-10-14-49';
 
 export const $ = (s, r = document) => r.querySelector(s);
 export const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -321,6 +321,9 @@ function guardia(seguir){
   return false;
 }
 if(typeof window !== 'undefined') window.addEventListener('beforeunload', (e) => { if(hayCambios()){ e.preventDefault(); e.returnValue = ''; } });
+// Quien necesite saber que una pantalla volvió a verse (el Dry Log repone su barra al regresar de una foto).
+const AL_MOSTRAR = [];
+export function alMostrar(fn){ AL_MOSTRAR.push(fn); }
 export function irA(id, desde, forzar){
   if(!forzar && id !== pantallaVisible() && !guardia(() => irA(id, desde, true))) return;
   const enVentana = MODAL && (id === 'pEntrar' || id === 'pCrear' || id === 'pEspera' || id === 'pCodigo' || id === 'pClave');
@@ -342,6 +345,7 @@ export function irA(id, desde, forzar){
   $('#subtitulo').textContent = { pEntrar:'Scanova360', pClave:'Contraseña nueva', pCrear:'Crear cuenta', pEspera:'Cuenta en espera', pInicio:'Home', pProyectos:'Projects', pPersonas:'Team', pForma:'Project', pTrabajo:'Project', pNivel:'Level', pCuarto:'Room', pFoto:'Photo', pGaleria:'Gallery', pMas:'More' }[id] || 'Scanova360';
   const m = $('#main'); if(m) m.scrollTo(0, 0); window.scrollTo(0, 0);
   if(CON_GUARDIA.includes(id)) FOTO_FORMA[id] = fotoDeCampos($('#' + id));
+  AL_MOSTRAR.forEach(fn => { try{ fn(id); }catch{} });
 }
 // 14-oct, su pedido: en el teléfono el Back ya no va arriba: el botón Home de la barra de abajo SE VUELVE Back en
 // cuanto se entra a algo (en Home sigue siendo Home). Ese Back regresa un paso: primero lo de adentro de la pantalla

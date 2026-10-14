@@ -6,12 +6,12 @@
 // TELÉFONO (su diseño del 14-oct): Dry Logs abre con la cámara prendida. Arriba "Dry Logs" y en qué cuarto va
 // (Room 1 of 4), luego Level y Room para escoger dónde, y la cámara llena lo que sobra. El botón azul de cámara de
 // abajo (el de siempre) toma la foto directo. Lo que sigue después de la foto espera su siguiente diseño.
-import { $, $$, authFetch, registrarAtras, preguntar } from './app.js?v=2026-10-14-44';
-import { RESTRICCIONES, errorCamara, puedeCamaraPropia } from './camara.js?v=2026-10-14-44';
-import * as fotos from './fotos.js?v=2026-10-14-44';
-import { leerPantalla } from './lector.js?v=2026-10-14-44';
-import * as R from './registro.js?v=2026-10-14-44';
-import { APP_BUILD } from './config.js?v=2026-10-14-44';
+import { $, $$, authFetch, registrarAtras, preguntar, alMostrar } from './app.js?v=2026-10-14-49';
+import { RESTRICCIONES, errorCamara, puedeCamaraPropia } from './camara.js?v=2026-10-14-49';
+import * as fotos from './fotos.js?v=2026-10-14-49';
+import { leerPantalla } from './lector.js?v=2026-10-14-49';
+import * as R from './registro.js?v=2026-10-14-49';
+import { APP_BUILD } from './config.js?v=2026-10-14-49';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -67,6 +67,9 @@ export const abreEnPaso1 = (web, cuartos, volvio) => !!web && (cuartos || []).le
 export const abreEnRegistro = (web, lect, equi) => !!web && ((lect || []).length + (equi || []).length) > 0;
 // TELÉFONO: con cuartos ya creados, Dry Logs abre directo en la cámara (su diseño); sin cuartos, la portada.
 export const abreEnCamara = (web, cuartos) => !web && (cuartos || []).length > 0;
+// Su diseño (14-oct, la lista de Dry Logs): en el teléfono, si el proyecto ya tiene algo anotado, Dry Logs abre en la
+// lista de días (Completed / Upcoming) con "Take More Readings"; sin nada anotado, directo a la cámara como antes.
+export const abreEnLista = (web, lect, equi) => !web && ((lect || []).length + (equi || []).length) > 0;
 export const PASOS_TEL = 5;
 // El cuarto que sale escogido en el teléfono: el que ya tenía (si sigue en ese nivel) o el primero del nivel.
 export function cuartoInicial(cuartos, nivelId, actual){
@@ -76,11 +79,11 @@ export function cuartoInicial(cuartos, nivelId, actual){
 const caja = () => $('#panel-secado');
 
 // Al entrar a la pestaña (no en cada repintado): lo de "tocó Back" se olvida y vuelve a abrir como la primera vez.
-export function entrar(){ VOLVIO = false; AVISO_TEL = ''; if(PANTALLA === 'vacio'){ NIVEL = null; CUARTO = null; } if(T) cargarRegistro(true); }   // lo que anotaron otros, al día
+export function entrar(){ VOLVIO = false; AVISO_TEL = ''; SESION = true; if(PANTALLA === 'vacio'){ NIVEL = null; CUARTO = null; } if(T) cargarRegistro(true); }   // lo que anotaron otros, al día
 // La ficha la llama cada vez que se pinta la pestaña (y cuando llegan los niveles y cuartos).
 export function pintar(t, niveles, cuartos){
   if(!t) return;
-  if(!T || T.id !== t.id){ PANTALLA = 'vacio'; NIVEL = null; CUARTO = null; VOLVIO = false; LECT = []; EQUI = []; REG_DE = null; }
+  if(!T || T.id !== t.id){ PANTALLA = 'vacio'; NIVEL = null; CUARTO = null; VOLVIO = false; LECT = []; EQUI = []; REG_DE = null; ABIERTO_LI.clear(); VOLVER = null; VISOR_DE = null; }
   T = t; NIVELES = niveles || []; CUARTOS = cuartos || [];
   cargarRegistro();
   if(NIVEL && !NIVELES.some(n => n.id === NIVEL)) NIVEL = null;
@@ -91,13 +94,19 @@ function pintarAqui(){
   const c = caja(); if(!c || !T) return;
   const web = esCompu();
   // En la computadora se espera a saber si ya hay registro (si no, abría en el paso 1 y luego no se veían los datos).
-  if(PANTALLA === 'vacio' && web && REG_DE !== T.id){ c.dataset.dlPantalla = 'cargando'; c.innerHTML = '<div class="card dl-paso"><p class="dl-paso-sub">Loading dry log…</p></div>'; return; }
+  if(PANTALLA === 'vacio' && REG_DE !== T.id){ c.dataset.dlPantalla = 'cargando'; c.innerHTML = '<div class="card dl-paso"><p class="dl-paso-sub">Loading dry log…</p></div>'; return; }
   if(PANTALLA === 'vacio' && abreEnRegistro(web, LECT, EQUI)) PANTALLA = 'registro';
+  if(PANTALLA === 'vacio' && abreEnLista(web, LECT, EQUI)) PANTALLA = 'lista';
+  if(!web && PANTALLA === 'registro') PANTALLA = 'lista';   // en el teléfono "todos los días" es la lista
+  if(web && PANTALLA === 'lista') PANTALLA = 'registro';
   if(PANTALLA === 'vacio' && abreEnPaso1(web, CUARTOS, VOLVIO)) PANTALLA = 'paso1';
   if(PANTALLA === 'vacio' && abreEnCamara(web, CUARTOS)) PANTALLA = 'cam';
   const TEL = ['cam', 'lectura', 'guardado', 'equipo', 'dia'];
   if(web && TEL.includes(PANTALLA) && PANTALLA !== 'dia') PANTALLA = 'paso1';   // si giraron la pantalla o la hicieron ancha
   if(!web && ['paso1', 'paso2', 'paso3'].includes(PANTALLA) && abreEnCamara(web, CUARTOS)) PANTALLA = 'cam';   // y de regreso a lo angosto: la cámara
+  // En el teléfono, estar tomando lecturas ES estar en la vuelta: sin su barra no habría cómo guardar (Continue y
+  // Finish viven en la barra). Pasa al girar un iPad después de Finish.
+  if(!web && ['cam', 'lectura', 'guardado', 'equipo'].includes(PANTALLA)) SESION = true;
   if(PANTALLA === 'cam' && !CUARTO){
     // Al abrir: el primer cuarto del recorrido que todavía no se lee hoy (el día 2, solo los cuartos afectados).
     const r = recorrido(), c = r.find(x => !R.lecturasDelDia(LECT, x.id, HOY()).length) || r[0];
@@ -113,10 +122,11 @@ function pintarAqui(){
   if(PANTALLA === 'lectura' && c.dataset.dlPantalla === 'lectura' && c.querySelector('#dlValor')) return;
   if(PANTALLA !== 'cam') apagarCam();
   c.dataset.dlPantalla = PANTALLA;
-  c.innerHTML = PANTALLA === 'paso1' ? paso1Html() : PANTALLA === 'paso2' ? paso2Html() : PANTALLA === 'paso3' ? paso3Html() : PANTALLA === 'cam' ? camHtml() : PANTALLA === 'lectura' ? lecturaHtml() : PANTALLA === 'guardado' ? guardadoHtml() : PANTALLA === 'equipo' ? equipoHtml() : PANTALLA === 'dia' ? diaHtml() : PANTALLA === 'registro' ? registroHtml() : vacioHtml();
+  c.innerHTML = PANTALLA === 'paso1' ? paso1Html() : PANTALLA === 'paso2' ? paso2Html() : PANTALLA === 'paso3' ? paso3Html() : PANTALLA === 'cam' ? camHtml() : PANTALLA === 'lectura' ? lecturaHtml() : PANTALLA === 'guardado' ? guardadoHtml() : PANTALLA === 'equipo' ? equipoHtml() : PANTALLA === 'dia' ? diaHtml() : PANTALLA === 'registro' || PANTALLA === 'lista' ? listaHtml() : vacioHtml();
   if(PANTALLA === 'cam'){ medirTel(); encenderCam(); }
   else if(PANTALLA === 'lectura') medirTel();
   else if((PANTALLA === 'guardado' || PANTALLA === 'equipo') && !web) requestAnimationFrame(medirQuieta);
+  else if(PANTALLA === 'lista' || PANTALLA === 'registro'){ document.body.classList.remove('dl-fijo'); cargarMinis(); }
   else document.body.classList.remove('dl-fijo');
   ajustarAlto();
   pintarBarra();
@@ -528,9 +538,9 @@ function avanzar(nombre, hecho){
   // En el teléfono no se avisa (su pedido del 14-oct: el letrero empujaba la cámara; arriba ya dice el cuarto y "Room N of M").
   const aviso = esCompu() ? hecho : '';
   if(sig){ NIVEL = sig.nivel_id; CUARTO = sig.id; AVISO_TEL = aviso && aviso + ' Next: ' + sig.nombre + '.'; PANTALLA = 'cam'; }
-  else { AVISO_TEL = aviso; PANTALLA = esCompu() ? 'registro' : 'dia'; }   // era el último cuarto: el resumen del día (en la computadora, el registro)
+  else { AVISO_TEL = aviso; PANTALLA = esCompu() ? 'registro' : 'lista'; }   // era el último cuarto: el resumen del día (en la computadora, el registro)
   pintarAqui();
-  const m = $('#main'); if(m && PANTALLA === 'dia') m.scrollTop = 0;
+  const m = $('#main'); if(m && (PANTALLA === 'dia' || PANTALLA === 'lista')) m.scrollTop = 0;
 }
 async function guardarEquipo(fin){
   if(OCUPADO_TEL || EQ.cargando || !CUARTO) return;
@@ -551,6 +561,7 @@ async function guardarEquipo(fin){
     EQUI = EQUI.filter(f => !(f.cuarto_id === CUARTO && f.dia === base.dia)).concat(vuelta);
     const txt = resumenEquipo(cuentas);
     if(fin) return true;
+    if(VOLVER){ volverALista(); return true; }   // lo abrió desde la lista: regresa a la lista, no al siguiente cuarto
     avanzar(nombre, txt ? 'Equipment saved for ' + nombre + ': ' + txt + '.' : 'No equipment in ' + nombre + '.');
     return true;
   }catch(e){ avisarTel('Not saved: ' + (e.message || e)); return false; }
@@ -577,9 +588,12 @@ function atrasTel(){
   const c = caja(); if(!c || c.closest('[hidden]') || esCompu()) return false;
   if(PANTALLA === 'lectura'){ PANTALLA = 'cam'; AVISO_TEL = ''; pintarAqui(); return true; }
   if(PANTALLA === 'guardado'){ PANTALLA = 'cam'; pintarAqui(); return true; }
+  if((PANTALLA === 'equipo' || PANTALLA === 'dia') && VOLVER){ volverALista(); return true; }
   if(PANTALLA === 'equipo'){ PANTALLA = GUARDADA && GUARDADA.cuarto_id === CUARTO ? 'guardado' : 'cam'; AVISO_TEL = ''; pintarAqui(); return true; }
   if(PANTALLA === 'dia'){ PANTALLA = 'cam'; AVISO_TEL = ''; pintarAqui(); return true; }
   if(PANTALLA === 'registro'){ PANTALLA = 'dia'; pintarAqui(); const m = $('#main'); if(m) m.scrollTop = 0; return true; }
+  // Su lista de Dry Logs es la portada del teléfono: de la cámara, Back regresa a la lista (si hay algo anotado).
+  if(PANTALLA === 'cam' && abreEnLista(false, LECT, EQUI)){ PANTALLA = 'lista'; AVISO_TEL = ''; pintarAqui(); const m = $('#main'); if(m) m.scrollTop = 0; return true; }
   return false;
 }
 // ---------- TELÉFONO: el resumen del día (al terminar el último cuarto, o tocando "Room X of N") ----------
@@ -608,41 +622,98 @@ function diaHtml(){
     <div class="card dl-dia"><p class="dl-dia-res">${hechos} of ${lista.length} room${lista.length === 1 ? '' : 's'} read today</p>${filas || '<p class="vacio">No rooms yet.</p>'}</div>
     <p class="aviso" id="dlAviso"></p>
     <div class="dl-botones"><button type="button" class="btn btn-outline" data-dl-ir="cam">${esCompu() ? 'Back to rooms' : 'Back to camera'}</button><button type="button" class="btn btn-accent" data-dl-reporte>${IC('doc')}Dry Log Report</button></div>
-    ${R.diasDelRegistro(LECT, EQUI).length ? '<button type="button" class="enlace-editar dl-ver-todo" data-dl-ir="registro">See all days</button>' : ''}
+    ${R.diasDelRegistro(LECT, EQUI).length ? `<button type="button" class="enlace-editar dl-ver-todo" data-dl-ir="${esCompu() ? 'registro' : 'lista'}">See all days</button>` : ''}
   </div>`;
 }
-// ---------- EL REGISTRO (computadora y teléfono): todos los días, nivel por nivel y cuarto por cuarto ----------
-// Cada punto de medida es una fila y cada día una columna (con cuánto bajó desde la visita anterior); abajo, el
-// equipo que había ese día. Los cuartos sin nada anotado se nombran al final, sin tabla vacía.
-export function registroHtml(){
-  const dias = R.diasDelRegistro(LECT, EQUI), porDia = R.equipoPorDia(EQUI), hoy = HOY(), web = esCompu();
-  const conDatos = (c) => LECT.some(f => f.cuarto_id === c.id) || !!porDia[c.id];
-  const rango = dias.length ? R.fechaLarga(dias[0].dia) + (dias.length > 1 ? ' – ' + R.fechaLarga(dias[dias.length - 1].dia) : '') : '';
-  const nCuartos = CUARTOS.filter(conDatos).length;
-  const cab = dias.map(d => `<th>Day ${d.n}<small>${esc(R.fechaCorta(d.dia))}</small></th>`).join('');
-  const tabla = (c) => {
-    const filas = R.puntosDeCuarto(LECT, c.id).map(p => { let ant = null;
-      return `<tr><td class="dl-reg-p">${esc(p.nombre)}</td>${dias.map(d => { const v = p.dias[d.dia]; if(!v) return `<td class="dl-reg-v nada" data-d="${esc(R.fechaCorta(d.dia))}">—</td>`;
-        const t = ant == null ? null : R.tendencia(ant, v.valor); ant = v.valor;
-        return `<td class="dl-reg-v" data-d="${esc(R.fechaCorta(d.dia))}"><b>${esc(fmtValor(v.valor))}%</b>${t && t.tipo !== 'igual' ? `<em class="dl-tend ${t.tipo}">${esc(t.texto)}</em>` : ''}</td>`; }).join('')}</tr>`; }).join('');
-    const eq = porDia[c.id] ? `<tr class="dl-reg-eq"><td class="dl-reg-p">${IC('dl-herramientas')}Equipment</td>${dias.map(d => { const e = R.equipoEnDia(porDia, c.id, d.dia);
-        return `<td data-d="${esc(R.fechaCorta(d.dia))}">${e ? esc(R.textoEquipo(e.cuentas) || 'None') : '—'}</td>`; }).join('')}</tr>` : '';
-    return `<div class="dl-reg-tabla-w"><table class="dl-reg-tabla"><thead><tr><th>Point</th>${cab}</tr></thead><tbody>${filas || `<tr><td class="dl-reg-p" colspan="${dias.length + 1}">No readings yet</td></tr>`}${eq}</tbody></table></div>`;
+// ---------- TELÉFONO: la lista de Dry Logs (su diseño del 14-oct) ----------
+// Una tarjeta por día con algo anotado (Completed, o In progress si hoy faltan cuartos) y la que sigue (Upcoming).
+// Adentro se abre nivel → cuarto → sus lecturas (con la foto del medidor) y el equipo de ese día. Abajo
+// "Take More Readings". Lo que se abre o se cierra se recuerda mientras se está en el proyecto.
+let SESION = false;
+const ABIERTO_LI = new Map();
+// Lo que se abre desde la lista (Rooms de la barra, el equipo de un cuarto) regresa a la lista, donde estaba.
+let VOLVER = null;     // { sesion, scroll }
+let VISOR_DE = null;   // { scroll } al abrir una foto de la lista
+// Las fotos llegan a veces después que el registro: la lista se vuelve a dibujar cuando cambian (y solo entonces).
+let FIRMA_FOTOS = '';
+const firmaFotos = () => fotos.lista().map(f => f.id + ':' + (f.cuarto_id || '')).join(',');
+export function alCambiarFotos(){
+  const c = caja(); if(!c || !T || c.closest('[hidden]') || !['lista', 'registro'].includes(PANTALLA) || c.dataset.dlPantalla !== PANTALLA) return;
+  if(firmaFotos() === FIRMA_FOTOS) return;
+  const m = $('#main'), y = m ? m.scrollTop : 0; pintarAqui(); if(m) m.scrollTop = y;
+}
+function desdeLista(){ const m = $('#main'); VOLVER = { sesion: SESION, scroll: m ? m.scrollTop : 0 }; }
+function volverALista(){
+  const v = VOLVER || { sesion: SESION, scroll: 0 }; VOLVER = null;
+  SESION = v.sesion; GUARDADA = null; AVISO_TEL = ''; PANTALLA = 'lista'; pintarAqui();
+  const m = $('#main'); if(m) m.scrollTop = v.scroll;
+}
+const ETIQ_CORTA = { 'Fans / Air Movers': 'Fans', 'Dehumidifiers': 'Dehu', 'Drip Pan': 'Drip pans', 'HEPA Air Scrubber': 'HEPA', 'Dry Mat': 'Dry mats', 'Air Duct': 'Ducts', 'Heater': 'Heaters', 'Poles': 'Poles', 'Water Bucket': 'Buckets', 'Desiccant Dehumidifier': 'Desiccant', 'Wall Cavity Dryer': 'Wall cavity', 'Generator': 'Generator', 'Hydroxyl Generator': 'Hydroxyl' };
+const icEq = (t) => (EQUIPOS_DL.find(x => x[0] === t) || [t, 'eq-otro'])[1];
+function listaHtml(){
+  const web = esCompu(), hoy = HOY(), dias = R.diasDelRegistro(LECT, EQUI), porDia = R.equipoPorDia(EQUI), rec = recorrido(), minis = fotos.urlsMini();
+  const ultimo = dias.length ? dias[dias.length - 1].dia : null;
+  const ab = (k, def) => ABIERTO_LI.has(k) ? ABIERTO_LI.get(k) : def;
+  const det = (cls, k, abierto, cab, cuerpo) => `<details class="${cls}" data-li="${esc(k)}"${abierto ? ' open' : ''}><summary>${cab}${IC('chev', 'dl-li-flecha')}</summary>${cuerpo}</details>`;
+  const mini = (id) => `<img data-mini="${esc(id)}" alt=""${minis[id] ? ` src="${minis[id]}"` : ''}>`;
+  // Las fotos de un cuarto ese día (su pedido del 14-oct: "en ese cuarto deberían estar las fotos"): todas las que se
+  // tomaron ahí ese día, menos las del medidor (esas ya salen con su lectura).
+  const deLecturas = new Set(LECT.map(f => f.foto_id).filter(Boolean));
+  const fotosDe = (cuartoId, dia) => fotos.lista().filter(f => f.cuarto_id === cuartoId && !deLecturas.has(f.id) && fotos.claveDia(fotos.fechaFoto(f)) === dia);
+  FIRMA_FOTOS = firmaFotos();
+  const tarjeta = (dia) => {
+    const lectDia = LECT.filter(f => f.dia === dia);
+    const todos = rec.length > 0 && rec.every(c => lectDia.some(f => f.cuarto_id === c.id));
+    const [est, cls] = dia < hoy || todos ? ['Completed', 'ok'] : ['In progress', 'curso'];
+    const abreDia = ab('d:' + dia, dia === ultimo);
+    let nivelAbierto = false, cuartoAbierto = false;
+    const niveles = NIVELES.filter(n => cuartosDeNivel(CUARTOS, n.id).length).map(n => {
+      // Entra el cuarto con algo ese día, y también el que tenía equipo trabajando (se cobra ese día aunque nadie lo leyera).
+      const conEquipo = (c) => { const e = R.equipoEnDia(porDia, c.id, dia); return !!e && Object.values(e.cuentas).some(k => k > 0); };
+      const cs = cuartosDeNivel(CUARTOS, n.id).filter(c => lectDia.some(f => f.cuarto_id === c.id) || (porDia[c.id] || {})[dia] || fotosDe(c.id, dia).length || conEquipo(c));
+      const abreN = ab('n:' + dia + ':' + n.id, !nivelAbierto && dia === ultimo && cs.length > 0); if(abreN) nivelAbierto = true;
+      const cuartos = cs.map(c => {
+        const ls = R.lecturasDelDia(LECT, c.id, dia), e = R.equipoEnDia(porDia, c.id, dia), fs = fotosDe(c.id, dia);
+        const abreC = ab('c:' + dia + ':' + c.id, abreN && !cuartoAbierto); if(abreC) cuartoAbierto = true;
+        const lecturas = ls.map(f => { const ant = R.lecturaAnterior(LECT, c.id, f.material, f.ubicacion, dia), t = ant && R.tendencia(ant.valor, Number(f.valor));
+          return `<button type="button" class="dl-li-lec"${f.foto_id ? ` data-dl-foto="${esc(f.foto_id)}"` : ' disabled'}>
+          <span class="dl-li-mini">${f.foto_id ? mini(f.foto_id) : IC('camara')}</span>
+          <span class="dl-li-dat"><b>${esc(Number(f.valor).toFixed(1))}%${t && t.tipo !== 'igual' ? ` <em class="dl-tend ${t.tipo}">${esc(t.texto)}</em>` : ''}</b>${f.material ? `<span>${esc(f.material)}</span>` : ''}${f.ubicacion ? `<span>${esc(f.ubicacion)}</span>` : ''}<small>${esc(R.fechaLarga(dia))}</small></span>${IC('chev-der', 'dl-li-chev')}</button>`; }).join('');
+        const fotosHtml = fs.length ? `<div class="dl-li-fotos"><small>Photos <b>${fs.length}</b></small><div class="dl-li-tira">${fs.map(f => `<button type="button" class="dl-li-foto" data-dl-foto="${esc(f.id)}" aria-label="Open photo">${mini(f.id)}</button>`).join('')}</div></div>` : '';
+        // Todo el equipo que había ese día (lo último contado ese día o antes), cada uno con su dibujo y su cantidad.
+        const items = e ? Object.entries(e.cuentas).filter(([, k]) => k > 0) : [];
+        const editar = dia === hoy && !web ? `<button type="button" class="dl-li-eq-ir" data-dl-li-eq="${esc(c.id)}" aria-label="Equipment in ${esc(c.nombre)}">${IC('chev-der')}</button>` : '';
+        const equipo = `<div class="dl-li-eq"><small>Equipment${e && e.desde !== dia ? ` <em>(counted ${esc(R.fechaCorta(e.desde))})</em>` : ''}</small><div class="dl-li-eq-f">${!e ? '<span class="dl-li-eq-no">Equipment not counted</span>'
+            : items.length ? `<div class="dl-li-eq-g">${items.map(([t, k]) => `<span class="dl-li-eq-i">${dibujoEq(icEq(t))}<span><small>${esc(ETIQ_CORTA[t] || t)}</small><b>${k}</b></span></span>`).join('')}</div>`
+            : '<span class="dl-li-eq-no">No equipment</span>'}${editar}</div></div>`;
+        return det('dl-li-cu', 'c:' + dia + ':' + c.id, abreC, `${IC(iconoCuarto(c), 'dl-li-ic')}<b>${esc(c.nombre)}</b>`, `<div class="dl-li-in">${lecturas}${fotosHtml}${equipo}</div>`);
+      }).join('');
+      return det('dl-li-niv', 'n:' + dia + ':' + n.id, abreN, `${IC('dl-capas', 'dl-li-ic')}<b>${esc(n.nombre)}</b>`, `<div class="dl-li-in">${cuartos || '<p class="dl-li-nada">Nothing logged on this floor.</p>'}</div>`);
+    }).join('');
+    return det('card dl-li-dia', 'd:' + dia, abreDia, `<b class="dl-li-fecha">${esc(R.fechaLarga(dia))}</b><span class="dl-li-est ${cls}">${est}</span>`, `<div class="dl-li-in">${niveles}</div>`);
   };
-  const niveles = NIVELES.map(n => { const cs = cuartosDeNivel(CUARTOS, n.id); const con = cs.filter(conDatos), sin = cs.filter(c => !conDatos(c));
-    if(!cs.length) return '';
-    return `<h3 class="dl-sec dl-reg-nivel">${esc(n.nombre)}</h3>${con.map(c => { const leido = R.lecturasDelDia(LECT, c.id, hoy).length;
-        return `<div class="dl-reg-cuarto"><div class="dl-reg-cu-cab">${IC(iconoCuarto(c), 'dl-op-ic')}<b>${esc(c.nombre)}</b>${leido ? `<small class="dl-leido-hoy">${IC('check')}Read today</small>` : '<small class="dl-reg-falta">Not read today</small>'}</div>${tabla(c)}</div>`; }).join('')}
-      ${sin.length ? `<p class="dl-reg-sin">Nothing logged yet: ${esc(sin.map(c => c.nombre).join(', '))}</p>` : ''}`; }).join('');
-  const acc = `<button type="button" class="btn btn-outline" data-dl-reporte>${IC('doc')}View Report</button><button type="button" class="btn btn-accent" data-dl="paso1">${IC('mas')}New Reading</button>`;
-  return `<div class="card dl-paso dl-reg">
-    <div class="dl-reg-cabeza"><div><p class="dl-paso-n">Dry Log · Day ${diaNum()}</p><h2 class="dl-paso-t">Drying record</h2>
-      <p class="dl-paso-sub">${esc(rango)} · ${nCuartos} room${nCuartos === 1 ? '' : 's'} · ${LECT.length} reading${LECT.length === 1 ? '' : 's'}</p></div>
-      ${web ? `<div class="dl-reg-acc">${acc}</div>` : ''}</div>
-    ${AVISO_TEL ? `<p class="dl-tel-aviso">${IC('check')}${esc(AVISO_TEL)}</p>` : ''}
-    ${niveles || '<p class="vacio">No levels yet.</p>'}
-    ${web ? '' : `<div class="dl-botones"><button type="button" class="btn btn-outline" data-dl-ir="dia">Back</button><button type="button" class="btn btn-accent" data-dl-reporte>${IC('doc')}Dry Log Report</button></div>`}
-  </div>`;
+  // La que sigue: hoy si hoy todavía no hay nada anotado; si ya hay tarjeta de hoy (lecturas o equipo), mañana.
+  const prox = dias.some(d => d.dia === hoy) ? R.sumarDias(hoy, 1) : hoy;
+  const proxNiv = NIVELES.filter(n => cuartosDeNivel(CUARTOS, n.id).length).map(n => det('dl-li-niv', 'p:' + n.id, ab('p:' + n.id, false), `${IC('dl-capas', 'dl-li-ic')}<b>${esc(n.nombre)}</b>`,
+    `<div class="dl-li-in"><p class="dl-li-nada">${esc(cuartosDeNivel(CUARTOS, n.id).map(c => c.nombre).join(' · '))}</p></div>`)).join('');
+  const proxima = det('card dl-li-dia', 'prox', ab('prox', true), `<b class="dl-li-fecha">${esc(R.fechaLarga(prox))}</b><span class="dl-li-est prox">Upcoming</span>`,
+    `<div class="dl-li-in">${proxNiv}<div class="dl-li-vacio">${IC('info')}<span><b>No readings yet</b><small>Take readings to see them listed here.</small></span></div></div>`);
+  // En la computadora (su pedido: "con este mismo estilo haz el de la web"): arriba View Report y + New Reading.
+  const cab = web
+    ? `<div class="dl-lista-cab"><h2 class="dl-lista-t">Dry Logs</h2><div class="dl-lista-acc"><button type="button" class="btn btn-outline" data-dl-reporte>${IC('doc')}View Report</button><button type="button" class="btn btn-accent" data-dl="paso1">${IC('mas')}New Reading</button></div></div>`
+    : '<h2 class="dl-lista-t">Dry Logs</h2>';
+  const mas = web ? 'data-dl="paso1"' : 'data-dl-mas';
+  return `<div class="dl-tel dl-lista${web ? ' dl-lista-web' : ''}">${cab}${AVISO_TEL ? `<p class="dl-tel-aviso">${IC('check')}${esc(AVISO_TEL)}</p>` : ''}${dias.map(d => tarjeta(d.dia)).join('')}${proxima}
+    <p class="aviso" id="dlAviso"></p>
+    <button type="button" class="btn btn-accent dl-lista-mas" ${mas}>${IC('mas-circulo')}Take More Readings</button>
+    <p class="dl-lista-nota">New readings use today's date automatically.</p></div>`;
+}
+// Las fotos chiquitas del medidor (firmadas, como en Photos).
+async function cargarMinis(){
+  const ids = [...new Set([...document.querySelectorAll('#panel-secado img[data-mini]')].filter(i => !i.getAttribute('src')).map(i => i.dataset.mini))];
+  if(!ids.length) return;
+  let u = {}; try{ u = await fotos.urlsFirmadas(ids, 'mini'); }catch{}
+  document.querySelectorAll('#panel-secado img[data-mini]').forEach(i => { if(!i.getAttribute('src') && u[i.dataset.mini]) i.src = u[i.dataset.mini]; });
 }
 async function borrarLectura(id){
   const f = LECT.find(x => x.id === id); if(!f || OCUPADO_TEL) return;
@@ -853,23 +924,29 @@ const BARRA = {
   cam: [['dl-herramientas', 'Equipment', 'equipo'], ['dl-sig', 'Next room', 'saltar'], ['dl-fin', 'Finish', 'fin']],
   lectura: [['girar-der', 'Retake', 'retomar'], ['flecha-der', 'Continue', 'continuar'], ['dl-fin', 'Finish', 'fin']],
   guardado: [['prohibido', 'No equip.', 'sin-equipo'], ['dl-herramientas', 'Add equip.', 'equipo'], ['dl-fin', 'Finish', 'fin']],
-  equipo: [['mas-circulo', 'Add type', 'tipo'], ['dl-guardar', 'Save & next', 'guardar-eq'], ['dl-fin', 'Finish', 'fin']]
+  equipo: [['mas-circulo', 'Add type', 'tipo'], ['dl-guardar', 'Save & next', 'guardar-eq'], ['dl-fin', 'Finish', 'fin']],
+  // Su diseño de la lista (14-oct): Back · Dry Logs · cámara · Rooms · Finish
+  lista: [['doc', 'Dry Logs', 'lista'], ['dl-capas', 'Rooms', 'rooms'], ['dl-fin', 'Finish', 'fin']],
+  dia: [['doc', 'Dry Logs', 'lista'], ['dl-capas', 'Rooms', 'rooms'], ['dl-fin', 'Finish', 'fin']]
 };
 function pintarBarra(){
   const pie = $('#pie'), c = caja(); if(!pie) return;
-  const p = !esCompu() && c && !c.closest('[hidden]') && BARRA[PANTALLA] ? PANTALLA : '';
+  const p = SESION && !esCompu() && c && !c.closest('[hidden]') && BARRA[PANTALLA] ? PANTALLA : '';
   document.body.classList.toggle('dl-barra', !!p);
   if(!p) return;
   if(!pie.querySelector('.dl-tab')){
     // Tres botones propios, cada uno junto al que reemplaza (los de siempre no se tocan, solo se esconden).
     ['proyectos', 'clients', 'settings'].forEach(n => { const b = pie.querySelector('[data-nav="' + n + '"]'); if(b) b.insertAdjacentHTML('afterend', '<button type="button" class="tab dl-tab"></button>'); });
   }
-  pie.querySelectorAll('.dl-tab').forEach((b, i) => { const d = BARRA[p][i]; if(!d) return; const [ic, t, a] = d;
-    if(b.dataset.dlBarra !== a){ b.dataset.dlBarra = a; b.classList.toggle('dl-tab-fin', a === 'fin'); b.innerHTML = IC(ic) + '<span>' + t + '</span>'; } });
+  const fila = p === 'equipo' && VOLVER ? BARRA.equipo.map(d => d[2] === 'guardar-eq' ? [d[0], 'Save', d[2]] : d) : BARRA[p];
+  pie.querySelectorAll('.dl-tab').forEach((b, i) => { const d = fila[i]; if(!d) return; const [ic, t, a] = d;
+    if(b.dataset.dlFirma !== a + '|' + t){ b.dataset.dlFirma = a + '|' + t; b.dataset.dlBarra = a; b.classList.toggle('dl-tab-fin', a === 'fin'); b.innerHTML = IC(ic) + '<span>' + t + '</span>'; } });
 }
 async function accionBarra(a){
   if(OCUPADO_TEL && a !== 'tipo') return;
   if(a === 'fin'){ terminar(); return; }
+  if(a === 'lista'){ VOLVER = null; PANTALLA = 'lista'; AVISO_TEL = ''; pintarAqui(); const m = $('#main'); if(m) m.scrollTop = 0; return; }
+  if(a === 'rooms'){ if(PANTALLA === 'lista') desdeLista(); PANTALLA = 'dia'; AVISO_TEL = ''; pintarAqui(); const m = $('#main'); if(m) m.scrollTop = 0; return; }
   if(a === 'saltar'){ const n = nombreDe(CUARTOS, CUARTO); AUTO = false; avanzar(n, 'Skipped ' + n + '.'); return; }
   if(a === 'equipo'){ if(GUARDADA && GUARDADA.cuarto_id !== CUARTO) GUARDADA = null; abrirEquipo(); return; }
   if(a === 'retomar'){ PANTALLA = 'cam'; AVISO_TEL = ''; pintarAqui(); return; }
@@ -883,9 +960,12 @@ async function terminar(){
   if(PANTALLA === 'lectura' && FOTO){ const ok = await guardarLectura(true); if(!ok) return; }
   else if(PANTALLA === 'lectura' && ESPERA_MAT){ const ok = await ESPERA_MAT; ESPERA_MAT = null; RUEDA = false; if(!ok) return; }
   else if(PANTALLA === 'equipo'){ const ok = await guardarEquipo(true); if(!ok) return; }
-  GUARDADA = null; AVISO_TEL = ''; PANTALLA = 'dia'; pintarAqui();
+  // Termina la sesión: la lista de Dry Logs con la barra de siempre (su pedido: "al presionar Finish vuelven esos botones").
+  GUARDADA = null; AVISO_TEL = ''; SESION = false; VOLVER = null; PANTALLA = esCompu() ? 'dia' : 'lista'; pintarAqui();
   const m = $('#main'); if(m) m.scrollTop = 0;
 }
+// "Take More Readings" (y la cámara de abajo en la lista): empieza la vuelta de hoy en el primer cuarto que falta.
+function iniciarLecturas(){ SESION = true; VOLVER = null; GUARDADA = null; AVISO_TEL = ''; CUARTO = null; AUTO = true; PANTALLA = 'cam'; pintarAqui(); }
 // La cámara de abajo en la pantalla del equipo: foto del equipo del cuarto (va a Photos, a ese cuarto: es la prueba
 // de las unidades para el invoice).
 const EQ_FOTOS = {};
@@ -904,7 +984,7 @@ function fotoEquipo(){
   document.body.appendChild(inp); inp.click();
 }
 // La ficha la llama al cambiar a otra pestaña.
-export function salir(){ apagarCam(); document.body.classList.remove('dl-fijo', 'dl-escribiendo', 'dl-barra'); if(['cam', 'lectura', 'guardado', 'equipo', 'dia'].includes(PANTALLA)) PANTALLA = 'vacio'; }
+export function salir(){ apagarCam(); SESION = false; VOLVER = null; document.body.classList.remove('dl-fijo', 'dl-escribiendo', 'dl-barra'); if(['cam', 'lectura', 'guardado', 'equipo', 'dia', 'lista'].includes(PANTALLA)) PANTALLA = 'vacio'; }
 
 // ---------- toques ----------
 export function conectar(){
@@ -917,12 +997,21 @@ export function conectar(){
       if(PANTALLA === 'lectura'){ if(RUEDA) okRueda(); else siguienteLectura(); }
       else if(PANTALLA === 'guardado'){ GUARDADA = null; AVISO_TEL = ''; PANTALLA = 'cam'; pintarAqui(); }
       else if(PANTALLA === 'equipo') fotoEquipo();
+      else if(PANTALLA === 'lista' || PANTALLA === 'dia') iniciarLecturas();
       return;
     }
     if(PANTALLA !== 'cam' || !$('#dlVideo') || !$('#dlVideo').offsetParent) return;
     e.preventDefault(); e.stopImmediatePropagation();
     if(camViva()) disparar(); else camaraDelTelefono();
   }, true);
+  // Se recuerda solo lo que la persona abre o cierra (el navegador avisa "toggle" también al dibujar lo que ya viene abierto).
+  document.addEventListener('click', (e) => { const s = e.target.closest && e.target.closest('#panel-secado details[data-li] > summary'); if(s) ABIERTO_LI.set(s.parentElement.dataset.li, !s.parentElement.open); }, true);
+  // Al regresar de una foto abierta desde la lista: la barra del Dry Log y el lugar donde estaba.
+  alMostrar((id) => {
+    if(id !== 'pTrabajo') return;
+    const v = VISOR_DE; VISOR_DE = null;
+    requestAnimationFrame(() => { pintarBarra(); if(v && caja() && !caja().closest('[hidden]')){ const m = $('#main'); if(m) m.scrollTop = v.scroll; } });
+  });
   document.addEventListener('click', (e) => { const b = e.target.closest && e.target.closest('#pie .dl-tab'); if(!b || !document.body.classList.contains('dl-barra')) return; e.preventDefault(); accionBarra(b.dataset.dlBarra); });
   document.addEventListener('change', (e) => {
     const sel = e.target.closest && e.target.closest('[data-dl-sel]'); if(!sel || !caja() || !caja().contains(sel)) return;
@@ -992,11 +1081,18 @@ export function conectar(){
     if(q('[data-eq-agregar]')){ EQ.agregando = true; pintarAqui(); const i = $('#dlEqNuevo'); if(i) i.focus(); return; }
     if((el = q('[data-eq-nuevo]'))){ if(el.dataset.eqNuevo === 'si') agregarTipo(); else { EQ.agregando = false; pintarAqui(); } return; }
     if(q('[data-eq-guardar]')){ guardarEquipo(); return; }
-    if((el = q('[data-dl-ir]'))){ PANTALLA = el.dataset.dlIr; if(PANTALLA === 'cam') AVISO_TEL = ''; pintarAqui(); const m = $('#main'); if(m && (PANTALLA === 'dia' || PANTALLA === 'registro')) m.scrollTop = 0; return; }   // el registro abre arriba, no a media lista
-    if((el = q('[data-dl-ir-cuarto]'))){ const k = CUARTOS.find(x => x.id === el.dataset.dlIrCuarto); if(k){ NIVEL = k.nivel_id; CUARTO = k.id; AUTO = false; } AVISO_TEL = ''; GUARDADA = null; PANTALLA = 'cam'; pintarAqui(); return; }
+    if((el = q('[data-dl-ir]'))){ VOLVER = null; PANTALLA = el.dataset.dlIr; if(PANTALLA === 'cam') AVISO_TEL = ''; pintarAqui(); const m = $('#main'); if(m && ['dia', 'registro', 'lista'].includes(PANTALLA)) m.scrollTop = 0; return; }   // el registro abre arriba, no a media lista
+    if((el = q('[data-dl-ir-cuarto]'))){ VOLVER = null; const k = CUARTOS.find(x => x.id === el.dataset.dlIrCuarto); if(k){ NIVEL = k.nivel_id; CUARTO = k.id; AUTO = false; } AVISO_TEL = ''; GUARDADA = null; PANTALLA = 'cam'; pintarAqui(); return; }
     if(q('[data-dl-saltar]')){ const n = nombreDe(CUARTOS, CUARTO); AUTO = false; avanzar(n, 'Skipped ' + n + '.'); return; }
     if(q('[data-dl-otro]')){ GUARDADA = null; AVISO_TEL = ''; PANTALLA = 'cam'; pintarAqui(); return; }
     if((el = q('[data-dl-borrar]'))){ borrarLectura(el.dataset.dlBorrar); return; }
+    if(q('[data-dl-mas]')){ iniciarLecturas(); return; }
+    if((el = q('[data-dl-foto]'))){
+      const cu = el.closest('.dl-li-cu'), ids = cu ? [...cu.querySelectorAll('[data-dl-foto]')].map(b => b.dataset.dlFoto) : [el.dataset.dlFoto];
+      const m = $('#main'); VISOR_DE = { scroll: m ? m.scrollTop : 0 };
+      fotos.abrirVisor(el.dataset.dlFoto, ids).then(ok => { if(!ok) VISOR_DE = null; });
+      return; }
+    if((el = q('[data-dl-li-eq]'))){ const k = CUARTOS.find(x => x.id === el.dataset.dlLiEq); if(k){ desdeLista(); NIVEL = k.nivel_id; CUARTO = k.id; AUTO = false; GUARDADA = null; SESION = true; abrirEquipo(); } return; }
     if(q('[data-dl-reporte]')){ const b = document.querySelector('#pTrabajo [data-ptab="documentos"]'); if(b) b.click(); return; }
     if((el = q('[data-dl-nivel]'))){ if(NIVEL !== el.dataset.dlNivel){ NIVEL = el.dataset.dlNivel; CUARTO = null; } pintarAqui(); return; }
     if((el = q('[data-dl-cuarto]'))){ CUARTO = el.dataset.dlCuarto; pintarAqui(); return; }
