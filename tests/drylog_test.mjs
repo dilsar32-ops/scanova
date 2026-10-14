@@ -1,0 +1,25 @@
+// Scanova360 · carpeta Dry Logs con SU diseño (14-oct): vacío -> Start Dry Log -> paso 1 (nivel y cuarto).
+import fs from 'node:fs';
+import * as DL from '../docs/drylog.js';
+let pass = 0, fail = 0;
+const ok = (l, c) => { if(c){ pass++; console.log('  ok  ' + l); } else { fail++; console.log('  FAIL ' + l); } };
+const NIV = [{ id:'n1', nombre:'Level 1' }, { id:'n2', nombre:'Level 2' }, { id:'n3', nombre:'Attic' }];
+const CUA = [{ id:'a', nivel_id:'n1', nombre:'Kitchen' }, { id:'b', nivel_id:'n1', nombre:'Dining Room' }, { id:'c', nivel_id:'n1', nombre:'East Living Room' }, { id:'d', nivel_id:'n1', nombre:'Hallway' }, { id:'e', nivel_id:'n2', nombre:'Master Bedroom' }];
+ok('cuántos cuartos tiene cada nivel (4 rooms / 1 room / 0 rooms)', DL.textoCuartos(DL.cuartosDeNivel(CUA, 'n1').length) === '4 rooms' && DL.textoCuartos(DL.cuartosDeNivel(CUA, 'n2').length) === '1 room' && DL.textoCuartos(0) === '0 rooms');
+ok('el nivel que sale escogido: el primero con cuartos', DL.nivelInicial(NIV, CUA) === 'n1' && DL.nivelInicial([{ id:'x' }, { id:'n2' }], CUA) === 'n2' && DL.nivelInicial([{ id:'x' }], []) === 'x' && DL.nivelInicial([], []) === null);
+ok('íconos de su diseño: Kitchen, Dining Room, East Living Room, Hallway', DL.iconoCuarto(CUA[0]) === 'dl-cocina' && DL.iconoCuarto(CUA[1]) === 'dl-comedor' && DL.iconoCuarto(CUA[2]) === 'dl-sofa' && DL.iconoCuarto(CUA[3]) === 'dl-puerta');
+ok('íconos: recámara, baño, lavandería, y uno general para lo demás', DL.iconoCuarto({ nombre:'Master Bedroom' }) === 'dl-cama' && DL.iconoCuarto({ nombre:'Guest Bath' }) === 'dl-bano' && DL.iconoCuarto({ nombre:'Laundry Room' }) === 'dl-lavar' && DL.iconoCuarto({ nombre:'Garage' }) === 'dl-cuarto' && DL.iconoCuarto({ nombre:'Room 3', tipo:'Kitchen' }) === 'dl-cocina');
+ok('WEB: con cuartos creados en Photos abre directo en el paso 1; sin cuartos, la portada "No dry logs yet"', DL.abreEnPaso1(true, CUA, false) === true && DL.abreEnPaso1(true, [], false) === false);
+ok('TELÉFONO: por ahora sigue igual (portada y Start), su diseño del teléfono viene aparte', DL.abreEnPaso1(false, CUA, false) === false);
+ok('si toca Back en la web, se queda en la portada (no lo regresa solo al paso 1)', DL.abreEnPaso1(true, CUA, true) === false);
+ok('WEB: la tarjeta llega al fondo de la pantalla (alto de la pantalla menos donde empieza), nunca más chica que 420', DL.altoTarjeta(786, 230, 16) === 540 && DL.altoTarjeta(500, 400, 16) === 420);
+const js = fs.readFileSync(new URL('../docs/drylog.js', import.meta.url), 'utf8');
+ok('textos de su diseño: No dry logs yet / Start Dry Log / Step 1 of 3 / Where are you taking the reading?', ['No dry logs yet', 'Start by scanning the first meter reading for this project.', 'Start Dry Log', "You'll choose a level, room, material and measurement point next.", 'New Dry Log · Step 1 of 3', 'Where are you taking the reading?', 'First select a level, then choose a room to take a moisture reading.', '1. Select level', '2. Select room'].every(t => js.includes(t)));
+ok('Continue apagado hasta escoger el cuarto; cambiar de nivel borra el cuarto escogido', /data-dl="paso2"\$\{CUARTO \? '' : ' disabled'\}/.test(js) && /if\(NIVEL !== el\.dataset\.dlNivel\)\{ NIVEL = el\.dataset\.dlNivel; CUARTO = null; \}/.test(js));
+ok('cada paso tiene Back abajo', (js.match(/class="dl-atras"/g) || []).length >= 2);
+const idx = fs.readFileSync(new URL('../docs/index.html', import.meta.url), 'utf8');
+ok('los íconos de los cuartos existen en la app', ['dl-hoja', 'dl-cocina', 'dl-comedor', 'dl-sofa', 'dl-puerta', 'dl-cama', 'dl-bano', 'dl-lavar', 'dl-cuarto'].every(n => idx.includes('id="i-' + n + '"')));
+const css = fs.readFileSync(new URL('../docs/estilo.css', import.meta.url), 'utf8').split('===== Dry Logs (14-oct')[1] || 'x';
+ok('el CSS de Dry Logs no usa verde ni position:fixed', !/#16a34a|green|var\(--ok\)|position:\s*fixed/.test(css));
+console.log(`\ndrylog: ${pass} ok, ${fail} fallas`);
+if(fail) process.exit(1);

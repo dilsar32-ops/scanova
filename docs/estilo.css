@@ -1634,3 +1634,62 @@ body.fv-editando .fv-asa{ visibility:hidden; }
 .seco-clima{ flex:1 1 100%; margin:2px 0 0; color:var(--ink-soft); font-size:12.5px; line-height:1.45; }
 .seco-clima:empty{ display:none; }
 .seco-clima-btn{ font:inherit; font-size:12.5px; font-weight:700; color:var(--accent); background:none; border:0; padding:2px 0; cursor:pointer; }
+
+/* ===== Dry Logs (14-oct, su diseño): "No dry logs yet" y New Dry Log paso a paso. Azul Scanova, nada verde. ===== */
+.dl-vacio{ display:flex; flex-direction:column; align-items:center; text-align:center; padding:56px 16px 40px; }
+.dl-vacio-ic{ width:96px; height:96px; border-radius:50%; background:var(--accent-soft); display:grid; place-items:center; margin-bottom:22px; }
+.dl-vacio-ic .ic{ width:44px; height:44px; color:var(--accent); stroke-width:1.6; }
+.dl-vacio h2{ margin:0 0 10px; font-size:22px; font-weight:700; letter-spacing:-.01em; }
+.dl-vacio p{ margin:0 0 20px; color:var(--ink-soft); font-size:15.5px; line-height:1.45; }
+.dl-vacio small{ margin-top:16px; color:var(--ink-mute); font-size:13px; line-height:1.45; }
+.dl-empezar{ padding:0 22px; }
+.dl-paso{ padding:22px 20px 18px; }
+.dl-paso-n{ margin:0 0 6px; color:var(--ink-soft); font-size:13.5px; }
+.dl-paso-t{ margin:0 0 6px; font-size:22px; font-weight:700; letter-spacing:-.015em; line-height:1.2; }
+.dl-paso-t small{ color:var(--ink-mute); font-size:15px; font-weight:500; margin-left:6px; }
+.dl-paso-sub{ margin:0 0 18px; color:var(--ink-soft); font-size:15px; line-height:1.45; }
+.dl-sec{ margin:0 0 10px; font-size:15.5px; font-weight:700; }
+.dl-sec small{ color:var(--ink-mute); font-size:13px; font-weight:500; }
+.dl-niveles{ display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:14px; margin-bottom:20px; }
+.dl-cuartos{ display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:14px; margin-bottom:8px; }
+.dl-op{ position:relative; display:flex; align-items:center; gap:14px; min-height:64px; padding:14px 40px 14px 16px; font:inherit; color:var(--ink); text-align:left; background:var(--card); border:1px solid var(--line2); border-radius:10px; cursor:pointer; }
+.dl-op:hover{ border-color:var(--accent); }
+.dl-op.on{ border-color:var(--accent); background:var(--accent-soft); box-shadow:0 0 0 1px var(--accent) inset; }
+.dl-op .dl-op-ic{ width:30px; height:30px; stroke-width:1.5; color:var(--ink); }
+.dl-op-txt{ display:flex; flex-direction:column; min-width:0; }
+.dl-op-txt b{ font-size:15px; font-weight:600; overflow-wrap:break-word; hyphens:none; }
+.dl-op-txt small{ color:var(--ink-soft); font-size:13px; margin-top:2px; }
+.dl-cuarto{ align-items:flex-end; min-height:74px; padding-top:12px; }
+.dl-cuarto .dl-op-ic{ align-self:flex-start; }
+.dl-cuarto .dl-op-txt b{ font-weight:500; font-size:14.5px; }
+.dl-radio{ position:absolute; top:12px; right:12px; width:18px; height:18px; border-radius:50%; border:1.5px solid var(--ink-mute); background:var(--card); }
+.dl-radio.on{ border-color:var(--accent); box-shadow:inset 0 0 0 3.5px var(--card); background:var(--accent); }
+.dl-falta{ background:var(--bg2); border-radius:10px; padding:14px; margin-bottom:16px; color:var(--ink-soft); font-size:14px; line-height:1.45; }
+.dl-falta p{ margin:0 0 8px; }
+.dl-falta p:last-child{ margin:0; }
+.dl-pie{ display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:18px; padding-top:14px; border-top:1px solid var(--line); }
+.dl-atras{ display:inline-flex; align-items:center; gap:4px; font:inherit; font-size:15px; font-weight:600; color:var(--accent); background:none; border:0; padding:8px 4px; cursor:pointer; }
+.dl-atras .ic{ width:18px; height:18px; }
+.dl-seguir{ min-width:150px; }
+.dl-seguir:disabled{ background:var(--line2); color:#fff; box-shadow:none; cursor:not-allowed; }
+@media (max-width:520px){ .dl-cuartos{ grid-template-columns:1fr 1fr; gap:10px; } .dl-niveles{ grid-template-columns:1fr; gap:10px; } .dl-op{ padding-left:12px; gap:10px; } .dl-cuarto{ flex-direction:column; align-items:flex-start; gap:8px; padding-right:34px; } }
+/* Dry Logs en la WEB: la tarjeta del paso ocupa toda la pantalla (el alto lo pone drylog.js) y todo se agranda. */
+@media (min-width:900px){
+  .dl-paso{ display:flex; flex-direction:column; padding:24px 30px 20px; margin-bottom:-32px; }
+  .dl-paso .dl-pie{ margin-top:auto; padding-top:16px; }
+  .dl-paso-n{ font-size:14.5px; margin-bottom:8px; }
+  .dl-paso-t{ font-size:28px; margin-bottom:6px; }
+  .dl-paso-sub{ font-size:16px; margin-bottom:22px; }
+  .dl-sec{ font-size:16.5px; margin-bottom:12px; }
+  .dl-niveles{ grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:16px; margin-bottom:24px; }
+  .dl-cuartos{ grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:16px; }
+  .dl-op{ min-height:80px; padding:16px 48px 16px 20px; gap:16px; border-radius:12px; }
+  .dl-op .dl-op-ic{ width:36px; height:36px; }
+  .dl-op-txt b{ font-size:17px; }
+  .dl-op-txt small{ font-size:14.5px; margin-top:4px; }
+  .dl-cuarto{ min-height:104px; flex-direction:column; align-items:flex-start; justify-content:space-between; gap:12px; }
+  .dl-cuarto .dl-op-txt b{ font-size:16px; }
+  .dl-radio{ top:16px; right:16px; width:20px; height:20px; }
+  .dl-atras{ font-size:16px; }
+  .dl-seguir{ min-width:190px; min-height:48px; font-size:16px; }
+}

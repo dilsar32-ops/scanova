@@ -1,13 +1,14 @@
 // Scanova · la ficha de un proyecto (diseño de Amilcar, 12 oct 2026): portada, nombre, dirección, etapa, cliente,
-// encargado y fecha; pestañas Rooms · Photos · Dry Log · Floor Plan · Measurements · Notes · Documents · Activity.
+// encargado y fecha; pestañas Rooms · Photos · Dry Logs · Floor Plan · Measurements · Notes · Documents · Activity.
 // Rooms = niveles (Basement, First Floor…) y sus cuartos (Kitchen…). Photos = las fotos por nivel y por cuarto.
-import { $, $$, authFetch, irA, atras, esManager, PERFIL } from './app.js?v=2026-10-14-9';
-import * as trabajos from './trabajos.js?v=2026-10-14-9';
-import * as fotos from './fotos.js?v=2026-10-14-9';
-import * as panel from './panel.js?v=2026-10-14-9';
-import * as planos from './planos.js?v=2026-10-14-9';
-import * as camara from './camara.js?v=2026-10-14-9';
-import * as detalles from './detalles.js?v=2026-10-14-9';
+import { $, $$, authFetch, irA, atras, esManager, PERFIL } from './app.js?v=2026-10-14-10';
+import * as trabajos from './trabajos.js?v=2026-10-14-10';
+import * as fotos from './fotos.js?v=2026-10-14-10';
+import * as panel from './panel.js?v=2026-10-14-10';
+import * as planos from './planos.js?v=2026-10-14-10';
+import * as camara from './camara.js?v=2026-10-14-10';
+import * as detalles from './detalles.js?v=2026-10-14-10';
+import * as drylog from './drylog.js?v=2026-10-14-10';
 
 const esc = (v) => trabajos.esc(v);
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -16,7 +17,7 @@ const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href=
 export const NIVELES_RAPIDOS = ['Basement', 'First Floor', 'Second Floor', 'Third Floor', 'Attic', 'Other'];
 export const TIPOS_CUARTO = ['Living Room', 'Kitchen', 'Bedroom', 'Bathroom', 'Hallway', 'Other'];
 // Su orden (14-oct): Photos, Dry Log, Floor Plan, Measurements… (la app es para compañías de water damage).
-export const TABS = [['cuartos', 'Rooms'], ['fotos', 'Photos'], ['secado', 'Dry Log'], ['plano', 'Floor Plan'], ['medidas', 'Measurements'], ['notas', 'Notes'], ['documentos', 'Documents'], ['actividad', 'Activity']];
+export const TABS = [['cuartos', 'Rooms'], ['fotos', 'Photos'], ['secado', 'Dry Logs'], ['plano', 'Floor Plan'], ['medidas', 'Measurements'], ['notas', 'Notes'], ['documentos', 'Documents'], ['actividad', 'Activity']];
 const fechaF = (f) => f.tomada_at || f.subida_at || '';
 export const fechaHora = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) + ' ' + d.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' }); };
 export const fechaCortaEn = (iso) => { if(!iso) return ''; const d = new Date(String(iso).length === 10 ? iso + 'T12:00:00' : iso); return isNaN(d) ? '' : d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }); };
@@ -203,13 +204,16 @@ export function abrir(t, portada){
 export const tabActual = () => TAB;
 function irTab(k){
   TAB = k; MODO_SEL = false; SEL.clear();
+  if(k === 'secado') drylog.entrar();
   $$('#fichaTabs .ptab').forEach(b => b.classList.toggle('on', b.dataset.ptab === k));
   $$('#trabajoFicha .tab-panel').forEach(p => { p.hidden = p.dataset.panel !== k; });
   const b = $('#fichaTabs .ptab.on'); if(b && b.scrollIntoView) b.scrollIntoView({ block:'nearest', inline:'center' });
   pintarTodo();
   if(k === 'plano') planos.enfocar(); else document.body.classList.remove('pl-fijo');
 }
-function pintarTodo(){ pintarCuartos(); pintarFotos(); pintarNotas(); pintarActividad(); pintarPronto(); pintarPlano(); camara.pintarCuarto(); }
+function pintarTodo(){ pintarCuartos(); pintarFotos(); pintarNotas(); pintarActividad(); pintarPronto(); pintarPlano(); pintarDryLog(); camara.pintarCuarto(); }
+// Dry Logs (su diseño del 14-oct): se dibuja con la pestaña abierta, con los niveles y cuartos del proyecto.
+function pintarDryLog(){ if(TAB === 'secado' && T) drylog.pintar(T, NIVELES, CUARTOS); }
 // Floor Plan (su diseño): solo se dibuja cuando la pestaña está abierta (el plano pesa).
 function pintarPlano(){ if(TAB === 'plano' && T) planos.abrir(T, NIVELES, () => abrirFormaNivel(null)); }
 
@@ -323,9 +327,8 @@ function pintarActividad(){
   caja.innerHTML = items.length ? '<div class="pact">' + items.map(x => `<div class="pact-fila"><span class="pact-punto"></span><div><b>${esc(x.texto)}</b><small>${esc(fechaHora(new Date(x.cuando).toISOString()))}</small></div></div>`).join('') + '</div>' : '<p class="vacio">No activity yet.</p>';
 }
 function pintarPronto(){
-  // Dry Log (14-oct): por ahora solo la pestaña; él va a armar el diseño de adentro (docs/secado.js queda guardado, sin conectar).
-  [['secado', 'Dry Log', 'Moisture readings, atmosphere and drying equipment for this project will live here. This tab is built next, from your design.'], ['medidas', 'Measurements', 'Room measurements will live here. This tab is built next, from your design.'], ['documentos', 'Documents', 'Estimates, reports and PDFs for this project will live here. This tab is built next, from your design.']].forEach(([k, t, x]) => {
-    const caja = $('#panel-' + k); if(caja && !caja.innerHTML) caja.innerHTML = `<div class="pronto pronto-tab"><span class="pronto-ic">${IC(k === 'medidas' ? 'cubo' : k === 'secado' ? 'gota' : 'doc')}</span><h2 class="titulo chico">${t}</h2><p>${x}</p></div>`;
+  [['medidas', 'Measurements', 'Room measurements will live here. This tab is built next, from your design.'], ['documentos', 'Documents', 'Estimates, reports and PDFs for this project will live here. This tab is built next, from your design.']].forEach(([k, t, x]) => {
+    const caja = $('#panel-' + k); if(caja && !caja.innerHTML) caja.innerHTML = `<div class="pronto pronto-tab"><span class="pronto-ic">${IC(k === 'medidas' ? 'cubo' : 'doc')}</span><h2 class="titulo chico">${t}</h2><p>${x}</p></div>`;
   });
 }
 
@@ -519,6 +522,7 @@ export function conectar(){
   detalles.usarNombres(fotos.nombreDe, fotos.cargarNombres);
   detalles.alCambiar(() => { if(T) pintarActividad(); });
   detalles.conectar();
+  drylog.conectar();
   camara.usarCuartos({ hay: (id) => !!(T && T.id === id), destino: destinoActual, nombre: nombreDestino, escoger: escogerCuarto });
   fotos.alPintar(pintarFotos);
   fotos.usarDestino(destinoActual);

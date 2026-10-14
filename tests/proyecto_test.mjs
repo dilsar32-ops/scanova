@@ -13,7 +13,7 @@ const F = [
 ];
 
 ok('los niveles rápidos y los tipos de cuarto son los del diseño', P.NIVELES_RAPIDOS.join() === 'Basement,First Floor,Second Floor,Third Floor,Attic,Other' && P.TIPOS_CUARTO.join() === 'Living Room,Kitchen,Bedroom,Bathroom,Hallway,Other');
-ok('las pestañas (su orden del 14-oct): Rooms (por •••), Photos, Dry Log, Floor Plan, Measurements, Notes, Documents, Activity', P.TABS.map(x => x[1]).join() === 'Rooms,Photos,Dry Log,Floor Plan,Measurements,Notes,Documents,Activity');
+ok('las pestañas (su orden del 14-oct): Rooms (por •••), Photos, Dry Logs, Floor Plan, Measurements, Notes, Documents, Activity', P.TABS.map(x => x[1]).join() === 'Rooms,Photos,Dry Logs,Floor Plan,Measurements,Notes,Documents,Activity');
 const c = P.contar(F);
 ok('contar: total, por nivel, sin nivel y por cuarto', c.total === 4 && c.nivel.n2 === 2 && c.nivel.n1 === 1 && c.sinNivel === 1 && c.cuarto.c1 === 1 && !c.cuarto.c3);
 ok('filtrarFotos: All / un nivel / sin nivel / un cuarto', P.filtrarFotos(F, { nivel:'todos', cuarto:'todos' }).length === 4 && P.filtrarFotos(F, { nivel:'n2', cuarto:'todos' }).map(f => f.id).join() === 'f1,f2' && P.filtrarFotos(F, { nivel:'sin', cuarto:'todos' }).map(f => f.id).join() === 'f4' && P.filtrarFotos(F, { nivel:'n2', cuarto:'c2' }).map(f => f.id).join() === 'f2');

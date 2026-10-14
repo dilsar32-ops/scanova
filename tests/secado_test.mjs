@@ -38,7 +38,7 @@ ok('clima: una respuesta rara no llena nada', S.leerClima(null) === null && S.le
   ok('clima: usa el punto del trabajo y, si no hay, el GPS del teléfono', /coordsDe\(T\) \|\| await miPosicion\(\)/.test(sj0)); }
 // La pestaña en la ficha
 const pr = fs.readFileSync(new URL('../docs/proyecto.js', import.meta.url), 'utf8');
-ok('por ahora (14-oct, él arma el diseño): la pestaña Dry Log existe y adentro dice que viene; el módulo no está conectado', /\['secado', 'Dry Log'\]/.test(pr) && /\['secado', 'Dry Log', 'Moisture readings/.test(pr) && !/from '\.\/secado\.js/.test(pr));
+ok('la carpeta Dry Logs usa su diseño (drylog.js); el borrador viejo secado.js sigue sin conectar', /\['secado', 'Dry Logs'\]/.test(pr) && /from '\.\/drylog\.js/.test(pr) && !/from '\.\/secado\.js/.test(pr));
 const sj = fs.readFileSync(new URL('../docs/secado.js', import.meta.url), 'utf8');
 ok('las lecturas del día se guardan sin duplicar (una por punto por día; una por lugar por día)', /fotos_secado_lecturas\?on_conflict=punto_id,dia/.test(sj) && /fotos_secado_ambiente\?on_conflict=trabajo_id,dia,lugar/.test(sj) && /resolution=merge-duplicates/.test(sj));
 ok('comprueba que el servidor de verdad guardó (cuenta lo que regresa)', /r\.length !== poner\.length/.test(sj) && /r\.length !== amb\.length/.test(sj));
