@@ -1568,3 +1568,69 @@ body.fv-editando .fv-asa{ visibility:hidden; }
 .barra-aparato{ position:absolute; left:12px; right:12px; top:calc(10px + env(safe-area-inset-top)); z-index:200; display:flex; align-items:center; gap:10px; padding:12px 12px 12px 16px; border-radius:14px; background:#2563eb; color:#fff; font-size:14px; line-height:1.35; box-shadow:0 10px 30px rgba(10,17,35,.28); cursor:pointer; }
 .barra-aparato span{ flex:1; }
 .barra-aparato button{ flex:0 0 auto; width:30px; height:30px; border:0; border-radius:50%; background:rgba(255,255,255,.2); color:#fff; font-size:14px; cursor:pointer; }
+
+/* ===== Dry Log (14-oct): su pedido, la app es para compañías de water damage. Azul = seco, ámbar = mojado; nada verde. ===== */
+#panel-secado .subtabs.tres, .seco-forma .subtabs.tres{ grid-template-columns:repeat(3,1fr); }
+.seco-aviso{ margin:0 0 12px; }
+.seco-res{ display:flex; flex-direction:column; gap:12px; }
+.seco-dia{ display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
+.seco-dia-n{ font-size:30px; font-weight:800; letter-spacing:-.02em; color:var(--accent); line-height:1; }
+.seco-dia-t{ color:var(--ink-soft); font-size:15px; }
+.seco-barra{ height:8px; border-radius:99px; background:var(--bg2); overflow:hidden; }
+.seco-barra i{ display:block; height:100%; background:var(--accent); border-radius:99px; }
+.seco-chips{ display:flex; flex-wrap:wrap; gap:8px; }
+.seco-chip{ font-size:13.5px; font-weight:600; color:var(--ink-soft); background:var(--bg2); border-radius:99px; padding:6px 11px; }
+.seco-chip.listo{ color:var(--accent); background:var(--accent-soft); }
+.seco-hoy{ width:100%; }
+.seco-vacio{ text-align:center; }
+.seco-vacio h3{ margin:6px 0 6px; font-size:18px; }
+.seco-vacio p{ color:var(--ink-soft); line-height:1.5; margin:0 0 14px; font-size:15px; }
+.seco-vacio-ic .ic{ width:34px; height:34px; color:var(--accent); }
+.seco-grupo{ margin-bottom:16px; }
+.seco-grupo h4, .seco-h4{ margin:0 0 8px; font-size:15.5px; font-weight:700; }
+.seco-grupo h4 small, .seco-h4 small, .seco-amb h4 small{ color:var(--ink-mute); font-weight:500; font-size:13px; margin-left:4px; }
+.seco-h3{ margin:22px 0 10px; font-size:17px; font-weight:700; }
+.seco-nota{ color:var(--ink-soft); font-size:13px; line-height:1.45; margin:0 0 12px; }
+.seco-punto{ display:block; width:100%; text-align:left; font:inherit; color:var(--ink); background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:8px; cursor:pointer; box-shadow:var(--sombra); }
+.seco-p-cab{ display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+.seco-p-cab small, .seco-in small, .seco-eq small{ display:block; color:var(--ink-soft); font-size:13px; margin-top:2px; font-weight:400; }
+.seco-est{ flex:0 0 auto; font-size:12.5px; font-weight:700; color:var(--ink-soft); background:var(--bg2); border-radius:99px; padding:4px 10px; white-space:nowrap; }
+.seco-est.seco{ color:var(--accent); background:var(--accent-soft); }
+.seco-est.mojado{ color:#8a6508; background:var(--warn-soft); }
+.seco-dias{ display:flex; gap:6px; overflow-x:auto; scrollbar-width:none; margin-top:10px; padding-bottom:2px; }
+.seco-dias::-webkit-scrollbar{ display:none; }
+.seco-d{ flex:0 0 auto; min-width:58px; display:flex; flex-direction:column; align-items:center; gap:1px; background:var(--bg2); border-radius:9px; padding:6px 8px; }
+.seco-d small{ color:var(--ink-mute); font-size:11px; line-height:1.2; }
+.seco-d b{ font-size:16px; margin-top:2px; font-variant-numeric:tabular-nums; }
+.seco-d b.alto{ color:#8a6508; }
+.seco-d b.bien{ color:var(--accent); }
+.seco-amb h4{ margin:0 0 8px; font-size:15.5px; }
+.seco-amb-fila{ display:grid; grid-template-columns:minmax(0,1fr) 60px 52px 62px; gap:8px; align-items:center; padding:8px 0; border-top:1px solid var(--line); font-size:14.5px; font-variant-numeric:tabular-nums; }
+.seco-amb-fila.cab{ border-top:0; color:var(--ink-mute); font-size:12px; font-weight:600; padding-top:0; }
+.seco-amb-fila.dos{ grid-template-columns:minmax(0,1fr) auto; }
+.seco-amb-fila span:first-child{ overflow-wrap:anywhere; line-height:1.3; }
+.seco-amb-fila b{ color:var(--accent); text-align:right; }
+.seco-amb .seco-nota{ margin:10px 0 0; }
+.seco-eq{ display:flex; align-items:center; gap:10px; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin-bottom:8px; box-shadow:var(--sombra); }
+.seco-eq.quitado{ opacity:.7; box-shadow:none; }
+.seco-eq-dato{ flex:1 1 auto; min-width:0; display:flex; align-items:center; gap:12px; font:inherit; color:var(--ink); text-align:left; background:none; border:0; padding:0; cursor:pointer; }
+.seco-eq-n{ flex:0 0 auto; width:38px; height:38px; border-radius:10px; background:var(--accent-soft); color:var(--accent); display:grid; place-items:center; font-weight:800; font-size:17px; }
+.seco-eq .btn{ flex:0 0 auto; }
+.seco-forma .field{ margin-bottom:14px; }
+.seco-forma .field .subtabs{ margin-bottom:0; }
+.seco-in{ display:flex; align-items:center; gap:10px; padding:10px 0; border-top:1px solid var(--line); }
+.seco-in > span:first-child{ flex:1 1 auto; min-width:0; }
+.seco-in input{ flex:0 0 auto; width:78px; height:44px; font:inherit; font-size:16px; text-align:center; color:var(--ink); background:var(--card); border:1px solid var(--line2); border-radius:10px; padding:0 6px; }
+.seco-in input:focus{ outline:none; border-color:var(--accent); box-shadow:0 0 0 3px rgba(37,99,235,.18); }
+.seco-in.amb{ flex-wrap:wrap; }
+.seco-in.amb > span:first-child{ flex:1 1 100%; }
+.seco-in.amb input{ width:84px; }
+.seco-gpp{ font-weight:700; color:var(--accent); font-size:14.5px; font-variant-numeric:tabular-nums; }
+.seco-borrar{ width:100%; margin-top:18px; }
+.seco-forma > .sec-t{ margin-bottom:14px; }
+.seco-mini{ display:flex; flex-direction:column; gap:3px; }
+.seco-mini small{ color:var(--ink-mute); font-size:11.5px; font-weight:600; margin:0; }
+.seco-in.amb .seco-gpp{ align-self:flex-end; padding-bottom:12px; }
+.seco-clima{ flex:1 1 100%; margin:2px 0 0; color:var(--ink-soft); font-size:12.5px; line-height:1.45; }
+.seco-clima:empty{ display:none; }
+.seco-clima-btn{ font:inherit; font-size:12.5px; font-weight:700; color:var(--accent); background:none; border:0; padding:2px 0; cursor:pointer; }
