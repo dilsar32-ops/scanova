@@ -1,8 +1,8 @@
 // Scanova · personas: quién pide entrar (aprobar / rechazar) y el equipo. Solo el manager.
-import { $, $$, authFetch, esManager } from './app.js?v=2026-10-14-14';
-import { esc, fechaCorta, iniciales } from './trabajos.js?v=2026-10-14-14';
+import { $, $$, authFetch, esManager } from './app.js?v=2026-10-14-15';
+import { esc, fechaCorta, iniciales } from './trabajos.js?v=2026-10-14-15';
 
-let SOLICITUDES = [], EQUIPO = [], INVITACIONES = [], INV_LISTA = true;
+let SOLICITUDES = [], EQUIPO = [], INVITACIONES = [], INV_LISTA = true, EMPRESAS = [], DUENO = false;
 export const estadoTxt = (st) => ({ active:'activo', paused:'en espera / pausado', removed:'sacado' }[st] || st || 'activo');
 
 export async function contarPendientes(){
@@ -24,7 +24,7 @@ export async function cargar(){
     authFetch('/rest/v1/fotos_solicitudes?select=user_id,nombre,correo,estado,created_at&estado=eq.pendiente&order=created_at.asc'),
     authFetch('/rest/v1/profiles?select=id,full_name,role,status&order=full_name.asc'),
   ]);
-  cargarInvitaciones();
+  cargarInvitaciones(); cargarEmpresas();
   if(rs.status === 404){ aviso.textContent = 'Esta parte todavía no está instalada en el servidor: falta correr sql/fotos-02-aprobacion.sql.'; }
   SOLICITUDES = rs.ok ? await rs.json() : [];
   EQUIPO = re.ok ? await re.json() : [];
@@ -32,10 +32,10 @@ export async function cargar(){
 }
 // ---------- invitar por enlace (sql/fotos-10-invitaciones.sql) ----------
 // Pura: el enlace que se manda. Siempre a scanova360.com (en el aparato la página no vive en https).
-export function enlaceInvitacion(token, href){
+export function enlaceInvitacion(token, href, param = 'invitacion'){
   let base = 'https://scanova360.com/';
   try{ const u = new URL(href); if(u.protocol === 'https:' || u.protocol === 'http:') base = u.origin + u.pathname.replace(/[^/]*$/, ''); }catch{}
-  return base + '?invitacion=' + encodeURIComponent(token);
+  return base + '?' + param + '=' + encodeURIComponent(token);
 }
 // Pura: en qué quedó una invitación.
 export function estadoInvitacion(v, ahora = Date.now()){
@@ -66,14 +66,14 @@ function pintarInvitaciones(){
   l.innerHTML = !INV_LISTA ? '<p class="vacio">Para invitar falta correr sql/fotos-10-invitaciones.sql en el servidor.</p>'
     : INVITACIONES.length ? INVITACIONES.map(v => invitacionHtml(v)).join('') : '';
 }
-async function mandarEnlace(enlace, nombre){
-  const texto = (nombre ? nombre + ', l' : 'L') + 'o invito a Scanova360. Toque este enlace, cree su cuenta y ya entra:';
+async function mandarEnlace(enlace, nombre, texto0){
+  const texto = texto0 || ((nombre ? nombre + ', l' : 'L') + 'o invito a Scanova360. Toque este enlace, cree su cuenta y ya entra:');
   try{ if(navigator.share){ await navigator.share({ title:'Scanova360', text: texto, url: enlace }); return 'ok'; } }catch(e){ if(e && e.name === 'AbortError') return 'cancelo'; }
   return copiar(enlace) ? 'copiado' : 'no';
 }
-function copiar(t){
+function copiar(t, sel = '#invEnlace'){
   try{ if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(t); return true; } }catch{}
-  const i = $('#invEnlace'); if(i){ i.value = t; i.select(); try{ return document.execCommand('copy'); }catch{} } return false;
+  const i = $(sel); if(i){ i.value = t; i.select(); try{ return document.execCommand('copy'); }catch{} } return false;
 }
 async function crearInvitacion(){
   const aviso = $('#personasAviso'); aviso.classList.remove('ok'); aviso.textContent = '';
@@ -89,6 +89,47 @@ async function crearInvitacion(){
     $('#invEnlace').value = enlace; $('#invHechoT').textContent = nombre ? 'Enlace para ' + nombre : 'Enlace listo';
     $('#invHecho').hidden = false; $('#invHecho').dataset.nombre = nombre; $('#invNombre').value = '';
     await cargarInvitaciones();
+  }catch(e){ aviso.textContent = String(e && e.message || e); }
+  finally{ b.disabled = false; }
+}
+// ---------- empresas nuevas (sql/fotos-11-empresas.sql): solo el dueño de Scanova360 ----------
+// Pura: una invitación de empresa en la lista (la usada dice qué empresa se creó).
+export function empresaInvHtml(v, ahora = Date.now()){
+  const st = estadoInvitacion(v, ahora);
+  const sub = st === 'usada' ? 'Creó ' + esc(v.empresa_creada || 'su empresa') + ' · ' + esc(fechaCorta(v.usada_at))
+    : st === 'valida' ? 'Sin usar · vence ' + esc(fechaCorta(v.vence_at)) + (v.para ? ' · para ' + esc(v.para) : '')
+    : st === 'vencida' ? 'Venció ' + esc(fechaCorta(v.vence_at)) : 'Anulada';
+  const chip = { valida:'esperando', usada:'registrada', vencida:'vencida', anulada:'anulada' }[st];
+  const titulo = v.empresa_creada || v.empresa || 'Empresa nueva';
+  return `<div class="persona invitacion" data-token="${esc(v.token)}"><span class="avatar">${esc(iniciales(titulo))}</span>
+    <div><div class="nom">${esc(titulo)}<span class="estado-chip inv-${st}">${chip}</span></div><div class="sub">${sub}</div></div>
+    ${st === 'valida' ? `<div class="persona-acciones"><button type="button" class="btn btn-outline" data-emp="mandar">Mandar</button><button type="button" class="btn btn-outline btn-rojo" data-emp="anular">Anular</button></div>` : ''}</div>`;
+}
+const textoEmpresa = (v) => (v && v.para ? v.para + ', l' : 'L') + 'o invito a registrar ' + (v && v.empresa ? v.empresa : 'su empresa') + ' en Scanova360. Toque este enlace, cree su cuenta y queda como manager:';
+async function cargarEmpresas(){
+  const b = $('#bloqueEmpresas'); if(!b) return;
+  const r = await authFetch('/rest/v1/rpc/fotos_soy_dueno', { method:'POST', body:'{}' });
+  DUENO = r.ok ? (await r.json()) === true : false;
+  b.hidden = !DUENO; if(!DUENO) return;
+  const l = await authFetch('/rest/v1/fotos_invitaciones_empresa?select=token,empresa,para,created_at,vence_at,usada_at,empresa_creada,anulada_at&order=created_at.desc&limit=30');
+  EMPRESAS = l.ok ? await l.json() : [];
+  $('#listaEmpresas').innerHTML = EMPRESAS.map(v => empresaInvHtml(v)).join('');
+}
+async function crearInvEmpresa(){
+  const aviso = $('#empAviso'); aviso.classList.remove('ok'); aviso.textContent = '';
+  const empresa = ($('#empNombre').value || '').trim(), para = ($('#empPara').value || '').trim();
+  const b = $('#btnEmpInvitar'); b.disabled = true;
+  try{
+    const r = await authFetch('/rest/v1/rpc/fotos_invitar_empresa', { method:'POST', body: JSON.stringify({ p_empresa: empresa || null, p_para: para || null }) });
+    const t = await r.text();
+    if(r.status === 404) throw new Error('Falta correr sql/fotos-11-empresas.sql en el servidor.');
+    if(!r.ok) throw new Error(/solo_dueno/.test(t) ? 'Solo el dueño de Scanova360 puede invitar empresas.' : 'No se pudo crear el enlace (' + r.status + ').');
+    const d = JSON.parse(t);
+    $('#empEnlace').value = enlaceInvitacion(d.token, location.href, 'empresa');
+    $('#empHechoT').textContent = 'Enlace para ' + (empresa || para || 'la empresa nueva');
+    $('#empHecho').hidden = false; $('#empHecho').dataset.empresa = empresa; $('#empHecho').dataset.para = para;
+    $('#empNombre').value = ''; $('#empPara').value = '';
+    await cargarEmpresas();
   }catch(e){ aviso.textContent = String(e && e.message || e); }
   finally{ b.disabled = false; }
 }
@@ -120,6 +161,19 @@ async function decidir(userId, aprobar){
   await cargar(); await pintarConteo();
 }
 export function conectar(){
+  $('#btnEmpInvitar').addEventListener('click', crearInvEmpresa);
+  const avisoEmp = (r) => { const a = $('#empAviso'); a.classList.toggle('ok', r === 'copiado'); a.textContent = r === 'copiado' ? 'Enlace copiado. Péguelo en un mensaje.' : r === 'no' ? 'Copie el enlace de arriba y péguelo en un mensaje.' : ''; };
+  $('#btnEmpCompartir').addEventListener('click', async () => { const h = $('#empHecho'); avisoEmp(await mandarEnlace($('#empEnlace').value, '', textoEmpresa({ empresa: h.dataset.empresa, para: h.dataset.para }))); });
+  $('#btnEmpCopiar').addEventListener('click', () => { const ok = copiar($('#empEnlace').value, '#empEnlace'); avisoEmp(ok ? 'copiado' : 'no'); });
+  $('#listaEmpresas').addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-emp]'); const fila = e.target.closest('[data-token]'); if(!b || !fila) return;
+    const v = EMPRESAS.find(x => x.token === fila.dataset.token); if(!v) return;
+    if(b.dataset.emp === 'mandar'){ avisoEmp(await mandarEnlace(enlaceInvitacion(v.token, location.href, 'empresa'), '', textoEmpresa(v))); return; }
+    if(!confirm('¿Anular el enlace' + (v.empresa ? ' de ' + v.empresa : '') + '? Ya no servirá para registrar la empresa.')) return;
+    const r = await authFetch('/rest/v1/rpc/fotos_anular_invitacion_empresa', { method:'POST', body: JSON.stringify({ p_token: v.token }) });
+    if(!r.ok){ const a = $('#empAviso'); a.classList.remove('ok'); a.textContent = 'No se pudo anular (' + r.status + ').'; return; }
+    await cargarEmpresas();
+  });
   $('#btnInvitar').addEventListener('click', crearInvitacion);
   $('#invNombre').addEventListener('keydown', (e) => { if(e.key === 'Enter') crearInvitacion(); });
   $('#btnInvCompartir').addEventListener('click', async () => {

@@ -37,8 +37,8 @@ const hu = invitacionHtml({ token:T, nombre:'Harold', vence_at:'2026-10-20T00:00
 ok('invitacionHtml: la sin usar se puede mandar o anular; la usada dice quién entró y no tiene botones', /data-inv="anular"/.test(hv) && /data-inv="mandar"/.test(hv) && /Entró Harold Gomez/.test(hu) && !/data-inv/.test(hu));
 ok('invitacionHtml: escapa el nombre', !/<b>x<\/b>/.test(invitacionHtml({ token:T, nombre:'<b>x</b>', vence_at:'2026-10-20T00:00:00Z' }, ahora)));
 ok('mensajeInvitacion: cada caso dice qué hacer', /ya se usó/.test(mensajeInvitacion('invitacion_usada', 'RD')) && /venció/.test(mensajeInvitacion('invitacion_vencida')) && /otra empresa/.test(mensajeInvitacion('otra_empresa')) && mensajeInvitacion('x') === '');
-ok('web: el enlace se guarda antes de que la página se recargue (sobrevive al correo y a Google)', /\(function guardarInvitacionDeUrl\(\)\{/.test(app) && /localStorage\.setItem\(CLAVE_INV, t\)/.test(app));
-ok('web: con invitación, Crear cuenta no pide el código y usa el enlace', /if\(!codigo && !inv\)/.test(app) && /inv \? await aceptarInvitacion\(inv, nombre\) : await pedirEntrada\(codigo, nombre\)/.test(app));
+ok('web: el enlace se guarda antes de que la página se recargue (sobrevive al correo y a Google)', /\(function guardarInvitacionDeUrl\(\)\{/.test(app) && /localStorage\.setItem\(CLAVE_INV, ti\)/.test(app));
+ok('web: con invitación, Crear cuenta no pide el código y usa el enlace', /if\(!codigo && !inv && !emp\)/.test(app) && /inv \? await aceptarInvitacion\(inv, nombre\) : await pedirEntrada\(codigo, nombre\)/.test(app));
 ok('web: Entrar y Google también usan el enlace si la cuenta no tiene empresa', /if\(\(!p \|\| !p\.company_id\) && inv\)\{ try\{ p = await aceptarInvitacion/.test(app) && /if\(invitacionGuardada\(\)\)\{\s*try\{ const p2 = await aceptarInvitacion/.test(app));
 ok('pantallas: aviso de quién invita en Crear cuenta y bloque Invitar en Personas', /id="crInvitacion"/.test(idx) && /id="crCodigoCampo"/.test(idx) && /id="btnInvitar"/.test(idx) && /id="listaInvitaciones"/.test(idx));
 console.log(`\n${pass} ok, ${fail} fail`); process.exit(fail ? 1 : 0);

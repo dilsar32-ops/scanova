@@ -2106,3 +2106,8 @@ body.pie-atras .tab-inicio svg.tab-atras{ display:block; }
 .invitacion-aviso[hidden]{ display:none; }
 .invitacion-aviso .ic{ width:20px; height:20px; color:var(--accent); flex:none; margin-top:1px; }
 #crCodigoCampo[hidden]{ display:none; }
+/* Empresas nuevas (solo el dueño de Scanova360) y los campos de "Registre su empresa". */
+#bloqueEmpresas[hidden], #crEmpresaCampo[hidden], #gcEmpresaCampo[hidden], #gcCodigoCampo[hidden]{ display:none; }
+.invitar-fila + .invitar-fila{ margin-top:8px; }
+#empAviso:empty{ display:none; }
+.invitar-fila input{ min-height:44px; }

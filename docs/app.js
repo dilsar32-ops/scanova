@@ -1,15 +1,15 @@
 // Scanova · arranque, sesión y navegación. Las pantallas viven en index.html; lo de trabajos en trabajos.js.
-import { SUPABASE_URL, ANON_KEY, APP_BUILD } from './config.js?v=2026-10-14-14';
-import { ESQUEMA_APARATO, urlEntrarGoogle } from './google.js?v=2026-10-14-14';
-import * as trabajos from './trabajos.js?v=2026-10-14-14';
-import * as personas from './personas.js?v=2026-10-14-14';
-import * as fotos from './fotos.js?v=2026-10-14-14';
-import * as panel from './panel.js?v=2026-10-14-14';
-import * as camara from './camara.js?v=2026-10-14-14';
-import * as direccion from './direccion.js?v=2026-10-14-14';
-import * as proyecto from './proyecto.js?v=2026-10-14-14';
-import * as foto from './foto.js?v=2026-10-14-14';
-import * as editor from './editor.js?v=2026-10-14-14';
+import { SUPABASE_URL, ANON_KEY, APP_BUILD } from './config.js?v=2026-10-14-15';
+import { ESQUEMA_APARATO, urlEntrarGoogle } from './google.js?v=2026-10-14-15';
+import * as trabajos from './trabajos.js?v=2026-10-14-15';
+import * as personas from './personas.js?v=2026-10-14-15';
+import * as fotos from './fotos.js?v=2026-10-14-15';
+import * as panel from './panel.js?v=2026-10-14-15';
+import * as camara from './camara.js?v=2026-10-14-15';
+import * as direccion from './direccion.js?v=2026-10-14-15';
+import * as proyecto from './proyecto.js?v=2026-10-14-15';
+import * as foto from './foto.js?v=2026-10-14-15';
+import * as editor from './editor.js?v=2026-10-14-15';
 
 export const $ = (s, r = document) => r.querySelector(s);
 export const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -25,17 +25,46 @@ export const esManager = () => !!(PERFIL && PERFIL.role === 'manager');
 // ---------- invitación por enlace (sql/fotos-10-invitaciones.sql) ----------
 // El manager manda scanova360.com/?invitacion=XXXX. El token se guarda en cuanto se abre la página: sobrevive a
 // crear la cuenta, al correo de confirmación y a la vuelta de Google. Se borra cuando ya entró a la empresa.
-const CLAVE_INV = 'scanova.invitacion';
-export function tokenDeUrl(busqueda){ const t = new URLSearchParams(String(busqueda || '')).get('invitacion'); return t && /^[0-9a-f]{32}$/i.test(t.trim()) ? t.trim().toLowerCase() : ''; }
+const CLAVE_INV = 'scanova.invitacion', CLAVE_EMP = 'scanova.empresaInv';
+export function tokenDeUrl(busqueda, param = 'invitacion'){ const t = new URLSearchParams(String(busqueda || '')).get(param); return t && /^[0-9a-f]{32}$/i.test(t.trim()) ? t.trim().toLowerCase() : ''; }
 (function guardarInvitacionDeUrl(){
-  try{ const t = tokenDeUrl(location.search); if(!t) return;
-    localStorage.setItem(CLAVE_INV, t);
-    const q = new URLSearchParams(location.search); q.delete('invitacion');
+  try{
+    const ti = tokenDeUrl(location.search, 'invitacion'), te = tokenDeUrl(location.search, 'empresa');
+    if(!ti && !te) return;
+    if(ti) localStorage.setItem(CLAVE_INV, ti);
+    if(te) localStorage.setItem(CLAVE_EMP, te);   // enlace para registrar una EMPRESA nueva (sql/fotos-11-empresas.sql)
+    const q = new URLSearchParams(location.search); q.delete('invitacion'); q.delete('empresa');
     history.replaceState(null, '', location.pathname + (q.toString() ? '?' + q : '') + location.hash);
   }catch{}
 })();
 export const invitacionGuardada = () => { try{ return localStorage.getItem(CLAVE_INV) || ''; }catch{ return ''; } };
 const olvidarInvitacion = () => { try{ localStorage.removeItem(CLAVE_INV); }catch{} };
+export const empresaGuardada = () => { try{ return localStorage.getItem(CLAVE_EMP) || ''; }catch{ return ''; } };
+const olvidarEmpresa = () => { try{ localStorage.removeItem(CLAVE_EMP); }catch{} };
+let EMP_INFO = null;   // { empresa, para, estado } del enlace de empresa guardado
+async function infoEmpresa(t){
+  try{ const r = await fetch(SUPABASE_URL + '/rest/v1/rpc/fotos_empresa_invitacion_info', { method:'POST', headers:{ 'Content-Type':'application/json', apikey: ANON_KEY }, body: JSON.stringify({ p_token: t }) });
+    return r.ok ? await r.json() : null; }catch{ return null; }
+}
+const empresaValida = () => !!(empresaGuardada() && EMP_INFO && EMP_INFO.estado === 'valida');
+// Pura: lo que se le dice cuando el enlace de empresa no sirve.
+export function mensajeEmpresa(codigo){
+  return { empresa_usada:'Ese enlace para registrar una empresa ya se usó. Pídale uno nuevo a Scanova360.',
+    empresa_vencida:'Ese enlace para registrar una empresa ya venció. Pídale uno nuevo a Scanova360.',
+    empresa_anulada:'Ese enlace para registrar una empresa fue anulado. Pídale uno nuevo a Scanova360.',
+    empresa_no_existe:'Ese enlace para registrar una empresa no existe. Revise que lo copió completo.',
+    ya_tiene_empresa:'Esta cuenta ya es de una empresa. Para registrar la empresa nueva, cree una cuenta con otro correo.',
+    falta_nombre_empresa:'Escriba el nombre de su empresa.' }[codigo] || '';
+}
+// Con la sesión ya puesta: crear la empresa con el enlace. La cuenta queda de manager de esa empresa nueva.
+export async function crearEmpresa(t, empresa, nombre){
+  const r = await authFetch('/rest/v1/rpc/fotos_crear_empresa', { method:'POST', body: JSON.stringify({ p_token: t, p_empresa: empresa, p_nombre: nombre || null }) });
+  const x = await r.text();
+  if(r.status === 404) throw new Error('Esta parte todavía no está instalada en el servidor: falta correr sql/fotos-11-empresas.sql.');
+  if(!r.ok){ const c = (x.match(/empresa_\w+|ya_tiene_empresa|falta_nombre_empresa/) || [''])[0]; if(c && c !== 'falta_nombre_empresa' && c !== 'ya_tiene_empresa') olvidarEmpresa(); throw new Error(mensajeEmpresa(c) || ('No se pudo crear la empresa (' + r.status + ')')); }
+  olvidarEmpresa(); olvidarInvitacion(); try{ localStorage.removeItem('scanova.codigoPendiente'); }catch{}
+  return await cargarPerfil();
+}
 let INV_INFO = null;   // { empresa, nombre, estado } del enlace guardado
 async function infoInvitacion(t){
   try{ const r = await fetch(SUPABASE_URL + '/rest/v1/rpc/fotos_invitacion_info', { method:'POST', headers:{ 'Content-Type':'application/json', apikey: ANON_KEY }, body: JSON.stringify({ p_token: t }) });
@@ -48,14 +77,15 @@ export function mensajeInvitacion(codigo, empresa){
     invitacion_vencida:'Ese enlace de invitación' + de + ' ya venció. Pídale al manager uno nuevo.',
     invitacion_anulada:'El manager anuló ese enlace de invitación. Pídale uno nuevo.',
     invitacion_no_existe:'Ese enlace de invitación no existe. Revise que lo copió completo.',
-    otra_empresa:'Su cuenta ya es de otra empresa. Para entrar a esta, cree una cuenta con otro correo.' }[codigo] || '';
+    otra_empresa:'Su cuenta ya es de otra empresa. Para entrar a esta, cree una cuenta con otro correo.',
+    cuenta_fuera:'Su cuenta está pausada o fuera del equipo. Pídale al manager que lo vuelva a activar.' }[codigo] || '';
 }
 // Con la sesión ya puesta: usar el enlace. Devuelve el perfil (ya activo en la empresa que invitó).
 export async function aceptarInvitacion(t, nombre){
   const r = await authFetch('/rest/v1/rpc/fotos_aceptar_invitacion', { method:'POST', body: JSON.stringify({ p_token: t, p_name: nombre || null }) });
   const x = await r.text();
   if(r.status === 404) throw new Error('Esta parte todavía no está instalada en el servidor: falta correr sql/fotos-10-invitaciones.sql.');
-  if(!r.ok){ const c = (x.match(/invitacion_\w+|otra_empresa/) || [''])[0]; if(c !== 'otra_empresa') olvidarInvitacion(); throw new Error(mensajeInvitacion(c, INV_INFO && INV_INFO.empresa) || ('No se pudo usar la invitación (' + r.status + ')')); }
+  if(!r.ok){ const c = (x.match(/invitacion_\w+|otra_empresa|cuenta_fuera/) || [''])[0]; if(c !== 'otra_empresa') olvidarInvitacion(); throw new Error(mensajeInvitacion(c, INV_INFO && INV_INFO.empresa) || ('No se pudo usar la invitación (' + r.status + ')')); }
   olvidarInvitacion(); try{ localStorage.removeItem('scanova.codigoPendiente'); }catch{}
   return await cargarPerfil();
 }
@@ -95,6 +125,7 @@ async function entrarCon(email, password){
   if(!d || !d.access_token) throw new Error('Sin sesión');
   guardarSes({ access_token: d.access_token, refresh_token: d.refresh_token, user_id: d.user && d.user.id });
   let p = await cargarPerfil();
+  if((!p || !p.company_id) && empresaGuardada()) return { necesitaEmpresa: true, full_name: p && p.full_name };
   const inv = invitacionGuardada();
   if((!p || !p.company_id) && inv){ try{ p = await aceptarInvitacion(inv, p && p.full_name); }catch(e){ guardarSes(null); throw e; } }
   if(!p || !p.company_id){
@@ -172,6 +203,7 @@ async function procesarVuelta(v, aviso){
     if(p.role !== 'manager' && p.status === 'removed'){ guardarSes(null); abrirEntrar('pEntrar'); $('#entrarAviso').textContent = 'Esa cuenta no está autorizada en este equipo. Hable con el manager.'; return true; }
     pintarQuien(); await llegar(p); return true;
   }
+  if(empresaGuardada()){ if(!EMP_INFO) EMP_INFO = await infoEmpresa(empresaGuardada()); pedirEmpresa(NOMBRE_GOOGLE); return true; }
   if(invitacionGuardada()){
     try{ const p2 = await aceptarInvitacion(invitacionGuardada(), NOMBRE_GOOGLE); pintarQuien(); await llegar(p2); }
     catch(e){ guardarSes(null); abrirEntrar('pCrear'); pintarInvitacion(); $('#crearAviso').textContent = String(e && e.message || e); }
@@ -206,7 +238,20 @@ async function guardarClaveNueva(){
   b.disabled = false; b.textContent = 'Guardar y entrar';
 }
 // Entró con Google pero no es del equipo todavía: pedir el código (queda en espera hasta que el manager apruebe).
+// Ya tiene sesión pero falta crear su empresa (entró con Google o con una cuenta sin empresa y un enlace de empresa).
+function pedirEmpresa(nombre){
+  $('#gcNombre').value = nombre || ''; $('#gcAviso').textContent = '';
+  $('#gcEmpresa').value = (EMP_INFO && EMP_INFO.empresa) || '';
+  $('#gcEmpresaCampo').hidden = false; $('#gcCodigoCampo').hidden = true;
+  $('#gcTitulo').textContent = 'Registre su empresa';
+  $('#gcCorreo').textContent = 'Scanova360 lo invitó a registrar su empresa. Escriba el nombre y entra como manager.';
+  $('#btnGcPedir').textContent = 'Crear mi empresa'; $('#btnGcPedir').dataset.modo = 'empresa';
+  if(!esAparato()) mostrarInicio();
+  abrirEntrar('pCodigo');
+}
 function pedirCodigo(){
+  $('#gcEmpresaCampo').hidden = true; $('#gcCodigoCampo').hidden = false; $('#gcTitulo').textContent = 'Un paso más';
+  $('#btnGcPedir').textContent = 'Pedir entrada'; delete $('#btnGcPedir').dataset.modo;
   $('#gcNombre').value = NOMBRE_GOOGLE; $('#gcCodigo').value = ''; $('#gcAviso').textContent = '';
   $('#gcCorreo').textContent = 'Entró con Google' + (CORREO_GOOGLE ? ' (' + CORREO_GOOGLE + ')' : '') + '. Falta el código del equipo.';
   abrirEntrar('pCodigo');
@@ -318,6 +363,13 @@ async function arrancar(){
     const aviso = $('#gcAviso'); aviso.textContent = '';
     const nombre = ($('#gcNombre').value || '').trim(), codigo = ($('#gcCodigo').value || '').trim().toUpperCase();
     if(!nombre) return aviso.textContent = 'Escriba su nombre.';
+    if($('#btnGcPedir').dataset.modo === 'empresa'){
+      const emp = ($('#gcEmpresa').value || '').trim(); if(emp.length < 2) return aviso.textContent = 'Escriba el nombre de su empresa.';
+      const b = $('#btnGcPedir'); b.disabled = true; b.textContent = 'Creando…';
+      try{ const p = await crearEmpresa(empresaGuardada(), emp, nombre); pintarQuien(); await llegar(p); }
+      catch(e){ aviso.textContent = String(e && e.message || e) || 'No se pudo. Revise su internet.'; }
+      b.disabled = false; b.textContent = 'Crear mi empresa'; return;
+    }
     if(!codigo) return aviso.textContent = 'Escriba el código del equipo (pídaselo al manager).';
     const b = $('#btnGcPedir'); b.disabled = true; b.textContent = 'Pidiendo…';
     try{ const p = await pedirEntrada(codigo, nombre); pintarQuien(); await llegar(p); }
@@ -342,8 +394,9 @@ async function arrancar(){
     const b = $('#btnEntrar'); b.disabled = true; b.textContent = 'Entrando…';
     try{
       const p = await entrarCon(correo, clave);
-      pintarQuien(); $('#inClave').value = '';
-      await llegar(p);
+      $('#inClave').value = '';
+      if(p && p.necesitaEmpresa){ if(!EMP_INFO) EMP_INFO = await infoEmpresa(empresaGuardada()); pedirEmpresa(p.full_name || ''); }
+      else { pintarQuien(); await llegar(p); }
     }catch(e){
       const m = String(e && e.message || '');
       aviso.textContent = /Invalid login/i.test(m) ? 'Correo o contraseña incorrectos.'
@@ -361,17 +414,18 @@ async function arrancar(){
     if(!nombre) return aviso.textContent = 'Escriba su nombre.';
     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo)) return aviso.textContent = 'Ese correo no se ve bien.';
     if(clave.length < 6) return aviso.textContent = 'La contraseña necesita 6 letras o más.';
-    const inv = invitacionGuardada();
-    if(!codigo && !inv) return aviso.textContent = 'Escriba el código del equipo (pídaselo al manager).';
+    const inv = invitacionGuardada(), emp = empresaValida() ? ($('#crEmpresa').value || '').trim() : '';
+    if(empresaValida() && emp.length < 2) return aviso.textContent = 'Escriba el nombre de su empresa.';
+    if(!codigo && !inv && !emp) return aviso.textContent = 'Escriba el código del equipo (pídaselo al manager).';
     const b = $('#btnCrear'); b.disabled = true; b.textContent = 'Creando…';
     try{
       const d = await authPost('/auth/v1/signup', { email: correo, password: clave, data: { full_name: nombre } });
       if(!d || !d.access_token){
         aviso.classList.add('ok'); aviso.textContent = 'Casi listo: le mandamos un correo. Toque el enlace que viene ahí y luego entre con su correo y contraseña.';
-        if(!inv) try{ localStorage.setItem('scanova.codigoPendiente', JSON.stringify({ codigo, nombre, correo })); }catch{}
+        if(!inv && !emp) try{ localStorage.setItem('scanova.codigoPendiente', JSON.stringify({ codigo, nombre, correo })); }catch{}
       }else{
         guardarSes({ access_token: d.access_token, refresh_token: d.refresh_token, user_id: d.user && d.user.id });
-        const p = inv ? await aceptarInvitacion(inv, nombre) : await pedirEntrada(codigo, nombre);
+        const p = emp ? await crearEmpresa(empresaGuardada(), emp, nombre) : inv ? await aceptarInvitacion(inv, nombre) : await pedirEntrada(codigo, nombre);
         pintarQuien(); await llegar(p);
       }
     }catch(e){
@@ -381,7 +435,7 @@ async function arrancar(){
         : /signups? not allowed|disabled/i.test(m) ? 'Las cuentas nuevas están apagadas. Hable con el manager.'
         : /rate limit|too many/i.test(m) ? 'Demasiados intentos. Espere un minuto.' : (m || 'No se pudo crear la cuenta. Revise su internet.');
     }
-    b.disabled = false; b.textContent = 'Crear cuenta';
+    b.disabled = false; b.textContent = empresaValida() ? 'Crear mi empresa' : 'Crear cuenta';
   }
   $('#btnCrear').addEventListener('click', crearCuenta);
   $('#btnEsperaRevisar').addEventListener('click', async () => {
@@ -429,15 +483,24 @@ async function arrancar(){
     if(vuelta.tipo === 'recovery'){ await pedirClaveNueva(vuelta); return; }   // vino del correo de "¿Olvidó su contraseña?"
     if(await procesarVuelta(vuelta)) return; }
   SES = leerSes();
-  const inv = invitacionGuardada();
+  const inv = invitacionGuardada(), empT = empresaGuardada();
   if(inv) INV_INFO = await infoInvitacion(inv);
+  if(empT) EMP_INFO = await infoEmpresa(empT);
   if(SES && SES.access_token){
     let p = await cargarPerfil();
+    if(empT && p && p.company_id){ olvidarEmpresa(); EMP_INFO = null; setTimeout(() => alert('Ese enlace es para registrar una empresa nueva, y esta cuenta ya es de una empresa. Para registrarla, cierre sesión y cree una cuenta con otro correo.'), 400); }
+    else if(empT && (!p || !p.company_id)){ if(!esAparato()) mostrarInicio(); pedirEmpresa(p && p.full_name); return; }
     if(inv && (!p || !p.company_id)){ try{ p = await aceptarInvitacion(inv, p && p.full_name); }catch(e){ console.warn('invitacion', e); } }
     else if(inv && p && p.company_id) olvidarInvitacion();   // ya es de una empresa: entra como siempre
     if(p && p.company_id){ pintarQuien(); await llegar(p); return; }
     if(p && !p.company_id || (!p && SES.user_id)){ const r = await authFetch('/auth/v1/user'); const u = r.ok ? await r.json() : null; if(u && u.app_metadata && u.app_metadata.provider === 'google'){ const m = u.user_metadata || {}; NOMBRE_GOOGLE = m.full_name || m.name || ''; CORREO_GOOGLE = u.email || ''; if(!esAparato()) mostrarInicio(); pedirCodigo(); return; } }
     guardarSes(null);
+  }
+  if(empT && EMP_INFO){
+    if(!esAparato()) mostrarInicio();
+    abrirEntrar('pCrear'); pintarInvitacion();
+    if(EMP_INFO.estado !== 'valida'){ $('#crearAviso').textContent = mensajeEmpresa('empresa_' + EMP_INFO.estado) || mensajeEmpresa('empresa_no_existe'); olvidarEmpresa(); EMP_INFO = null; pintarInvitacion(); }
+    return;
   }
   if(inv && INV_INFO){
     if(!esAparato()) mostrarInicio();
@@ -449,10 +512,17 @@ async function arrancar(){
 }
 // Crear cuenta con invitación: dice quién invita y no pide el código del equipo.
 function pintarInvitacion(){
-  const ok = !!(invitacionGuardada() && INV_INFO && INV_INFO.estado === 'valida');
+  const emp = empresaValida();
+  const ok = !emp && !!(invitacionGuardada() && INV_INFO && INV_INFO.estado === 'valida');
   const b = $('#crInvitacion'); if(b){ b.hidden = !ok; if(ok) $('#crInvEmpresa').textContent = INV_INFO.empresa || 'Su empresa'; }
-  const c = $('#crCodigoCampo'); if(c) c.hidden = ok;
+  const be = $('#crInvEmpresaNueva'); if(be) be.hidden = !emp;
+  const ce = $('#crEmpresaCampo'); if(ce) ce.hidden = !emp;
+  if(emp && !$('#crEmpresa').value && EMP_INFO.empresa) $('#crEmpresa').value = EMP_INFO.empresa;
+  const c = $('#crCodigoCampo'); if(c) c.hidden = ok || emp;
+  $('#crTitulo').textContent = emp ? 'Registre su empresa' : 'Crear cuenta';
+  $('#btnCrear').textContent = emp ? 'Crear mi empresa' : 'Crear cuenta';
   if(ok && INV_INFO.nombre && !$('#crNombre').value) $('#crNombre').value = INV_INFO.nombre;
+  if(emp && EMP_INFO.para && !$('#crNombre').value) $('#crNombre').value = EMP_INFO.para;
 }
 // ---------- versión nueva ----------
 // El servidor deja que el teléfono guarde la página 10 minutos; sin esto, después de publicar seguía viendo la vieja

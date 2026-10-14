@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
-<link rel="stylesheet" href="estilo.css?v=2026-10-14-14">
+<link rel="stylesheet" href="estilo.css?v=2026-10-14-15">
 <meta name="description" content="Scanova360: the smarter way to capture, organize, and manage restoration projects. Private workspace, by invitation only.">
 <style>
 /* ===== BIENVENIDA (la imagen aprobada hecha pagina; se ve solo sin sesion) ===== */
@@ -325,10 +325,12 @@ body.en-inicio{ overflow:hidden; }
           <button type="button" class="cerrar-modal" data-cerrar-modal aria-label="Cerrar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
           <div class="marca">
             <svg class="logo" aria-hidden="true"><use href="#i-logo"/></svg>
-            <div class="marca-nombre">Crear cuenta</div>
+            <div class="marca-nombre" id="crTitulo">Crear cuenta</div>
             <div class="marca-lema">Con su correo entra desde cualquier aparato</div>
           </div>
+          <div class="invitacion-aviso" id="crInvEmpresaNueva" hidden><svg class="ic"><use href="#i-casa"/></svg><span><b>Scanova360</b> lo invitó a registrar su empresa. Usted queda como manager y después invita a su equipo.</span></div>
           <div class="invitacion-aviso" id="crInvitacion" hidden><svg class="ic"><use href="#i-persona-mas"/></svg><span><b id="crInvEmpresa">Su empresa</b> lo invitó a Scanova360. Cree su cuenta y entra directo.</span></div>
+          <div class="field" id="crEmpresaCampo" hidden><label for="crEmpresa">Nombre de su empresa</label><input type="text" id="crEmpresa" maxlength="80" autocomplete="organization" placeholder="Como se llama su compañía"></div>
           <div class="field"><label for="crNombre">Su nombre</label><input type="text" id="crNombre" autocomplete="name" placeholder="Como lo conocen en el equipo"></div>
           <div class="field"><label for="crCorreo">Correo</label><input type="email" id="crCorreo" autocomplete="email" inputmode="email" placeholder="nombre@correo.com"></div>
           <div class="field"><label for="crClave">Contraseña <span class="hint">6 letras o más</span></label>
@@ -349,11 +351,12 @@ body.en-inicio{ overflow:hidden; }
           <button type="button" class="cerrar-modal" data-cerrar-modal aria-label="Cerrar"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
           <div class="marca">
             <svg class="logo" aria-hidden="true"><use href="#i-logo"/></svg>
-            <div class="marca-nombre">Un paso más</div>
+            <div class="marca-nombre" id="gcTitulo">Un paso más</div>
             <div class="marca-lema" id="gcCorreo">Ya entró con Google. Falta el código del equipo.</div>
           </div>
           <div class="field"><label for="gcNombre">Su nombre</label><input type="text" id="gcNombre" autocomplete="name" placeholder="Como lo conocen en el equipo"></div>
-          <div class="field"><label for="gcCodigo">Código del equipo <span class="hint">se lo da el manager</span></label><input type="text" id="gcCodigo" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="ABC123"></div>
+          <div class="field" id="gcEmpresaCampo" hidden><label for="gcEmpresa">Nombre de su empresa</label><input type="text" id="gcEmpresa" maxlength="80" autocomplete="organization" placeholder="Como se llama su compañía"></div>
+          <div class="field" id="gcCodigoCampo"><label for="gcCodigo">Código del equipo <span class="hint">se lo da el manager</span></label><input type="text" id="gcCodigo" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="ABC123"></div>
           <button type="button" class="btn btn-accent btn-block btn-grande" id="btnGcPedir">Pedir entrada</button>
           <p class="aviso" id="gcAviso"></p>
           <p class="entrar-crear"><a href="#" id="lnkGcOtra">Usar otra cuenta</a></p>
@@ -482,6 +485,19 @@ body.en-inicio{ overflow:hidden; }
         <div class="bloque">
           <h2 class="bloque-t">Equipo</h2>
           <div class="lista" id="listaEquipo"></div>
+        </div>
+        <div class="bloque invitar" id="bloqueEmpresas" hidden>
+          <h2 class="bloque-t">Empresas nuevas</h2>
+          <p class="invitar-sub">Solo usted lo ve, como dueño de Scanova360. Cree un enlace para que otra empresa se registre: quien lo abre crea su cuenta, queda como manager de SU empresa y no ve nada de la suya. Sirve una vez y vence en 14 días.</p>
+          <div class="invitar-fila"><input type="text" id="empNombre" maxlength="80" autocomplete="off" placeholder="Nombre de la empresa (opcional)" aria-label="Nombre de la empresa"></div>
+          <div class="invitar-fila"><input type="text" id="empPara" maxlength="60" autocomplete="off" placeholder="Para quién (opcional)" aria-label="Para quién"><button type="button" class="btn btn-accent" id="btnEmpInvitar"><svg class="ic"><use href="#i-casa"/></svg>Crear enlace</button></div>
+          <div class="invitar-hecho" id="empHecho" hidden>
+            <p class="invitar-hecho-t" id="empHechoT">Enlace listo</p>
+            <div class="invitar-enlace"><input type="text" id="empEnlace" readonly aria-label="Enlace para registrar la empresa"></div>
+            <div class="invitar-botones"><button type="button" class="btn btn-accent" id="btnEmpCompartir"><svg class="ic"><use href="#i-compartir"/></svg>Mandar</button><button type="button" class="btn btn-outline" id="btnEmpCopiar">Copiar</button></div>
+          </div>
+          <div class="lista" id="listaEmpresas"></div>
+          <p class="aviso" id="empAviso"></p>
         </div>
         <p class="aviso" id="personasAviso"></p>
       </section>
@@ -699,6 +715,6 @@ body.en-inicio{ overflow:hidden; }
     <div class="visor-pie"><span id="visorPie"></span><button type="button" class="btn btn-outline btn-rojo" id="visorBorrar" hidden><svg class="ic"><use href="#i-archivo"/></svg>Papelera</button></div>
   </div>
 </div>
-<script type="module" src="app.js?v=2026-10-14-14"></script>
+<script type="module" src="app.js?v=2026-10-14-15"></script>
 </body>
 </html>
