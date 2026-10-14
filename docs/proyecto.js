@@ -1,14 +1,14 @@
 // Scanova · la ficha de un proyecto (diseño de Amilcar, 12 oct 2026): portada, nombre, dirección, etapa, cliente,
 // encargado y fecha; pestañas Rooms · Photos · Dry Logs · Floor Plan · Measurements · Notes · Documents · Activity.
 // Rooms = niveles (Basement, First Floor…) y sus cuartos (Kitchen…). Photos = las fotos por nivel y por cuarto.
-import { $, $$, authFetch, irA, atras, esManager, PERFIL } from './app.js?v=2026-10-14-11';
-import * as trabajos from './trabajos.js?v=2026-10-14-11';
-import * as fotos from './fotos.js?v=2026-10-14-11';
-import * as panel from './panel.js?v=2026-10-14-11';
-import * as planos from './planos.js?v=2026-10-14-11';
-import * as camara from './camara.js?v=2026-10-14-11';
-import * as detalles from './detalles.js?v=2026-10-14-11';
-import * as drylog from './drylog.js?v=2026-10-14-11';
+import { $, $$, authFetch, irA, atras, esManager, PERFIL } from './app.js?v=2026-10-14-12';
+import * as trabajos from './trabajos.js?v=2026-10-14-12';
+import * as fotos from './fotos.js?v=2026-10-14-12';
+import * as panel from './panel.js?v=2026-10-14-12';
+import * as planos from './planos.js?v=2026-10-14-12';
+import * as camara from './camara.js?v=2026-10-14-12';
+import * as detalles from './detalles.js?v=2026-10-14-12';
+import * as drylog from './drylog.js?v=2026-10-14-12';
 
 const esc = (v) => trabajos.esc(v);
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -223,7 +223,7 @@ function miniDe(lista){ const f = ordenarFotos(lista, 'nuevas')[0]; return f ? (
 // Ya no es pestaña (su diseño): se llega por ••• > Levels & Rooms y tiene su "Back to Photos" arriba.
 function pintarCuartos(){
   pintarCuartosLista();
-  const caja = $('#panel-cuartos'); if(caja && !caja.querySelector('.pcuartos-cab')) caja.insertAdjacentHTML('afterbegin', `<div class="pcuartos-cab"><button type="button" class="volver" data-ptab="fotos">${IC('atras')}Back to Photos</button><h2 class="sec-t">Levels & Rooms</h2></div>`);
+  const caja = $('#panel-cuartos'); if(caja && !caja.querySelector('.pcuartos-cab')) caja.insertAdjacentHTML('afterbegin', `<div class="pcuartos-cab"><button type="button" class="volver" data-ptab="fotos" data-atras-pie>${IC('atras')}Back to Photos</button><h2 class="sec-t">Levels & Rooms</h2></div>`);
 }
 function pintarCuartosLista(){
   const caja = $('#panel-cuartos'); if(!caja) return;
@@ -310,7 +310,7 @@ export function pintarFotos(urls){
   const barraSel = MODO_SEL ? `<div class="psel-barra"><button type="button" class="btn btn-outline btn-chico" id="btnSeleccionar">Cancel</button><button type="button" class="btn btn-outline btn-chico" data-sel-accion="mover"${SEL.size ? '' : ' disabled'}>${IC('carpeta')}Move to room</button><button type="button" class="btn btn-outline btn-chico btn-rojo" data-sel-accion="papelera"${SEL.size ? '' : ' disabled'}>${IC('archivo')}Delete</button></div>` : '';
   caja.classList.toggle('pmodo-sel', MODO_SEL);
   caja.innerHTML = destino + fotos.tandaHtml() + herr + porNivel + barraSel +
-    `<div class="sec-cab ptitulo"><h2 class="sec-t">${FILTRO.nivel !== 'todos' ? `<button type="button" class="ptitulo-atras solo-movil" data-filtro-atras aria-label="Back">${IC('atras')}</button>` : ''}${esc(titulo)} (${fs.length})</h2>${todas.length ? `<button type="button" class="ver-por" id="btnVerPor" aria-haspopup="menu">View by: ${VER_TXT[VER_POR]}${IC('chev')}</button>` : ''}${fs.length && !gruposVisibles(fs) ? selGrupo(fs.map(f => f.id), -1) : ''}</div>` + cuerpo;
+    `<div class="sec-cab ptitulo"><h2 class="sec-t">${FILTRO.nivel !== 'todos' ? `<button type="button" class="ptitulo-atras solo-movil" data-filtro-atras data-atras-pie aria-label="Back">${IC('atras')}</button>` : ''}${esc(titulo)} (${fs.length})</h2>${todas.length ? `<button type="button" class="ver-por" id="btnVerPor" aria-haspopup="menu">View by: ${VER_TXT[VER_POR]}${IC('chev')}</button>` : ''}${fs.length && !gruposVisibles(fs) ? selGrupo(fs.map(f => f.id), -1) : ''}</div>` + cuerpo;
   if(TAB === 'cuartos') pintarCuartos();
 }
 

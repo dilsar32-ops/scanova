@@ -3,13 +3,13 @@
 //  · New Dry Log, Step 1 of 3: "Where are you taking the reading?" — primero el nivel (con cuántos cuartos
 //    tiene), después el cuarto de ese nivel. Continue se prende cuando ya escogió los dos.
 // Los pasos 2 y 3 (material y punto de medida) esperan su diseño: no se inventan.
-// TELÉFONO (su diseño del 14-oct): Dry Logs abre con la cámara prendida. Arriba "Dry Logs" y la barrita de pasos
-// (1 of 5), luego Level y Room para escoger dónde, y la cámara llena lo que sobra. El botón azul de cámara de
+// TELÉFONO (su diseño del 14-oct): Dry Logs abre con la cámara prendida. Arriba "Dry Logs" y en qué cuarto va
+// (Room 1 of 4), luego Level y Room para escoger dónde, y la cámara llena lo que sobra. El botón azul de cámara de
 // abajo (el de siempre) toma la foto directo. Lo que sigue después de la foto espera su siguiente diseño.
-import { $, $$, authFetch } from './app.js?v=2026-10-14-11';
-import { RESTRICCIONES, errorCamara, puedeCamaraPropia } from './camara.js?v=2026-10-14-11';
-import * as fotos from './fotos.js?v=2026-10-14-11';
-import { leerPantalla } from './lector.js?v=2026-10-14-11';
+import { $, $$, authFetch, registrarAtras } from './app.js?v=2026-10-14-12';
+import { RESTRICCIONES, errorCamara, puedeCamaraPropia } from './camara.js?v=2026-10-14-12';
+import * as fotos from './fotos.js?v=2026-10-14-12';
+import { leerPantalla } from './lector.js?v=2026-10-14-12';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -69,6 +69,7 @@ function pintarAqui(){
   if(PANTALLA === 'vacio' && abreEnCamara(web, CUARTOS)) PANTALLA = 'cam';
   const TEL = ['cam', 'lectura', 'guardado', 'equipo'];
   if(web && TEL.includes(PANTALLA)) PANTALLA = 'paso1';   // si giraron la pantalla o la hicieron ancha
+  if(!web && (PANTALLA === 'paso1' || PANTALLA === 'paso2') && abreEnCamara(web, CUARTOS)) PANTALLA = 'cam';   // y de regreso a lo angosto: la cámara
   if(PANTALLA === 'cam' || PANTALLA === 'guardado'){
     if(!NIVEL || !cuartosDeNivel(CUARTOS, NIVEL).length) NIVEL = nivelInicial(NIVELES, CUARTOS);
     CUARTO = cuartoInicial(CUARTOS, NIVEL, CUARTO);
@@ -148,7 +149,6 @@ function paso2Html(){
 }
 
 // ---------- TELÉFONO: la cámara del Dry Log ----------
-const barrita = (n) => `<div class="dl-prog" role="img" aria-label="Step ${n} of ${PASOS_TEL}">${Array.from({ length: PASOS_TEL }, (_, i) => `<i${i < n ? ' class="on"' : ''}></i>`).join('')}</div><span class="dl-prog-n">${n} of ${PASOS_TEL}</span>`;
 function selectoresHtml(){
   const nivel = NIVELES.find(n => n.id === NIVEL), cuarto = CUARTOS.find(c => c.id === CUARTO);
   const cuartos = nivel ? cuartosDeNivel(CUARTOS, nivel.id) : [];
@@ -157,10 +157,14 @@ function selectoresHtml(){
     <label class="dl-caja">${IC(cuarto ? iconoCuarto(cuarto) : 'dl-puerta', 'dl-caja-ic')}<span class="dl-caja-txt"><small>Room</small><b>${esc(cuarto ? cuarto.nombre : 'No rooms')}</b></span>${IC('chev', 'dl-caja-chev')}
       <select data-dl-sel="cuarto" aria-label="Room"${cuartos.length ? '' : ' disabled'}>${cuartos.map(c => `<option value="${esc(c.id)}"${c.id === CUARTO ? ' selected' : ''}>${esc(c.nombre)}</option>`).join('')}</select></label>`;
 }
-function pintarSelectores(){ const s = $('#panel-secado .dl-tel-sel'); if(s) s.innerHTML = selectoresHtml(); }
+function pintarSelectores(){
+  const s = $('#panel-secado .dl-tel-sel'); if(s) s.innerHTML = selectoresHtml();
+  // "Room X of N" sigue al cuarto escogido.
+  const cab = $('#panel-secado .dl-tel-cab'); if(cab){ cab.querySelectorAll('.dl-prog, .dl-prog-n').forEach(x => x.remove()); cab.insertAdjacentHTML('beforeend', barritaCuartos()); }
+}
 function camHtml(){
   return `<div class="dl-tel">
-    <div class="dl-tel-cab"><h2>Dry Logs</h2>${barrita(1)}</div>
+    <div class="dl-tel-cab"><h2>Dry Logs</h2>${barritaCuartos()}</div>
     <div class="dl-tel-sel">${selectoresHtml()}</div>
     ${AVISO_TEL ? `<p class="dl-tel-aviso">${IC('check')}${esc(AVISO_TEL)}</p>` : ''}
     <div class="dl-visor"><video id="dlVideo" playsinline muted autoplay></video>
@@ -223,11 +227,131 @@ function guardadoHtml(){
     </div>
   </div>`;
 }
+// ---------- TELÉFONO: el equipo del cuarto (su diseño del 14-oct, paso 4 de 5) ----------
+// Una fila por equipo con − y +. Los números salen con lo último que se anotó en ese cuarto (el equipo casi siempre
+// se queda de un día a otro: solo se cambia lo que se movió). "Add equipment type" agrega otro tipo y se recuerda
+// en este teléfono. "Save Equipment & Next Room" guarda y pasa al siguiente cuarto con la cámara.
+export const EQUIPOS_DL = [['Fans / Air Movers', 'eq-ventilador'], ['Dehumidifiers', 'eq-deshum'], ['HEPA Air Scrubber', 'eq-hepa'],
+  ['Dry Mat', 'eq-tapete'], ['Air Duct', 'eq-ducto'], ['Heater', 'eq-calentador'], ['Poles', 'eq-postes']];
+const CLAVE_TIPOS = 'scanova.dl.tiposEquipo';
+const tiposPropios = () => { try{ const a = JSON.parse(localStorage.getItem(CLAVE_TIPOS) || '[]'); return Array.isArray(a) ? a.filter(x => typeof x === 'string' && x.trim()) : []; }catch{ return []; } };
+// Lo último que se anotó en un cuarto: el día más reciente, y de ese día la anotación más nueva de cada equipo.
+// "none" (No Equipment) deja todo en cero.
+export function ultimoEquipo(filas){
+  const l = (filas || []).slice().sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+  if(!l.length) return null;
+  const dia = l[0].dia, cuentas = {};
+  for(const f of l){ if(f.dia !== dia || f.tipo === 'none' || f.tipo in cuentas) continue; cuentas[f.tipo] = Math.max(0, Math.min(200, Number(f.cantidad) || 0)); }
+  return { dia, cuentas };
+}
+// Lo que se manda al guardar: solo lo que tiene cantidad; si todo está en cero, una fila "none" (igual que No Equipment).
+export function filasEquipo(cuentas){
+  const f = Object.entries(cuentas || {}).filter(([t, n]) => String(t).trim() && n > 0).map(([tipo, cantidad]) => ({ tipo: String(tipo).trim().slice(0, 60), cantidad: Math.min(200, Math.round(cantidad)) }));
+  return f.length ? f : [{ tipo: 'none', cantidad: 0 }];
+}
+export const resumenEquipo = (cuentas) => Object.entries(cuentas || {}).filter(([, n]) => n > 0).map(([t, n]) => n + ' ' + t).join(', ');
+let EQ = { cuarto: null, cuentas: {}, previo: null, cargando: false, agregando: false };
+const tiposEq = () => { const base = EQUIPOS_DL.map(x => x[0]); const extra = [...tiposPropios(), ...Object.keys(EQ.cuentas)].filter((t, i, a) => !base.includes(t) && a.indexOf(t) === i); return [...EQUIPOS_DL, ...extra.map(t => [t, 'eq-otro'])]; };
+// En qué cuarto va de todos los del proyecto (en el orden de la app): "Room 1 of 4".
+export function posicionCuarto(niveles, cuartos, actual){
+  const orden = []; (niveles || []).forEach(n => cuartosDeNivel(cuartos, n.id).forEach(c => orden.push(c)));
+  return { n: Math.max(0, orden.findIndex(c => c.id === actual)) + 1, de: orden.length };
+}
+function barritaCuartos(){
+  const { n, de } = posicionCuarto(NIVELES, CUARTOS, CUARTO);
+  if(!de) return '';
+  return `<div class="dl-prog dl-prog-cuartos${de > 8 ? ' muchos' : de > 4 ? ' medio' : ''}" role="img" aria-label="Room ${n} of ${de}">${Array.from({ length: de }, (_, i) => `<i${i < n ? ' class="on"' : ''}></i>`).join('')}</div><span class="dl-prog-n">Room ${n} of ${de}</span>`;
+}
 function equipoHtml(){
-  return `<div class="dl-tel"><div class="dl-tel-cab"><h2>Dry Logs</h2>${barrita(4)}</div>
-    <div class="card dl-paso"><p class="dl-paso-n">Equipment for ${esc(GUARDADA ? GUARDADA.cuarto_nombre : nombreDe(CUARTOS, CUARTO))}</p>
-    <p class="dl-paso-sub">This screen is built from your next design.</p>
-    <div class="dl-pie"><button type="button" class="dl-atras" data-dl-ir="guardado">${IC('atras')}Back</button></div></div></div>`;
+  const cuarto = nombreDe(CUARTOS, CUARTO);
+  const filas = tiposEq().map(([t, ic], i) => { const n = EQ.cuentas[t] || 0;
+    return `<div class="dl-eq-fila${n ? ' con' : ''}">${IC(ic, 'dl-eq-ic')}<span class="dl-eq-n">${esc(t)}</span>
+      <button type="button" class="dl-eq-b dl-eq-menos" data-eq-menos="${i}" aria-label="One less ${esc(t)}"${n ? '' : ' disabled'}>${IC('menos')}</button>
+      <b class="dl-eq-c" data-eq-c="${i}">${n}</b>
+      <button type="button" class="dl-eq-b dl-eq-mas" data-eq-mas="${i}" aria-label="One more ${esc(t)}">${IC('mas')}</button></div>`; }).join('');
+  // Su diseño (14-oct): arriba "Room 1 of 4" (una rayita por cuarto) y el título es solo "Equipment" con su raya azul;
+  // el cuarto ya lo dice la caja Room.
+  // Su pedido (14-oct): arriba, donde dice "Dry Logs", aquí dice "Equipment" (no dos títulos). Al guardar vuelve a "Dry Logs".
+  return `<div class="dl-tel"><div class="dl-tel-cab"><h2 aria-label="Equipment in ${esc(cuarto || 'this room')}">Equipment</h2>${barritaCuartos()}</div>
+    <div class="card dl-eq">
+      <div class="dl-tel-sel">${selectoresHtml()}</div>
+      <div class="dl-eq-lista">${filas}
+        ${EQ.agregando
+          ? `<div class="dl-eq-fila dl-eq-nuevo">${IC('eq-otro', 'dl-eq-ic')}<input id="dlEqNuevo" type="text" maxlength="60" placeholder="Equipment name" autocomplete="off"><button type="button" class="btn btn-accent btn-chico" data-eq-nuevo="si">Add</button><button type="button" class="btn btn-outline btn-chico" data-eq-nuevo="no">Cancel</button></div>`
+          : `<button type="button" class="dl-eq-fila dl-eq-agregar" data-eq-agregar>${IC('mas-circulo', 'dl-eq-ic')}<span class="dl-eq-n">Add equipment type</span>${IC('chev-der', 'dl-eq-chev')}</button>`}
+      </div>
+      <p class="aviso" id="dlAviso"></p>
+      <button type="button" class="btn btn-accent btn-block dl-eq-guardar" data-eq-guardar>Save Equipment &amp; Next Room</button>
+    </div></div>`;
+}
+async function cargarEquipo(){
+  const cuarto = CUARTO; EQ = { cuarto, cuentas: {}, previo: null, cargando: true, agregando: false };
+  if(!T || !cuarto){ EQ.cargando = false; return; }
+  try{
+    const r = await authFetch('/rest/v1/fotos_drylog_equipos?trabajo_id=eq.' + encodeURIComponent(T.id) + '&cuarto_id=eq.' + encodeURIComponent(cuarto) + '&select=tipo,cantidad,dia,created_at&order=created_at.desc&limit=80');
+    const u = r.ok ? ultimoEquipo(await r.json()) : null;
+    if(EQ.cuarto !== cuarto) return;   // ya cambió de cuarto mientras cargaba
+    if(u){ EQ.cuentas = u.cuentas; EQ.previo = u.dia; }
+  }catch{}
+  if(EQ.cuarto !== cuarto) return;
+  EQ.cargando = false; if(PANTALLA === 'equipo') pintarAqui();
+}
+function abrirEquipo(){
+  if(GUARDADA){ NIVEL = GUARDADA.nivel_id || NIVEL; CUARTO = GUARDADA.cuarto_id || CUARTO; }
+  PANTALLA = 'equipo'; EQ = { cuarto: CUARTO, cuentas: {}, previo: null, cargando: true, agregando: false };
+  pintarAqui(); cargarEquipo();
+  const m = $('#main'); if(m && !esCompu()) m.scrollTop = 0;
+}
+// Después de anotar el equipo (o No Equipment): al siguiente cuarto, con la cámara lista.
+function avanzar(nombre, hecho){
+  const sig = siguienteCuarto(NIVELES, CUARTOS, CUARTO);
+  if(sig){ NIVEL = sig.nivel_id; CUARTO = sig.id; AVISO_TEL = hecho + ' Next: ' + sig.nombre + '.'; }
+  else AVISO_TEL = hecho + ' That was the last room.';
+  GUARDADA = null; PANTALLA = 'cam'; pintarAqui();
+}
+async function guardarEquipo(){
+  if(OCUPADO_TEL || EQ.cargando || !CUARTO) return;
+  const nombre = nombreDe(CUARTOS, CUARTO), cuentas = { ...EQ.cuentas };
+  OCUPADO_TEL = true; const b = $('[data-eq-guardar]'); if(b){ b.disabled = true; b.textContent = 'Saving…'; }
+  try{
+    const base = { trabajo_id: T.id, dia: hoyLocal(), nivel_id: NIVEL || null, cuarto_id: CUARTO, cuarto_nombre: nombre || null };
+    const filas = filasEquipo(cuentas).map(f => ({ ...base, ...f }));
+    const r = await authFetch('/rest/v1/fotos_drylog_equipos', { method: 'POST', headers: { Prefer: 'return=representation' }, body: JSON.stringify(filas) });
+    if(r.status === 404) throw new Error('This part is not installed on the server yet: sql/fotos-09-drylogs.sql still has to be run.');
+    if(!r.ok){ let m = 'HTTP ' + r.status; try{ const d = await r.json(); m = d.message || m; }catch{} throw new Error(m); }
+    const vuelta = await r.json().catch(() => []);
+    if(!Array.isArray(vuelta) || vuelta.length !== filas.length) throw new Error('The server did not keep it. Try again.');   // confirmar que de verdad se guardó
+    // Ya guardado: si se había contado antes hoy en este cuarto, lo de antes se quita (no se suma dos veces). Se
+    // borra DESPUÉS de guardar lo nuevo: si se cae la señal a medias, no se pierde el conteo.
+    const desde = vuelta.map(f => f.created_at).filter(Boolean).sort()[0];
+    if(desde) await authFetch('/rest/v1/fotos_drylog_equipos?trabajo_id=eq.' + encodeURIComponent(T.id) + '&cuarto_id=eq.' + encodeURIComponent(CUARTO) + '&dia=eq.' + base.dia + '&created_at=lt.' + encodeURIComponent(desde), { method: 'DELETE' }).catch(() => null);
+    const txt = resumenEquipo(cuentas);
+    avanzar(nombre, txt ? 'Equipment saved for ' + nombre + ': ' + txt + '.' : 'No equipment in ' + nombre + '.');
+  }catch(e){ avisarTel('Not saved: ' + (e.message || e)); }
+  finally{ OCUPADO_TEL = false; const b2 = $('[data-eq-guardar]'); if(b2){ b2.disabled = false; b2.innerHTML = 'Save Equipment &amp; Next Room'; } }
+}
+function cambiarEq(i, d){
+  const t = (tiposEq()[i] || [])[0]; if(!t) return;
+  const n = Math.max(0, Math.min(200, (EQ.cuentas[t] || 0) + d)); EQ.cuentas[t] = n;
+  const c = $('#panel-secado [data-eq-c="' + i + '"]'); if(!c){ pintarAqui(); return; }
+  c.textContent = n; const fila = c.closest('.dl-eq-fila'); fila.classList.toggle('con', n > 0);
+  const menos = fila.querySelector('[data-eq-menos]'); if(menos) menos.disabled = !n;
+}
+function agregarTipo(){
+  const inp = $('#dlEqNuevo'), t = (inp ? inp.value : '').trim().replace(/\s+/g, ' ').slice(0, 60);
+  if(!t){ if(inp) inp.focus(); return; }
+  const ya = tiposEq().find(([x]) => x.toLowerCase() === t.toLowerCase());
+  if(!ya){ const l = tiposPropios(); l.push(t); try{ localStorage.setItem(CLAVE_TIPOS, JSON.stringify(l.slice(-20))); }catch{} }
+  const nombre = ya ? ya[0] : t; EQ.cuentas[nombre] = Math.max(1, EQ.cuentas[nombre] || 0);
+  EQ.agregando = false; pintarAqui();
+}
+// El Back de la barra de abajo (su pedido del 14-oct): dentro del Dry Log del teléfono regresa un paso.
+function atrasTel(){
+  const c = caja(); if(!c || c.closest('[hidden]') || esCompu()) return false;
+  if(PANTALLA === 'lectura'){ PANTALLA = 'cam'; AVISO_TEL = ''; pintarAqui(); return true; }
+  if(PANTALLA === 'guardado'){ PANTALLA = 'cam'; pintarAqui(); return true; }
+  if(PANTALLA === 'equipo'){ PANTALLA = GUARDADA ? 'guardado' : 'cam'; pintarAqui(); return true; }
+  return false;
 }
 // La cámara llena lo que sobra de la pantalla hasta la barra de abajo (como el plano; nada de position:fixed).
 function medirTel(){
@@ -351,10 +475,7 @@ async function sinEquipo(){
   OCUPADO_TEL = true;
   try{
     await enviarTel('fotos_drylog_equipos', { trabajo_id: T.id, dia: hoyLocal(), nivel_id: nivel || null, cuarto_id: cuarto || null, cuarto_nombre: nombre || null, tipo: 'none', cantidad: 0 });
-    const sig = siguienteCuarto(NIVELES, CUARTOS, cuarto);
-    if(sig){ NIVEL = sig.nivel_id; CUARTO = sig.id; AVISO_TEL = 'No equipment in ' + nombre + '. Next: ' + sig.nombre + '.'; }
-    else AVISO_TEL = 'No equipment in ' + nombre + '. That was the last room.';
-    GUARDADA = null; PANTALLA = 'cam'; pintarAqui();
+    CUARTO = cuarto; NIVEL = nivel || NIVEL; avanzar(nombre, 'No equipment in ' + nombre + '.');
   }catch(e){ avisarTel('Not saved: ' + (e.message || e)); }
   finally{ OCUPADO_TEL = false; }
 }
@@ -382,11 +503,19 @@ export function conectar(){
     const sel = e.target.closest && e.target.closest('[data-dl-sel]'); if(!sel || !caja() || !caja().contains(sel)) return;
     if(sel.dataset.dlSel === 'nivel'){ NIVEL = sel.value; CUARTO = cuartoInicial(CUARTOS, NIVEL, null); } else CUARTO = sel.value;
     const av = $('#panel-secado .dl-tel-aviso'); if(av){ av.remove(); AVISO_TEL = ''; }
+    if(PANTALLA === 'equipo'){ pintarAqui(); cargarEquipo(); return; }
     pintarSelectores();
+    if(PANTALLA === 'cam') medirTel();   // sin el aviso, la cámara vuelve a llenar lo que sobra
   });
+  document.addEventListener('keydown', (e) => { if(e.key === 'Enter' && e.target && e.target.id === 'dlEqNuevo'){ e.preventDefault(); agregarTipo(); } });
+  registrarAtras(atrasTel);
   document.addEventListener('input', (e) => { if(e.target && e.target.id === 'dlValor') anchoNumero(e.target); });
   document.addEventListener('visibilitychange', () => { if(document.hidden) apagarCam(); else if((PANTALLA === 'cam' || PANTALLA === 'guardado') && $('#dlVideo') && $('#dlVideo').offsetParent) encenderCam(); });
-  window.addEventListener('resize', () => { if(!caja()) return; if(caja().querySelector('.dl-paso')) ajustarAlto(); if(caja().querySelector('.dl-tel')) pintarAqui(); });
+  // Al girar el teléfono (en los grandes, de lado ya es "computadora") se vuelve a escoger la pantalla que toca.
+  let ancho = esCompu();
+  window.addEventListener('resize', () => { if(!caja()) return; const ahora = esCompu(), cambio = ahora !== ancho; ancho = ahora;
+    if(cambio && T){ pintarAqui(); return; }
+    if(caja().querySelector('.dl-paso')) ajustarAlto(); if(caja().querySelector('.dl-tel')) pintarAqui(); });
   document.addEventListener('click', (e) => {
     const c = caja(); if(!c || !c.contains(e.target)) return;
     const q = (s) => e.target.closest(s);
@@ -395,7 +524,12 @@ export function conectar(){
       if(a === 'telefono') camaraDelTelefono(); else if(a === 'otra') encenderCam(); else if(a === 'otra-foto'){ PANTALLA = 'cam'; AVISO_TEL = ''; pintarAqui(); }
       return; }
     if(q('[data-dl-guardar]')){ guardarLectura(); return; }
-    if((el = q('[data-dl-equipo]'))){ if(el.dataset.dlEquipo === 'no') sinEquipo(); else { PANTALLA = 'equipo'; pintarAqui(); } return; }
+    if((el = q('[data-dl-equipo]'))){ if(el.dataset.dlEquipo === 'no') sinEquipo(); else abrirEquipo(); return; }
+    if((el = q('[data-eq-mas]'))){ cambiarEq(+el.dataset.eqMas, 1); return; }
+    if((el = q('[data-eq-menos]'))){ cambiarEq(+el.dataset.eqMenos, -1); return; }
+    if(q('[data-eq-agregar]')){ EQ.agregando = true; pintarAqui(); const i = $('#dlEqNuevo'); if(i) i.focus(); return; }
+    if((el = q('[data-eq-nuevo]'))){ if(el.dataset.eqNuevo === 'si') agregarTipo(); else { EQ.agregando = false; pintarAqui(); } return; }
+    if(q('[data-eq-guardar]')){ guardarEquipo(); return; }
     if((el = q('[data-dl-ir]'))){ PANTALLA = el.dataset.dlIr; pintarAqui(); return; }
     if((el = q('[data-dl-nivel]'))){ if(NIVEL !== el.dataset.dlNivel){ NIVEL = el.dataset.dlNivel; CUARTO = null; } pintarAqui(); return; }
     if((el = q('[data-dl-cuarto]'))){ CUARTO = el.dataset.dlCuarto; pintarAqui(); return; }

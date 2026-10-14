@@ -1767,3 +1767,129 @@ body.fv-editando .fv-asa{ visibility:hidden; }
   body.dl-fijo #main{ overflow:hidden; padding-bottom:10px; }
   body.dl-fijo #fichaAviso:empty{ display:none; }
 }
+
+/* 14-oct, su pedido (teléfono): el Back baja a la barra de abajo. En Home el botón es Home; dentro de cualquier otra
+   cosa se vuelve Back (body.pie-atras) y los Back de arriba ya no se ven. En la computadora no cambia nada. */
+.tab-inicio .tab-atras{ display:none; }
+body.pie-atras .tab-inicio .tab-casa{ display:none; }
+body.pie-atras .tab-inicio .tab-atras{ display:inline; }
+body.pie-atras .tab-inicio svg.tab-atras{ display:block; }
+@media (max-width:899px){
+  .pantalla > .volver[data-nav="atras"], .ptrabajo-main > .volver[data-nav="atras"]{ display:none !important; }
+  #pTrabajo [data-atras-pie]{ display:none !important; }
+  .pcuartos-cab{ padding-top:2px; }
+  /* La cabecera del cliente sube (ya sin el Back) y se hace más chica: más pantalla para lo de abajo. */
+  #pTrabajo .pcab{ grid-template-columns:62px minmax(0,1fr) auto; column-gap:10px; row-gap:1px; margin:0 0 8px; }
+  #pTrabajo .pcab .portada{ width:62px; min-height:62px; border-radius:10px; }
+  #pTrabajo .pcab-t{ font-size:17px; }
+  #pTrabajo .pcab-dir{ font-size:12.5px; }
+  #pTrabajo .pcab-meta{ font-size:11.5px; }
+  #pTrabajo .pcab-etqs{ margin-top:2px; }
+  #pTrabajo .pcab-etqs .etq-c{ font-size:11.5px; padding:2px 7px; }
+  #pTrabajo .pcab-etqs .enlace-editar{ font-size:12.5px; }
+  #pTrabajo .pcab .mas-cab{ width:34px; height:34px; }
+}
+
+/* Dry Log · equipo del cuarto (su diseño del 14-oct, 4 of 5): una fila por equipo con − y + azul. Nada verde. */
+.dl-eq{ display:flex; flex-direction:column; gap:12px; padding:14px; }
+.dl-eq-t{ margin:4px 0 0; font-size:22px; font-weight:800; letter-spacing:-.01em; }
+.dl-eq-nota{ margin:-6px 0 0; font-size:13px; color:var(--ink-soft); }
+.dl-eq-lista{ display:flex; flex-direction:column; gap:8px; }
+.dl-eq-fila{ display:flex; align-items:center; gap:12px; min-height:58px; padding:8px 10px 8px 12px; background:var(--card); border:1px solid var(--line); border-radius:12px; }
+.dl-eq-fila.con{ border-color:var(--line2); }
+.dl-eq-ic{ width:30px; height:30px; flex:none; color:var(--ink); stroke-width:1.6; }
+.dl-eq-n{ flex:1; min-width:0; font-size:15.5px; font-weight:500; color:var(--ink); overflow-wrap:anywhere; }
+.dl-eq-b{ flex:none; width:40px; height:40px; border-radius:50%; border:0; display:grid; place-items:center; cursor:pointer; padding:0; }
+.dl-eq-b .ic{ width:20px; height:20px; stroke-width:2.4; }
+.dl-eq-menos{ background:var(--bg2); color:var(--ink-soft); }
+.dl-eq-menos:disabled{ opacity:.55; cursor:default; }
+.dl-eq-mas{ background:var(--accent); color:#fff; box-shadow:0 2px 6px rgba(37,99,235,.3); }
+.dl-eq-c{ flex:none; width:28px; text-align:center; font-size:18px; font-weight:600; font-variant-numeric:tabular-nums; }
+.dl-eq-agregar{ width:100%; font:inherit; text-align:left; cursor:pointer; }
+.dl-eq-agregar .dl-eq-ic{ color:var(--accent); }
+.dl-eq-chev{ width:20px; height:20px; color:var(--ink); flex:none; }
+.dl-eq-nuevo input{ flex:1; min-width:0; font:inherit; font-size:15px; padding:9px 10px; border:1px solid var(--line2); border-radius:10px; }
+.dl-eq-nuevo .btn{ flex:none; }
+.dl-eq-guardar{ min-height:52px; font-size:16.5px; }
+.dl-eq .aviso:empty{ display:none; }
+@media (max-width:899px){
+  .dl-eq{ padding:12px 10px; }
+  .dl-eq-fila{ gap:10px; padding:6px 8px 6px 10px; }
+  .dl-eq-ic{ width:28px; height:28px; }
+  .dl-eq-n{ font-size:15px; overflow-wrap:normal; word-break:normal; hyphens:none; }
+  .dl-eq-b{ width:38px; height:38px; }
+  .dl-eq-c{ width:24px; }
+}
+/* Su pedido (14-oct): "Equipment in …" más chico, en un solo renglón. */
+@media (max-width:899px){ .dl-eq-t{ font-size:17px; font-weight:700; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; } }
+/* Su pedido (14-oct): la cabecera "Dry Logs · 4 of 5" y el título del equipo un poco más chicos. */
+@media (max-width:899px){
+  .dl-tel-cab h2{ font-size:18px; }
+  .dl-prog i{ width:18px; height:3px; }
+  .dl-prog-n{ font-size:12.5px; }
+  .dl-eq-t{ font-size:15.5px; }
+}
+/* Su pedido (14-oct): "Equipment in …" en azul, para que llame la atención. */
+.dl-eq-t{ color:var(--accent); }
+/* Su pedido (14-oct): más espacio ENTRE LAS PALABRAS del título ("Equipment  in  Master Bedroom"), no arriba ni abajo. */
+.dl-eq-t{ word-spacing:.3em; }
+
+/* ===== Su diseño nuevo del equipo (14-oct): todo en una pantalla, letra ligera, "Room 1 of 4", "Equipment" con raya azul ===== */
+.dl-prog-cuartos i{ width:26px; }
+.dl-prog-cuartos.muchos i{ width:10px; }
+.dl-eq{ gap:10px; }
+.dl-eq .dl-caja{ min-height:46px; padding:6px 10px; }
+.dl-eq .dl-caja-txt small{ font-size:11.5px; }
+.dl-eq .dl-caja-txt b{ font-size:15px; font-weight:400; }
+.dl-eq-t{ display:flex; align-items:center; gap:10px; margin:4px 0 0; font-size:21px; font-weight:700; color:var(--ink); word-spacing:normal; letter-spacing:-.01em; white-space:nowrap; }
+.dl-eq-t::before{ content:""; width:4px; height:22px; border-radius:2px; background:var(--accent); flex:none; }
+.dl-eq-lista{ gap:6px; }
+.dl-eq-fila{ min-height:44px; padding:4px 8px 4px 10px; gap:12px; }
+.dl-eq-ic{ width:30px; height:30px; color:var(--accent-dark); stroke-width:1.4; }
+.dl-eq-n{ font-size:15px; font-weight:400; }
+.dl-eq-b{ width:32px; height:32px; }
+.dl-eq-b .ic{ width:17px; height:17px; }
+.dl-eq-c{ font-size:16px; font-weight:400; width:26px; }
+.dl-eq-guardar{ min-height:42px; font-size:15.5px; font-weight:500; }
+@media (max-width:899px){
+  .dl-eq{ padding:10px; }
+  .dl-eq-t{ font-size:20px; margin:4px 0 0; }
+  .dl-eq-fila{ gap:10px; padding:4px 6px 4px 8px; }
+  .dl-eq-ic{ width:28px; height:28px; }
+  .dl-eq-b{ width:32px; height:32px; }
+  .dl-eq-c{ width:24px; }
+}
+/* Ajuste: que quepa todo (hasta Save) en la pantalla del teléfono y el cuarto se lea completo. */
+.dl-prog-cuartos.medio i{ width:16px; }
+@media (max-width:899px){
+  .dl-tel:has(.dl-eq){ gap:8px; }
+  .dl-eq{ gap:8px; padding:9px; }
+  .dl-eq .dl-tel-sel{ gap:8px; }
+  .dl-eq .dl-caja{ min-height:44px; padding:5px 8px; gap:7px; }
+  .dl-eq .dl-caja .dl-caja-ic{ width:21px; height:21px; }
+  .dl-eq .dl-caja .dl-caja-chev{ width:15px; height:15px; }
+  .dl-eq .dl-caja-txt small{ font-size:11px; }
+  .dl-eq .dl-caja-txt b{ font-size:13.5px; }
+  .dl-eq-t{ font-size:19px; margin:2px 0 0; }
+  .dl-eq-t::before{ height:20px; }
+  .dl-eq-lista{ gap:5px; }
+  .dl-eq-fila{ min-height:40px; padding:3px 6px 3px 8px; }
+  .dl-eq-ic{ width:26px; height:26px; }
+  .dl-eq-n{ font-size:14.5px; }
+  .dl-eq-b{ width:30px; height:30px; }
+  .dl-eq-guardar{ min-height:42px; }
+}
+/* Su pedido (14-oct): la letra como estaba antes (no tan ligera); el resto del diseño nuevo se queda. */
+.dl-eq .dl-caja-txt b{ font-weight:600; }
+.dl-eq-n{ font-weight:500; }
+.dl-eq-c{ font-weight:600; }
+.dl-eq-guardar{ font-weight:600; }
+/* Su pedido (14-oct): las cajas Level / Room de todo el Dry Log del teléfono iguales a las del equipo. */
+@media (max-width:899px){
+  .dl-tel .dl-caja{ min-height:44px; padding:5px 8px; gap:7px; }
+  .dl-tel .dl-caja .dl-caja-ic{ width:21px; height:21px; }
+  .dl-tel .dl-caja .dl-caja-chev{ width:15px; height:15px; }
+  .dl-tel .dl-caja-txt small{ font-size:11px; }
+  .dl-tel .dl-caja-txt b{ font-size:13.5px; font-weight:600; }
+  .dl-tel .dl-tel-sel{ gap:8px; }
+}

@@ -1,0 +1,275 @@
+{
+ "origen": "CompanyCam, trabajo de secado (14-oct-2026), medidor GENERAL RHMG650; solo el recorte del medidor. \"lee\" = lo que dice el número grande, anotado a ojo; null = la pantalla no muestra una lectura (A0.0).",
+ "casos": [
+  {
+   "archivo": "m008.png",
+   "lee": "99.9",
+   "pantalla": {
+    "x": 94,
+    "y": 87,
+    "w": 104,
+    "h": 96
+   }
+  },
+  {
+   "archivo": "m009.png",
+   "lee": "99.9",
+   "pantalla": {
+    "x": 155,
+    "y": 96,
+    "w": 171,
+    "h": 106
+   }
+  },
+  {
+   "archivo": "m010.png",
+   "lee": "99.9",
+   "pantalla": {
+    "x": 108,
+    "y": 90,
+    "w": 120,
+    "h": 100
+   }
+  },
+  {
+   "archivo": "m011.png",
+   "lee": "99.9",
+   "pantalla": {
+    "x": 154,
+    "y": 109,
+    "w": 171,
+    "h": 120
+   }
+  },
+  {
+   "archivo": "m013.png",
+   "lee": "99.9",
+   "pantalla": {
+    "x": 90,
+    "y": 51,
+    "w": 100,
+    "h": 56
+   }
+  },
+  {
+   "archivo": "m014.png",
+   "lee": "99.9",
+   "pantalla": {
+    "x": 154,
+    "y": 93,
+    "w": 171,
+    "h": 103
+   }
+  },
+  {
+   "archivo": "m015.png",
+   "lee": "99.9",
+   "pantalla": {
+    "x": 116,
+    "y": 83,
+    "w": 128,
+    "h": 92
+   }
+  },
+  {
+   "archivo": "m016.png",
+   "lee": "99.9",
+   "pantalla": {
+    "x": 155,
+    "y": 98,
+    "w": 171,
+    "h": 108
+   }
+  },
+  {
+   "archivo": "m017.png",
+   "lee": "63.2",
+   "pantalla": {
+    "x": 155,
+    "y": 112,
+    "w": 171,
+    "h": 125
+   }
+  },
+  {
+   "archivo": "m046.png",
+   "lee": "85.0",
+   "pantalla": {
+    "x": 155,
+    "y": 108,
+    "w": 171,
+    "h": 120
+   }
+  },
+  {
+   "archivo": "m049.png",
+   "lee": "71.0",
+   "pantalla": {
+    "x": 137,
+    "y": 119,
+    "w": 152,
+    "h": 132
+   }
+  },
+  {
+   "archivo": "m050.png",
+   "lee": "72.6",
+   "pantalla": {
+    "x": 154,
+    "y": 107,
+    "w": 171,
+    "h": 118
+   }
+  },
+  {
+   "archivo": "m057.png",
+   "lee": "99.9",
+   "pantalla": {
+    "x": 155,
+    "y": 134,
+    "w": 171,
+    "h": 149
+   }
+  },
+  {
+   "archivo": "m058.png",
+   "lee": "99.9",
+   "pantalla": {
+    "x": 155,
+    "y": 125,
+    "w": 171,
+    "h": 138
+   }
+  },
+  {
+   "archivo": "m064.png",
+   "lee": "99.9",
+   "pantalla": {
+    "x": 119,
+    "y": 101,
+    "w": 132,
+    "h": 112
+   }
+  },
+  {
+   "archivo": "m065.png",
+   "lee": "99.9",
+   "pantalla": {
+    "x": 154,
+    "y": 114,
+    "w": 171,
+    "h": 127
+   }
+  },
+  {
+   "archivo": "m066.png",
+   "lee": "71.4",
+   "pantalla": {
+    "x": 155,
+    "y": 133,
+    "w": 171,
+    "h": 148
+   }
+  },
+  {
+   "archivo": "m067.png",
+   "lee": "72.1",
+   "pantalla": {
+    "x": 155,
+    "y": 109,
+    "w": 171,
+    "h": 121
+   }
+  },
+  {
+   "archivo": "m068.png",
+   "lee": "99.9",
+   "pantalla": {
+    "x": 123,
+    "y": 94,
+    "w": 136,
+    "h": 104
+   }
+  },
+  {
+   "archivo": "m069.png",
+   "lee": "99.9",
+   "pantalla": {
+    "x": 155,
+    "y": 133,
+    "w": 172,
+    "h": 147
+   }
+  },
+  {
+   "archivo": "m070.png",
+   "lee": "99.9",
+   "pantalla": {
+    "x": 155,
+    "y": 114,
+    "w": 171,
+    "h": 126
+   }
+  },
+  {
+   "archivo": "m071.png",
+   "lee": "99.9",
+   "pantalla": {
+    "x": 154,
+    "y": 128,
+    "w": 171,
+    "h": 142
+   }
+  },
+  {
+   "archivo": "m072.png",
+   "lee": "99.9",
+   "pantalla": {
+    "x": 155,
+    "y": 101,
+    "w": 171,
+    "h": 112
+   }
+  },
+  {
+   "archivo": "m073.png",
+   "lee": "99.9",
+   "pantalla": {
+    "x": 155,
+    "y": 122,
+    "w": 171,
+    "h": 135
+   }
+  },
+  {
+   "archivo": "m074.png",
+   "lee": "99.9",
+   "pantalla": {
+    "x": 126,
+    "y": 105,
+    "w": 140,
+    "h": 116
+   }
+  },
+  {
+   "archivo": "m075.png",
+   "lee": "99.9",
+   "pantalla": {
+    "x": 154,
+    "y": 119,
+    "w": 171,
+    "h": 131
+   }
+  },
+  {
+   "archivo": "m076.png",
+   "lee": null,
+   "pantalla": {
+    "x": 154,
+    "y": 101,
+    "w": 172,
+    "h": 112
+   }
+  }
+ ]
+}

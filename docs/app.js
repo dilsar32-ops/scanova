@@ -1,15 +1,15 @@
 // Scanova · arranque, sesión y navegación. Las pantallas viven en index.html; lo de trabajos en trabajos.js.
-import { SUPABASE_URL, ANON_KEY, APP_BUILD } from './config.js?v=2026-10-14-11';
-import { ESQUEMA_APARATO, urlEntrarGoogle } from './google.js?v=2026-10-14-11';
-import * as trabajos from './trabajos.js?v=2026-10-14-11';
-import * as personas from './personas.js?v=2026-10-14-11';
-import * as fotos from './fotos.js?v=2026-10-14-11';
-import * as panel from './panel.js?v=2026-10-14-11';
-import * as camara from './camara.js?v=2026-10-14-11';
-import * as direccion from './direccion.js?v=2026-10-14-11';
-import * as proyecto from './proyecto.js?v=2026-10-14-11';
-import * as foto from './foto.js?v=2026-10-14-11';
-import * as editor from './editor.js?v=2026-10-14-11';
+import { SUPABASE_URL, ANON_KEY, APP_BUILD } from './config.js?v=2026-10-14-12';
+import { ESQUEMA_APARATO, urlEntrarGoogle } from './google.js?v=2026-10-14-12';
+import * as trabajos from './trabajos.js?v=2026-10-14-12';
+import * as personas from './personas.js?v=2026-10-14-12';
+import * as fotos from './fotos.js?v=2026-10-14-12';
+import * as panel from './panel.js?v=2026-10-14-12';
+import * as camara from './camara.js?v=2026-10-14-12';
+import * as direccion from './direccion.js?v=2026-10-14-12';
+import * as proyecto from './proyecto.js?v=2026-10-14-12';
+import * as foto from './foto.js?v=2026-10-14-12';
+import * as editor from './editor.js?v=2026-10-14-12';
 
 export const $ = (s, r = document) => r.querySelector(s);
 export const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -208,11 +208,27 @@ export function irA(id, desde){
   const solo = (id === 'pEntrar' || id === 'pCrear' || id === 'pEspera' || id === 'pCodigo' || id === 'pClave');
   document.body.classList.toggle('modo-entrar', solo);
   $('#pie').hidden = solo;
+  document.body.classList.toggle('pie-atras', !solo && id !== 'pInicio');
   // La barra lateral y la de abajo marcan en qué parte está (Projects abarca la forma y la ficha).
   const seccion = { pInicio:'inicio', pProyectos:'proyectos', pForma:'proyectos', pTrabajo:'proyectos', pNivel:'proyectos', pCuarto:'proyectos', pFoto:'proyectos', pPersonas:'settings', pGaleria:'galeria', pMas:'mas', pPronto: PRONTO }[id] || '';
   $$('[data-nav]').forEach(b => b.classList.toggle('on', !!seccion && b.dataset.nav === seccion));
   $('#subtitulo').textContent = { pEntrar:'Scanova360', pClave:'Contraseña nueva', pCrear:'Crear cuenta', pEspera:'Cuenta en espera', pInicio:'Home', pProyectos:'Projects', pPersonas:'Team', pForma:'Project', pTrabajo:'Project', pNivel:'Level', pCuarto:'Room', pFoto:'Photo', pGaleria:'Gallery', pMas:'More' }[id] || 'Scanova360';
   const m = $('#main'); if(m) m.scrollTo(0, 0); window.scrollTo(0, 0);
+}
+// 14-oct, su pedido: en el teléfono el Back ya no va arriba: el botón Home de la barra de abajo SE VUELVE Back en
+// cuanto se entra a algo (en Home sigue siendo Home). Ese Back regresa un paso: primero lo de adentro de la pantalla
+// (una hoja abierta, la cámara del Dry Log, el filtro de fotos...), y si no hay nada, la pantalla anterior.
+const ATRAS_DENTRO = [];
+export function registrarAtras(fn){ ATRAS_DENTRO.push(fn); }
+const seVe = (el) => { for(let e = el; e && e !== document.body; e = e.parentElement){ if(e.hidden) return false; } return true; };
+export function volverUno(){
+  for(const s of ['#detHoja', '#hojaCuarto']){ const h = $(s); if(h && !h.hidden){ h.hidden = true; return; } }
+  const k = $('#cajonDetalles'); if(k && !k.hidden){ k.hidden = true; document.body.classList.remove('con-cajon'); return; }
+  for(let i = ATRAS_DENTRO.length - 1; i >= 0; i--){ try{ if(ATRAS_DENTRO[i]()) return; }catch(e){ console.warn('atras', e); } }
+  const p = $$('.pantalla').find(x => !x.hidden);
+  const dentro = p ? [...p.querySelectorAll('[data-atras-pie]')].filter(seVe) : [];
+  if(dentro.length){ dentro[dentro.length - 1].click(); return; }
+  atras();
 }
 export function atras(){ const a = pila.pop(); if(a) irA(a); else irA('pInicio'); if(!a || a === 'pInicio' || a === 'pProyectos'){ trabajos.pintar(); trabajos.cargar(); } }
 // Una sección que todavía no tiene diseño: pantalla que lo dice (no finge que funciona).
@@ -340,6 +356,7 @@ async function arrancar(){
     document.body.classList.remove('menu-abierto');
     const n = b.dataset.nav;
     if(n === 'atras') atras();
+    else if(n === 'inicio' && b.closest('#pie') && document.body.classList.contains('pie-atras')) volverUno();
     else if(n === 'inicio' || n === 'trabajos'){ pila.length = 0; irA('pInicio'); panel.pintar(); trabajos.cargar(); }
     else if(n === 'proyectos'){ pila.length = 0; irA('pProyectos'); panel.pintar(); trabajos.cargar(); }
     else if(n === 'galeria'){ pila.length = 0; irA('pGaleria'); panel.pintarGaleria(); trabajos.cargar(); }

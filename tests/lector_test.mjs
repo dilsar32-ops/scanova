@@ -6,8 +6,11 @@ let pass = 0, fail = 0;
 const ok = (l, c) => { if(c){ pass++; console.log('  ok  ' + l); } else { fail++; console.log('  FAIL ' + l); } };
 const lee = (txt, op, sem) => { const R = azar(sem || 7); const p = pantalla(txt, op, R); const r = leerPantalla(p.img, p.guia); return r ? r.texto : null; };
 // Los casos de siempre, limpios
-for(const t of ['40', '18.5', '12', '9.8', '0', '7', '100', '27.3', '88', '65'])
+for(const t of ['40', '18.5', '12', '9.8', '100', '27.3', '88', '65'])
   ok('pantalla limpia "' + t + '"', lee(t, { pct: true, gap: 0.08 }) === t);
+// Una sola cifra NO se da (fotos de verdad, 14-oct: un "7" o un "9" suelto salía de cualquier rayita). Los medidores
+// muestran el decimal (7.0); si de veras dice 7, el técnico lo escribe.
+for(const t of ['0', '7']) ok('una sola cifra "' + t + '" no se adivina', lee(t, { pct: true, gap: 0.08 }) === null);
 // Como en la vida real
 ok('cursiva (los medidores escriben inclinado)', lee('18.5', { inclina: 0.18, gap: 0.08 }) === '18.5');
 ok('foto un poco chueca (5°)', lee('40', { gira: 5, gap: 0.08, pct: true }) === '40');

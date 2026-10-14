@@ -32,5 +32,24 @@ const idx = fs.readFileSync(new URL('../docs/index.html', import.meta.url), 'utf
 ok('los íconos de los cuartos existen en la app', ['dl-hoja', 'dl-cocina', 'dl-comedor', 'dl-sofa', 'dl-puerta', 'dl-cama', 'dl-bano', 'dl-lavar', 'dl-cuarto'].every(n => idx.includes('id="i-' + n + '"')));
 const css = fs.readFileSync(new URL('../docs/estilo.css', import.meta.url), 'utf8').split('===== Dry Logs (14-oct')[1] || 'x';
 ok('el CSS de Dry Logs no usa verde ni position:fixed', !/#16a34a|green|var\(--ok\)|position:\s*fixed/.test(css));
+// Equipo del cuarto (su diseño del 14-oct, 4 of 5)
+{ const filas = [
+    { tipo:'Fans / Air Movers', cantidad:3, dia:'2026-10-14', created_at:'2026-10-14T15:00:00Z' },
+    { tipo:'Fans / Air Movers', cantidad:2, dia:'2026-10-14', created_at:'2026-10-14T12:00:00Z' },
+    { tipo:'Dehumidifiers', cantidad:1, dia:'2026-10-14', created_at:'2026-10-14T15:00:00Z' },
+    { tipo:'Heater', cantidad:4, dia:'2026-10-13', created_at:'2026-10-13T15:00:00Z' } ];
+  const u = DL.ultimoEquipo(filas);
+  ok('equipo: sale lo del día más reciente, la anotación más nueva de cada uno', u.dia === '2026-10-14' && u.cuentas['Fans / Air Movers'] === 3 && u.cuentas['Dehumidifiers'] === 1 && !('Heater' in u.cuentas));
+  ok('equipo: "No Equipment" deja todo en cero', JSON.stringify(DL.ultimoEquipo([{ tipo:'none', cantidad:0, dia:'2026-10-14', created_at:'x' }]).cuentas) === '{}');
+  ok('equipo: sin nada anotado, no inventa', DL.ultimoEquipo([]) === null);
+  const f = DL.filasEquipo({ 'Fans / Air Movers':2, 'Dry Mat':0, 'Ozone Machine':1 });
+  ok('equipo: se guarda solo lo que tiene cantidad', f.length === 2 && f.every(x => x.cantidad > 0));
+  ok('equipo: todo en cero se guarda como "none" (igual que No Equipment)', JSON.stringify(DL.filasEquipo({ 'Heater':0 })) === '[{"tipo":"none","cantidad":0}]');
+  { const niv = [{ id:'n1' }, { id:'n2' }], cua = [{ id:'a', nivel_id:'n1' }, { id:'b', nivel_id:'n1' }, { id:'c', nivel_id:'n2' }, { id:'d', nivel_id:'n2' }];
+    const p = DL.posicionCuarto(niv, cua, 'c');
+    ok('equipo: "Room 3 of 4" cuenta los cuartos de todo el proyecto, en el orden de la app', p.n === 3 && p.de === 4); }
+  ok('equipo: los 7 de su diseño, en su orden', DL.EQUIPOS_DL.map(x => x[0]).join('|') === 'Fans / Air Movers|Dehumidifiers|HEPA Air Scrubber|Dry Mat|Air Duct|Heater|Poles');
+  ok('equipo: sus íconos existen en la app', DL.EQUIPOS_DL.every(([, ic]) => idx.includes('id="i-' + ic + '"')) && idx.includes('id="i-mas-circulo"'));
+}
 console.log(`\ndrylog: ${pass} ok, ${fail} fallas`);
 if(fail) process.exit(1);
