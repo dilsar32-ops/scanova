@@ -1521,7 +1521,19 @@ body.fv-editando .fv-asa{ visibility:hidden; }
 .pl-grande-lienzo{ overflow:hidden; }
 /* 13-oct: en el teléfono la página del plano queda quieta (todo cabe en una pantalla); un dedo sobre el plano no mueve la página. */
 @media (max-width:899px){
-  body.pl-fijo #main{ overflow:hidden; }
+  body.pl-fijo #main{ overflow:hidden; padding-bottom:10px; }
+  /* Su pedido (13-oct): más espacio al plano en el teléfono. El aviso vacío de la ficha y el margen de abajo ya
+     no se comen espacio; el cuadro del plano se lleva lo que sobra (medir() en planos.js). */
+  body.pl-fijo #fichaAviso:empty{ display:none; }
+  /* Su pedido (13-oct): el botón de pantalla completa sale de encima del plano y va junto a Edit Floor Plan. */
+  #panel-plano .pl-tel-editar{ display:flex; gap:8px; }
+  #panel-plano .pl-tel-editar [data-pl-editar]{ flex:1; }
+  #panel-plano .pl-tel-editar .pl-tel-grande{ flex:none; width:52px; padding:0; }
+  #panel-plano .pl-tel-editar .pl-tel-grande .ic{ width:20px; height:20px; }
+  body.pl-fijo #panel-plano .pl-lienzo.ajustado{ padding:2px; }
+  /* Su escogida (13-oct): el cuadro del plano de orilla a orilla del teléfono (sin el margen de la página a los
+     lados): el plano crece y se sigue viendo entero. Los botones se quedan donde estaban. */
+  body.pl-fijo #panel-plano .pl-visor{ margin-left:-18px; margin-right:-18px; border-radius:0; border-left:0; border-right:0; }
   body.pl-fijo .pl-lienzo.ajustado{ touch-action:none; }
 }
 /* 14-oct, su pedido: en la computadora la cabecera va IGUAL que en el teléfono: nombre, dirección,

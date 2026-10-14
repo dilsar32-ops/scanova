@@ -2,8 +2,8 @@
 // (el mismo escáner de Field Reports, que ya viene dentro de la app: plugin RoomScan) y se dibuja con el
 // mismo código de Field Reports (plano.js, copiado por tools/extraer_plano.py). Un escaneo por piso;
 // un escaneo nuevo no borra el anterior (queda de historial), se ve el más reciente.
-import * as plano from './plano.js?v=2026-10-14-6';
-import { authFetch, esAparato } from './app.js?v=2026-10-14-6';
+import * as plano from './plano.js?v=2026-10-14-7';
+import { authFetch, esAparato } from './app.js?v=2026-10-14-7';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
@@ -113,7 +113,8 @@ export function pintar(){
   const lista = nivelesConPlanos();
   const filasNiv = lista.map(n => { const q = planoDe(PLANOS, n.id);
     return `<button type="button" class="pl-nivel${n.id === niv.id ? ' on' : ''}" data-pl-nivel="${esc(n.id)}"><b>${esc(n.nombre)}</b><small>${q ? fmtPies(q.area_sqft != null ? q.area_sqft : resumenPlano(q.data).area) + ' sq ft' : 'No plan'}</small></button>`; }).join('');
-  const chips = lista.map(n => `<button type="button" class="pl-chip${n.id === niv.id ? ' on' : ''}" data-pl-nivel="${esc(n.id)}">${esc(n.nombre)}</button>`).join('');
+  // Teléfono (su pedido, 13-oct): sin la tarjeta de resumen ni la fila de pisos debajo de los botones, para que el
+  // plano tenga más espacio. El piso se escoge arriba (la lista); "Add Level" vive en el menú •••.
   const opciones = lista.map(n => `<option value="${esc(n.id)}"${n.id === niv.id ? ' selected' : ''}>${esc(n.nombre)}</option>`).join('');
   let vista;
   if(CARGADO === 'cargando' || CARGADO === '') vista = '<div class="pl-vacio"><p>Loading plans…</p></div>';
@@ -125,7 +126,6 @@ export function pintar(){
   const det = (k, v) => `<div class="pl-det"><span>${k}</span><b>${v}</b></div>`;
   const detalles = res ? det('Total Area', fmtPies(res.area) + ' sq ft') + det('Rooms', res.cuartos) + det('Exterior Walls', fmtPies(res.murosExt) + ' lf') + det('Ceiling Height', res.techo ? pies(res.techo) : '—') + det('Units', 'ft / in')
     : '<p class="pl-nada">Scan this floor to see its area, rooms and walls.</p>';
-  const resumenTel = res ? `${fmtPies(res.area)} sq ft · ${res.cuartos} rooms · ${fmtPies(res.murosExt)} lf exterior walls` : 'No plan yet';
   const herrVista = `<div class="pl-seg"><button type="button" class="${VISTA === '2d' ? 'on' : ''}" data-pl-vista="2d">2D</button><button type="button" class="${VISTA === '3d' ? 'on' : ''}" data-pl-vista="3d">3D</button></div>`;
   const zoom = `<div class="pl-zoomer"><button type="button" data-pl-zoom="-1" aria-label="Zoom out">${IC('menos')}</button><span>${Math.round(ZOOM * 100)}%</span><button type="button" data-pl-zoom="1" aria-label="Zoom in">${IC('mas')}</button></div>`;
   caja.innerHTML = `
@@ -142,7 +142,7 @@ export function pintar(){
     <label class="sel pl-sel"><select id="plNivelSel" aria-label="Level">${opciones}</select>${IC('chev')}</label>
     ${herrVista}
     <div class="pl-mas-wrap"><button type="button" class="pl-mas-btn" data-pl-menu aria-label="More options" aria-expanded="${MENU ? 'true' : 'false'}">•••</button>
-      <div class="pl-menu"${MENU ? '' : ' hidden'}><button type="button" data-pl-rejilla>${IC('cuadros')}${REJILLA ? 'Hide grid' : 'Show grid'}</button><button type="button" data-pl-ajustes>${IC('engrane')}Plan Settings</button></div></div>
+      <div class="pl-menu"${MENU ? '' : ' hidden'}><button type="button" data-pl-mas-nivel>${IC('mas')}Add Level</button><button type="button" data-pl-rejilla>${IC('cuadros')}${REJILLA ? 'Hide grid' : 'Show grid'}</button><button type="button" data-pl-ajustes>${IC('engrane')}Plan Settings</button></div></div>
   </div>
   <div class="pl-cuerpo">
     <aside class="pl-col pl-niveles"><h3>Levels</h3>${filasNiv}<button type="button" class="btn btn-outline btn-block pl-mas-nivel" data-pl-mas-nivel>${IC('mas')}Add Level</button></aside>
@@ -151,16 +151,13 @@ export function pintar(){
         <span class="pl-esp"></span>${herrVista}
         <button type="button" class="pl-rej${REJILLA ? ' on' : ''}" data-pl-rejilla>${IC('cuadros')}Grid</button>${zoom}
         <button type="button" class="pl-grande-btn" data-pl-grande aria-label="Full screen">${IC('expandir')}</button></div>
-      <div class="pl-tel-flota"><button type="button" class="pl-grande-btn" data-pl-grande aria-label="Full screen">${IC('expandir')}</button></div>
       ${vista}
     </section>
     <aside class="pl-col pl-detalles"><h3>Plan Details</h3>${detalles}<button type="button" class="btn btn-outline btn-block" data-pl-ajustes>${IC('engrane')}Plan Settings</button></aside>
   </div>
-  <div class="pl-tel-resumen"><b>${esc(niv.nombre)}</b><span>${esc(resumenTel)}</span>${p ? `<small>Updated ${esc(fechaEn(p.created_at))}</small>` : ''}</div>
   <div class="pl-tel-acc">
-    <button type="button" class="btn btn-accent btn-block" data-pl-editar${p ? '' : ' disabled'}>Edit Floor Plan</button>
+    <div class="pl-tel-editar"><button type="button" class="btn btn-accent" data-pl-editar${p ? '' : ' disabled'}>Edit Floor Plan</button><button type="button" class="btn btn-outline pl-tel-grande" data-pl-grande aria-label="Full screen">${IC('expandir')}</button></div>
     <div class="pl-tel-dos"><button type="button" class="btn btn-outline" data-pl-escanear>${IC('escanear')}Scan New Plan</button><button type="button" class="btn btn-outline" data-pl-exportar${p ? '' : ' disabled'}>${IC('compartir')}Export</button></div>
-    <div class="pl-chips">${chips}<button type="button" class="pl-chip pl-chip-mas" data-pl-mas-nivel>${IC('mas')}Add Level</button></div>
   </div>`;
   medir();
   const lz = $('#panel-plano .pl-lienzo.ajustado'); if(lz) pellizco(lz, lz.querySelector('.pl-zoom'), PZ);
@@ -179,6 +176,9 @@ function medir(){
     // Su pedido (13-oct): la página del plano NO se mueve para arriba y para abajo, queda como su diseño:
     // cabecera, pestañas, plano y botones en UNA pantalla, y el cuadro del plano se lleva el espacio que sobra.
     // Si de plano no cabe (teléfono acostado, letra muy grande), la página se desplaza como siempre.
+    // La clase va ANTES de medir: con ella la pantalla suelta su margen de abajo y el aviso vacío (13-oct),
+    // y ese espacio se lo tiene que llevar el plano. Si al final no cabe, se quita abajo.
+    document.body.classList.add('pl-fijo');
     const v = l.querySelector('svg'); const vb = v && v.viewBox && v.viewBox.baseVal;
     const ar = vb && vb.width && vb.height ? vb.width / vb.height : 1.4;
     const panel = $('#panel-plano'); const ultimo = panel && panel.lastElementChild;

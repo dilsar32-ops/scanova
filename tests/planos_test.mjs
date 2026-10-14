@@ -31,7 +31,7 @@ ok('exportar lleva abajo la tabla de medidas (como Field Reports); la pantalla n
 { const e = PL.limitarPZ({ s: 0.4, x: 50, y: 50 }, 300, 200); ok('pellizco: no se encoge menos que entero', e.s === 1 && e.x === 0 && e.y === 0); }
 { const e = PL.zoomEn({ s: 1, x: 0, y: 0 }, 2, 150, 100); ok('pellizco: acerca en el punto de los dedos (el punto no se mueve)', e.x === -150 && e.y === -100); }
 { const e = PL.limitarPZ({ s: 2, x: -900, y: 40 }, 300, 200); ok('pellizco: no deja mover el plano fuera del cuadro', e.x === -300 && e.y === 0); }
-{ const src = fs.readFileSync(new URL('../docs/planos.js', import.meta.url), 'utf8'); ok('teléfono: sin + y − encima del plano', /class="pl-tel-flota"><button type="button" class="pl-grande-btn"/.test(src)); }
+{ const src = fs.readFileSync(new URL('../docs/planos.js', import.meta.url), 'utf8'); ok('teléfono: nada encima del plano (sin + y −) y pantalla completa junto a Edit Floor Plan (13-oct)', !/pl-tel-flota/.test(src) && /class="pl-tel-editar"><button[^>]*data-pl-editar[\s\S]{0,120}data-pl-grande/.test(src)); }
 // Su queja del 13-oct: "los planos salen de lado". El escaneo llega con el ángulo del teléfono: se endereza.
 { const girar = (d, gr) => { const a = gr*Math.PI/180, c = Math.cos(a), sn = Math.sin(a); const rot = p => ({ x: p.x*c - p.y*sn, y: p.x*sn + p.y*c });
     const o = JSON.parse(JSON.stringify(d)); delete o._handEdited; o.rooms.forEach(r => { (r.walls||[]).forEach(w => { w.start = rot(w.start); w.end = rot(w.end); }); ['doors','windows','openings'].forEach(k => (r[k]||[]).forEach(x => x.position && (x.position = rot(x.position)))); (r.objects||[]).forEach(x => { x.center = rot(x.center); }); }); return o; };
