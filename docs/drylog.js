@@ -6,11 +6,11 @@
 // TELÉFONO (su diseño del 14-oct): Dry Logs abre con la cámara prendida. Arriba "Dry Logs" y en qué cuarto va
 // (Room 1 of 4), luego Level y Room para escoger dónde, y la cámara llena lo que sobra. El botón azul de cámara de
 // abajo (el de siempre) toma la foto directo. Lo que sigue después de la foto espera su siguiente diseño.
-import { $, $$, authFetch, registrarAtras } from './app.js?v=2026-10-14-15';
-import { RESTRICCIONES, errorCamara, puedeCamaraPropia } from './camara.js?v=2026-10-14-15';
-import * as fotos from './fotos.js?v=2026-10-14-15';
-import { leerPantalla } from './lector.js?v=2026-10-14-15';
-import * as R from './registro.js?v=2026-10-14-15';
+import { $, $$, authFetch, registrarAtras, preguntar } from './app.js?v=2026-10-14-16';
+import { RESTRICCIONES, errorCamara, puedeCamaraPropia } from './camara.js?v=2026-10-14-16';
+import * as fotos from './fotos.js?v=2026-10-14-16';
+import { leerPantalla } from './lector.js?v=2026-10-14-16';
+import * as R from './registro.js?v=2026-10-14-16';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -153,7 +153,7 @@ function paso1Html(){
     ? `<div class="dl-cuartos" role="radiogroup" aria-label="Room">${cuartos.map(c => { const on = c.id === CUARTO;
         const hoyN = R.lecturasDelDia(LECT, c.id, HOY()).length;
         return `<button type="button" class="dl-op dl-cuarto${on ? ' on' : ''}" role="radio" aria-checked="${on}" data-dl-cuarto="${esc(c.id)}">${IC(iconoCuarto(c), 'dl-op-ic')}<span class="dl-op-txt"><b>${esc(c.nombre)}</b>${hoyN ? `<small class="dl-leido-hoy">${IC('check')}Read today</small>` : ''}</span>${radio(on)}</button>`; }).join('')}</div>`
-    : `<div class="dl-falta"><p>${esc(nivel.nombre)} has no rooms yet. Add them from the ••• menu of the project (Levels & Rooms).</p></div>`;
+    : `<div class="dl-falta"><p>${esc(nivel.nombre)} has no rooms yet.</p><button type="button" class="btn btn-outline btn-chico" data-nuevo-cuarto data-nivel="${esc(nivel.id)}">+ Add room</button></div>`;
   return `<div class="card dl-paso">
     <p class="dl-paso-n">${diaNum() > 1 ? 'Day ' + diaNum() + ' · ' + esc(R.fechaLarga(HOY())) + ' · ' : 'New Dry Log · '}Step 1 of 3</p>
     ${AVISO_TEL ? `<p class="dl-tel-aviso">${IC('check')}${esc(AVISO_TEL)}</p>` : ''}
@@ -200,21 +200,26 @@ function paso3Html(){
   </div>`;
 }
 async function guardarWeb(){
-  if(OCUPADO_TEL || !CUARTO) return;
+  if(OCUPADO_TEL || !CUARTO) return false;
   const valor = valorDe(($('#dlValor') || {}).value);
-  if(valor == null){ avisarTel('Type the reading as a number (like 18 or 18.5).'); const i = $('#dlValor'); if(i) i.focus(); return; }
+  if(valor == null){ avisarTel('Type the reading as a number (like 18 or 18.5).'); const i = $('#dlValor'); if(i) i.focus(); return false; }
   MATERIAL = $('#dlMaterial').value; UBIC = ($('#dlUbic').value || '').trim();
+  // Igual que en el teléfono (prueba en vivo del 14-oct): dos lecturas del mismo punto el mismo día se tapaban en el reporte.
+  if(R.lecturasDelDia(LECT, CUARTO, HOY()).some(f => R.clavePunto(f) === R.clavePunto({ material: MATERIAL, ubicacion: UBIC || null }))){
+    avisarTel('This room already has a ' + MATERIAL + (UBIC ? ' · ' + UBIC : '') + ' reading today. Write a different "Where" (another wall or spot).'); const u = $('#dlUbic'); if(u) u.focus(); return false;
+  }
   const archivo = ($('#dlWebFoto') && $('#dlWebFoto').files[0]) || null;
   OCUPADO_TEL = true; const b = $('[data-dl-web-guardar]'); if(b){ b.disabled = true; b.textContent = 'Saving…'; }
   try{
-    let foto = null; if(archivo) ({ foto } = await fotos.subirCopia(archivo, { nivel_id: NIVEL, cuarto_id: CUARTO }));
+    let foto = null; if(archivo) ({ foto } = await fotos.subirCopia(archivo, { nivel_id: NIVEL, cuarto_id: CUARTO }, { medidor: true }));
     const fila = await enviarTel('fotos_drylog_lecturas', { trabajo_id: T.id, dia: hoyLocal(), nivel_id: NIVEL || null, cuarto_id: CUARTO, cuarto_nombre: nombreDe(CUARTOS, CUARTO) || null,
       material: MATERIAL, ubicacion: UBIC || null, valor, unidad: '%', foto_id: foto ? foto.id : null, leido_texto: null, leido_por: null, corregido: false });
     LECT.push(fila);
     const pend = R.puntosPendientes(LECT, CUARTO, HOY())[0];   // el que sigue, ya escrito
     if(pend){ MATERIAL = pend.material || MATERIAL; UBIC = pend.ubicacion || ''; } else UBIC = '';
     pintarAqui(); avisarTel(''); const a = $('#dlAviso'); if(a){ a.className = 'aviso ok'; a.textContent = 'Saved ' + fmtValor(valor) + '% · ' + R.nombrePunto(fila) + '.'; }
-  }catch(e){ avisarTel('Not saved: ' + (e.message || e)); }
+    return true;
+  }catch(e){ avisarTel('Not saved: ' + (e.message || e)); return false; }
   finally{ OCUPADO_TEL = false; const b2 = $('[data-dl-web-guardar]'); if(b2){ b2.disabled = false; b2.textContent = 'Save Reading'; } }
 }
 
@@ -524,7 +529,7 @@ function diaHtml(){
 }
 async function borrarLectura(id){
   const f = LECT.find(x => x.id === id); if(!f || OCUPADO_TEL) return;
-  if(!confirm('Delete the ' + fmtValor(f.valor) + '% reading of ' + R.nombrePunto(f) + ' (' + (f.cuarto_nombre || 'room') + ')? The photo stays in Photos.')) return;
+  if(!await preguntar({ titulo: 'Delete this reading?', texto: fmtValor(f.valor) + '% · ' + R.nombrePunto(f) + ' (' + (f.cuarto_nombre || 'room') + '). The photo stays in Photos.', si: 'Delete Reading', no: 'Cancel' })) return;
   OCUPADO_TEL = true;
   try{
     const r = await authFetch('/rest/v1/fotos_drylog_lecturas?id=eq.' + encodeURIComponent(id), { method: 'DELETE', headers: { Prefer: 'return=representation' } });
@@ -652,7 +657,7 @@ async function guardarLectura(siguiente){
   try{
     // La foto va a Photos, a su piso y cuarto: es la prueba de la lectura.
     const archivo = new File([FOTO.blob], 'dry-log-' + hoyLocal() + '-' + Date.now() + '.jpg', { type: 'image/jpeg', lastModified: Date.now() });
-    const { foto } = await fotos.subirCopia(archivo, { nivel_id: FOTO.nivel, cuarto_id: FOTO.cuarto });
+    const { foto } = await fotos.subirCopia(archivo, { nivel_id: FOTO.nivel, cuarto_id: FOTO.cuarto }, { medidor: true });
     const cuarto_nombre = nombreDe(CUARTOS, FOTO.cuarto) || null;
     const fila = await enviarTel('fotos_drylog_lecturas', { trabajo_id: T.id, dia: hoyLocal(), nivel_id: FOTO.nivel || null, cuarto_id: FOTO.cuarto || null, cuarto_nombre,
       material: mat, ubicacion: ubi, valor, unidad: '%', foto_id: foto ? foto.id : null,
@@ -749,6 +754,10 @@ export function conectar(){
       if(a === 'vacio'){ NIVEL = null; CUARTO = null; VOLVIO = true; }   // tocó Back: se queda en la portada hasta que toque Start
       if(a === 'paso1') VOLVIO = false;
       if(a === 'paso2'){ const p = R.puntosPendientes(LECT, CUARTO, HOY())[0]; if(p){ MATERIAL = p.material || MATERIAL; UBIC = p.ubicacion || ''; } }
+      // Prueba en vivo (14-oct): en la computadora "Continue" tiraba la lectura escrita sin avisar. Si hay número, se guarda primero.
+      if(a === 'paso3' && PANTALLA === 'paso2' && String(($('#dlValor') || {}).value || '').trim()){
+        guardarWeb().then(ok => { if(ok){ PANTALLA = 'paso3'; cargarEquipo(); pintarAqui(); } }); return;
+      }
       if(a === 'paso3'){ PANTALLA = 'paso3'; cargarEquipo(); }
       PANTALLA = a; pintarAqui();
       if(c.scrollIntoView) c.scrollIntoView({ block: 'nearest' });

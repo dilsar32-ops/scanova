@@ -21,4 +21,10 @@ ok('tipoTxt: nombres y respaldo', T.tipoTxt('agua') === 'Agua' && T.tipoTxt('zzz
 ok('telDigitos: solo dígitos', T.telDigitos('(703) 555-0100') === '7035550100');
 ok('esc: escapa html', T.esc('<b>"x"</b>') === '&lt;b&gt;&quot;x&quot;&lt;/b&gt;');
 ok('fechaCorta: vacío y fecha', T.fechaCorta('') === '' && /2026/.test(T.fechaCorta('2026-10-12T03:00:00Z')));
+// Las fotos del medidor del Dry Log nunca son portada ni "fotos recientes".
+{ const F = [ { id:'m1', trabajo_id:'A' }, { id:'f1', trabajo_id:'A' }, { id:'f2', trabajo_id:'A' }, { id:'m2', trabajo_id:'B' }, { id:'f3', trabajo_id:'B' } ];
+  const r = T.portadasSinMedidor(F, new Set(['m1','m2']));
+  ok('portadas: brinca las fotos del medidor', r.A.join() === 'f1,f2' && r.B.join() === 'f3');
+  ok('portadas: proyecto con solo fotos del medidor queda sin portada', !T.portadasSinMedidor([{ id:'m1', trabajo_id:'C' }], new Set(['m1'])).C);
+  ok('portadas: tope de 4 por proyecto, y sin medidor no truena', T.portadasSinMedidor([1,2,3,4,5,6].map(i => ({ id:'x'+i, trabajo_id:'D' })), null).D.length === 4); }
 console.log(`\n${pass} ok, ${fail} fail`); process.exit(fail ? 1 : 0);

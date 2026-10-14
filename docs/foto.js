@@ -3,12 +3,12 @@
 // Arriba: Download, Share, •••, Edit Photo y Save a Copy. El panel se esconde y se vuelve a sacar con la flechita.
 // Datos: la nota de la foto (fotos_fotos.nota), sus etiquetas (fotos_etiquetas + fotos_foto_etiquetas) y sus comentarios
 // (fotos_comentarios) ya existían desde fotos-01; las tareas de la foto usan fotos_tareas (sql/fotos-06-foto.sql).
-import { $, $$, authFetch, irA, atras, esManager, PERFIL, esAparato } from './app.js?v=2026-10-14-15';
-import * as trabajos from './trabajos.js?v=2026-10-14-15';
-import * as fotos from './fotos.js?v=2026-10-14-15';
-import * as proyecto from './proyecto.js?v=2026-10-14-15';
-import * as panel from './panel.js?v=2026-10-14-15';
-import * as editor from './editor.js?v=2026-10-14-15';
+import { $, $$, authFetch, irA, atras, esManager, PERFIL, esAparato } from './app.js?v=2026-10-14-16';
+import * as trabajos from './trabajos.js?v=2026-10-14-16';
+import * as fotos from './fotos.js?v=2026-10-14-16';
+import * as proyecto from './proyecto.js?v=2026-10-14-16';
+import * as panel from './panel.js?v=2026-10-14-16';
+import * as editor from './editor.js?v=2026-10-14-16';
 
 const esc = (v) => trabajos.esc(v);
 const IC = (n) => '<svg class="ic"><use href="#i-' + n + '"/></svg>';
@@ -71,9 +71,11 @@ async function pintarFoto(){
   [i - 1, i + 1].forEach(k => { const g = lista[(k + lista.length) % lista.length]; if(g && u[g.id] && !PRECARGA.has(u[g.id])){ PRECARGA.add(u[g.id]); const pi = new Image(); pi.decoding = 'async'; pi.src = u[g.id]; } });
 }
 const PRECARGA = new Set();
+let TIRA_CLAVE = '';
 function pintarTira(){
   const lista = fotos.visorLista(); const urls = fotos.urlsMini(); const i = fotos.visorIndice();
   const t = $('#fvTira');
+  TIRA_CLAVE = lista.map(f => f.id + (urls[f.id] ? '+' : '')).join(',') + '|' + i;
   t.innerHTML = lista.map((f, k) => `<button type="button" class="fv-mini${k === i ? ' on' : ''}" data-fv-ir="${k}" aria-label="Photo ${k + 1}">${urls[f.id] ? '<img src="' + esc(urls[f.id]) + '" alt="" loading="lazy">' : ''}</button>`).join('');
   const on = t.querySelector('.fv-mini.on'); if(on && on.scrollIntoView) on.scrollIntoView({ block:'nearest', inline:'center' });
 }
@@ -181,6 +183,13 @@ function ponerOculto(v){ document.body.classList.toggle('fv-oculto', v); try{ lo
 
 export function conectar(){
   fotos.alAbrirFoto(abrir);
+  // Una foto recién subida (o su miniatura que llega después) entra a la tira y al contador sin salir y volver.
+  fotos.alCambiarLista(() => {
+    if(!F || $('#pFoto').hidden || fotos.fijarVisor(F.id) < 0) return;
+    const lista = fotos.visorLista(); const urls = fotos.urlsMini(); const i = fotos.visorIndice();
+    if(lista.map(f => f.id + (urls[f.id] ? '+' : '')).join(',') + '|' + i === TIRA_CLAVE) return;
+    $('#fvN').textContent = (i + 1) + ' / ' + lista.length; pintarTira();
+  });
   $('#fvAtras').addEventListener('click', () => editor.salir(volverAGaleria));
   $('#fvAnt').addEventListener('click', () => otraFoto(-1));
   $('#fvSig').addEventListener('click', () => otraFoto(1));

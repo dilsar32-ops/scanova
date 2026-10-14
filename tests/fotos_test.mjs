@@ -20,9 +20,9 @@ ok('claveDia: basura = sin-fecha', F.claveDia('nada') === 'sin-fecha' && /^\d{4}
 const tanda = [ { estado:'lista' }, { estado:'lista' }, { estado:'fallo' }, { estado:'repetida' }, { estado:'subiendo' }, { estado:'cola' } ];
 const r = F.resumenTanda(tanda);
 ok('resumenTanda: cuenta cada estado', r.total === 6 && r.listas === 2 && r.fallidas === 1 && r.repetidas === 1 && r.enCurso === 2);
-ok('textoAvance: mientras sube dice cuál va de cuántas', F.textoAvance(r) === 'Subiendo 5 de 6…');
-ok('textoAvance: al terminar resume subidas, repetidas y fallidas', F.textoAvance({ total:4, listas:2, fallidas:1, repetidas:1, enCurso:0 }) === '2 fotos subidas · 1 ya estaba · 1 no se pudo');
-ok('textoAvance: singulares y vacío', F.textoAvance({ total:1, listas:1, fallidas:0, repetidas:0, enCurso:0 }) === '1 foto subida' && F.textoAvance({ total:0 }) === '');
+ok('textoAvance: mientras sube dice cuál va de cuántas', F.textoAvance(r) === 'Uploading 5 of 6…');
+ok('textoAvance: al terminar resume subidas, repetidas y fallidas', F.textoAvance({ total:4, listas:2, fallidas:1, repetidas:1, enCurso:0 }) === '2 photos uploaded · 1 already there · 1 could not upload');
+ok('textoAvance: singulares y vacío', F.textoAvance({ total:1, listas:1, fallidas:0, repetidas:0, enCurso:0 }) === '1 photo uploaded' && F.textoAvance({ total:0 }) === '');
 const h = F.fotoHtml({ id:'x"y' }, 'https://r2/x', 'Amilcar Gonzalez');
 ok('fotoHtml: botón con el id escapado, la imagen y las iniciales de quien la tomó', /data-foto="x&quot;y"/.test(h) && /<img src="https:\/\/r2\/x"/.test(h) && />AG</.test(h));
 ok('fotoHtml: sin url deja el hueco; sin nombre no pone iniciales', /ffoto-vacia/.test(F.fotoHtml({ id:'z' }, '', '')) && /class="fquien" title=""><\/span>/.test(F.fotoHtml({ id:'z' }, '', '')));

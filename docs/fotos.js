@@ -2,8 +2,8 @@
 // por día y ver en grande. La página nunca ve las claves de R2: pide URLs firmadas a la función
 // fotos-subir, sube DIRECTO a R2 y luego confirma; la fila en fotos_fotos la escribe la función
 // solo cuando R2 ya tiene la foto completa (HEAD y tamaño).
-import { $, $$, authFetch, PERFIL, esManager } from './app.js?v=2026-10-14-15';
-import { esc, iniciales } from './trabajos.js?v=2026-10-14-15';
+import { $, $$, authFetch, PERFIL, esManager } from './app.js?v=2026-10-14-16';
+import { esc, iniciales } from './trabajos.js?v=2026-10-14-16';
 
 const FUNCION = '/functions/v1/fotos-subir';
 export const MAX_WEB = 1600, MAX_MINI = 320;
@@ -33,11 +33,11 @@ export function resumenTanda(items){
 }
 export function textoAvance(r){
   if(!r.total) return '';
-  if(r.enCurso) return 'Subiendo ' + (r.listas + r.repetidas + r.fallidas + 1) + ' de ' + r.total + '…';
+  if(r.enCurso) return 'Uploading ' + (r.listas + r.repetidas + r.fallidas + 1) + ' of ' + r.total + '…';
   const partes = [];
-  if(r.listas) partes.push(r.listas === 1 ? '1 foto subida' : r.listas + ' fotos subidas');
-  if(r.repetidas) partes.push(r.repetidas + (r.repetidas === 1 ? ' ya estaba' : ' ya estaban'));
-  if(r.fallidas) partes.push(r.fallidas + (r.fallidas === 1 ? ' no se pudo' : ' no se pudieron'));
+  if(r.listas) partes.push(r.listas === 1 ? '1 photo uploaded' : r.listas + ' photos uploaded');
+  if(r.repetidas) partes.push(r.repetidas + ' already there');
+  if(r.fallidas) partes.push(r.fallidas + ' could not upload');
   return partes.join(' · ');
 }
 // Pura: la foto de un día en la rejilla.
@@ -62,7 +62,7 @@ function leerImagen(file){
   return new Promise((res, rej) => {
     const img = new Image(); const url = URL.createObjectURL(file);
     img.onload = () => res({ img, url });
-    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('no se pudo leer la foto')); };
+    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('could not read the photo')); };
     img.src = url;
   });
 }
@@ -94,7 +94,7 @@ async function putR2(url, blob){
     catch(e){ ultimo = e; }
     await new Promise(r => setTimeout(r, 700 * (i + 1)));
   }
-  throw ultimo || new Error('no se pudo subir a R2');
+  throw ultimo || new Error('upload failed');
 }
 // Una foto, de principio a fin. `avance(etapa)` para la pantalla.
 export async function subirUna(trabajoId, file, avance){
@@ -144,6 +144,9 @@ export async function urlsFirmadas(ids, variante){
   const out = {}; ids.forEach(id => { if(caja[id]) out[id] = caja[id].url; }); return out;
 }
 
+// Las fotos que son prueba de una lectura del Dry Log: siguen en Photos, pero no son portada (prueba en vivo del 14-oct).
+const MEDIDOR = new Set();
+export function marcarMedidor(id){ if(id) MEDIDOR.add(id); }
 export async function cargar(trabajo){
   TRABAJO = trabajo; FOTOS = []; TANDA = [];
   const caja = $('#fotosPanel'); if(!caja) return;
@@ -151,6 +154,8 @@ export async function cargar(trabajo){
   const [r] = await Promise.all([
     authFetch('/rest/v1/fotos_fotos?trabajo_id=eq.' + encodeURIComponent(trabajo.id) + '&estado=eq.activa&select=id,trabajo_id,created_by,subida_at,tomada_at,ancho,alto,bytes,nota,nivel_id,cuarto_id&order=subida_at.desc&limit=1000'),
     nombres(),
+    authFetch('/rest/v1/fotos_drylog_lecturas?trabajo_id=eq.' + encodeURIComponent(trabajo.id) + '&foto_id=not.is.null&select=foto_id&limit=2000')
+      .then(x => x.ok ? x.json() : []).then(m => { (Array.isArray(m) ? m : []).forEach(x => MEDIDOR.add(x.foto_id)); }).catch(() => {}),
   ]);
   if(r.status === 404){ FOTOS = []; pintar(); $('#fotosAviso').textContent = 'Esta parte todavía no está instalada en el servidor: falta correr sql/fotos-01-base.sql.'; return; }
   if(!r.ok){ FOTOS = []; pintar(); $('#fotosAviso').textContent = 'No se pudieron leer las fotos (' + r.status + ').'; return; }
@@ -166,6 +171,9 @@ export async function cargar(trabajo){
 // Aquí quedan los botones de subir, el avance de la tanda y las URLs; la ficha se registra con alPintar().
 let AL_PINTAR = null, DESTINO_FN = () => ({}), AL_CLIC_FN = null, ORDEN_FN = null, ETIQUETA_FN = null;
 export const alPintar = (fn) => { AL_PINTAR = fn; };
+// La ventana de UNA foto se entera cuando cambia la lista (una foto recién subida entra a su tira sin salir y volver).
+let AL_LISTA = null;
+export const alCambiarLista = (fn) => { AL_LISTA = fn; };
 export const usarDestino = (fn) => { DESTINO_FN = fn; };
 export const alClicFoto = (fn) => { AL_CLIC_FN = fn; };
 export const usarOrdenVisor = (fn) => { ORDEN_FN = fn; };
@@ -183,18 +191,19 @@ export function botonesSubir(){
 export function tandaHtml(){
   if(!TANDA.length) return '';
   const r = resumenTanda(TANDA);
-  const filas = TANDA.filter(i => i.estado !== 'lista' && i.estado !== 'repetida').map(i => `<div class="ftanda-fila ${esc(i.estado)}"><span>${esc(i.nombre)}</span><span>${i.estado === 'fallo' ? '✕ ' + esc(i.error || 'no se pudo') : (i.estado === 'cola' ? 'en espera' : i.estado + '…')}</span></div>`).join('');
-  return `<div class="ftanda"><div class="ftanda-cab"><b>${esc(textoAvance(r))}</b>${r.enCurso ? '' : '<button type="button" class="enlace-editar" data-tanda-cerrar>Cerrar</button>'}</div>${filas}${(!r.enCurso && r.fallidas) ? '<div class="ftanda-pie"><button type="button" class="btn btn-outline" data-tanda-reintentar>Reintentar las que fallaron</button></div>' : ''}</div>`;
+  const filas = TANDA.filter(i => i.estado !== 'lista' && i.estado !== 'repetida').map(i => `<div class="ftanda-fila ${esc(i.estado)}"><span>${esc(i.nombre)}</span><span>${i.estado === 'fallo' ? '✕ ' + esc(i.error || 'could not upload') : (i.estado === 'cola' ? 'waiting' : ({ preparando:'preparing', subiendo:'uploading', anotando:'saving' }[i.estado] || i.estado) + '…')}</span></div>`).join('');
+  return `<div class="ftanda"><div class="ftanda-cab"><b>${esc(textoAvance(r))}</b>${r.enCurso ? '' : '<button type="button" class="enlace-editar" data-tanda-cerrar>Close</button>'}</div>${filas}${(!r.enCurso && r.fallidas) ? '<div class="ftanda-pie"><button type="button" class="btn btn-outline" data-tanda-reintentar>Retry failed photos</button></div>' : ''}</div>`;
 }
 export function pintar(urls){
   if(!TRABAJO) return;
   urls = urls || {}; FOTOS.forEach(f => { const c = URLS.mini[f.id]; if(!urls[f.id] && c && c.vence > Date.now()) urls[f.id] = c.url; });
   const n = $('#fotosConteo'); if(n) n.textContent = '(' + FOTOS.length + ')';
   // La portada de la ficha = la foto más nueva (antes se quedaba vacía si las fotos llegaban después de abrir).
-  const masNueva = porDia(FOTOS).flatMap(d => d.fotos)[0];
+  const masNueva = porDia(FOTOS).flatMap(d => d.fotos).find(f => !MEDIDOR.has(f.id));
   const portada = $('#trabajoFicha .portada');
   if(portada && masNueva && urls[masNueva.id]){ const img = portada.querySelector('img'); if(!img || img.getAttribute('src') !== urls[masNueva.id]) portada.innerHTML = '<img src="' + esc(urls[masNueva.id]) + '" alt="">'; }
   if(AL_PINTAR) AL_PINTAR(urls);
+  if(AL_LISTA) AL_LISTA();
 }
 // Mover fotos a un nivel/cuarto (o sacarlas: null). Devuelve cuántas se movieron de verdad (las de otros solo las mueve el manager).
 export async function moverFotos(ids, destino){
@@ -224,7 +233,7 @@ async function procesarTanda(){
   try{
     for(const item of TANDA){
       if(item.estado !== 'cola') continue;
-      if(!TRABAJO || item.trabajoId !== TRABAJO.id) { item.estado = 'fallo'; item.error = 'cambió de trabajo'; continue; }
+      if(!TRABAJO || item.trabajoId !== TRABAJO.id) { item.estado = 'fallo'; item.error = 'project changed'; continue; }
       try{
         const { foto, repetida } = await subirUna(item.trabajoId, item.file, (e) => { item.estado = e; pintar(); });
         // La foto queda en el nivel/cuarto escogido (la fila la escribe la función; el cuarto se le pone aquí).
@@ -242,9 +251,10 @@ async function procesarTanda(){
   } finally { subiendo = false; }
 }
 // Subir UNA foto ya hecha (la copia editada) y esperar a que quede: devuelve la foto nueva. La original no se toca.
-export async function subirCopia(file, destino){
+export async function subirCopia(file, destino, opts){
   if(!TRABAJO) throw new Error('no project open');
   const { foto, repetida } = await subirUna(TRABAJO.id, file, () => {});
+  if(foto && opts && opts.medidor) MEDIDOR.add(foto.id);   // la foto del medidor del Dry Log: se marca antes de pintar, así no parpadea de portada
   if(foto && !repetida && destino && (destino.nivel_id || destino.cuarto_id)){
     try{ const r = await authFetch('/rest/v1/fotos_fotos?id=eq.' + encodeURIComponent(foto.id), { method:'PATCH', headers:{ Prefer:'return=representation' }, body: JSON.stringify({ nivel_id: destino.nivel_id || null, cuarto_id: destino.cuarto_id || null }) });
       if(r.ok){ const x = (await r.json())[0]; if(x){ foto.nivel_id = x.nivel_id; foto.cuarto_id = x.cuarto_id; } } }catch{}
@@ -276,6 +286,8 @@ export async function abrirVisor(fotoId){
   if(AL_FOTO){ AL_FOTO(true); return; }
   abrirGrande();
 }
+// Al entrar fotos nuevas la lista se corre: la ventana vuelve a buscar SU foto para no saltar a otra.
+export function fijarVisor(id){ const i = ordenVisor().findIndex(f => f.id === id); if(i >= 0) VISOR_I = i; return i; }
 export function irFoto(i){ const n = ordenVisor().length; if(!n) return; VISOR_I = ((i % n) + n) % n; if(AL_FOTO) AL_FOTO(false); }
 // La pantalla completa (la vista negra de siempre).
 export async function abrirGrande(){ if(VISOR_I < 0) return; $('#visor').hidden = false; document.body.classList.add('con-visor'); await pintarVisor(); }

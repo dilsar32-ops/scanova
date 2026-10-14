@@ -1,6 +1,6 @@
 // Scanova · trabajos: la lista, crear, abrir, editar, archivar. De las fotos solo el conteo por ahora (paso 2).
-import { $, $$, authFetch, irA, atras, esManager } from './app.js?v=2026-10-14-15';
-import * as fotos from './fotos.js?v=2026-10-14-15';
+import { $, $$, authFetch, irA, atras, esManager, marcarLimpio } from './app.js?v=2026-10-14-16';
+import * as fotos from './fotos.js?v=2026-10-14-16';
 
 export const TIPOS = { agua:'Agua', moho:'Moho', fuego:'Fuego', contenidos:'Contenidos', mudanza:'Mudanza', otro:'Otro' };
 export const tipoTxt = (t) => TIPOS[t] || 'Otro';
@@ -64,6 +64,13 @@ export const datos = () => ({ LISTA, FOTOS, RECIENTES, MINIS, ORDEN, cargando: C
 let AL_CAMBIAR = () => {};
 export const alCambiar = (fn) => { AL_CAMBIAR = fn; };
 
+// Pura: las fotos para la portada de cada proyecto (las 4 más nuevas), SIN las fotos del medidor del Dry Log
+// (prueba en vivo del 14-oct: la última lectura se volvía la portada del proyecto). Las fotos del medidor siguen en Photos.
+export function portadasSinMedidor(filas, medidor, n = 4){
+  const out = {};
+  (filas || []).forEach(x => { if(medidor && medidor.has(x.id)) return; const l = (out[x.trabajo_id] = out[x.trabajo_id] || []); if(l.length < n) l.push(x.id); });
+  return out;
+}
 export async function cargar(){
   const aviso = $('#trabajosAviso'); aviso.textContent = '';
   CARGANDO = !LISTA.length; pintar();
@@ -71,12 +78,15 @@ export async function cargar(){
     authFetch('/rest/v1/fotos_trabajos?select=' + SELECT + '&order=updated_at.desc&limit=500'),
     authFetch('/rest/v1/fotos_fotos?select=id,trabajo_id&estado=eq.activa&order=subida_at.desc&limit=5000'),
   ]);
+  // Las fotos que son prueba de una lectura del Dry Log (no van de portada). Si la tabla no existe todavía, no pasa nada.
+  let MEDIDOR = new Set();
+  try{ const rm = await authFetch('/rest/v1/fotos_drylog_lecturas?select=foto_id&foto_id=not.is.null&limit=5000'); if(rm.ok){ const m = await rm.json(); if(Array.isArray(m)) MEDIDOR = new Set(m.map(x => x.foto_id)); } }catch{}
   CARGANDO = false;
   if(r.status === 404){ LISTA = []; pintar(); aviso.textContent = 'Esta parte todavía no está instalada en el servidor: falta correr sql/fotos-01-base.sql.'; return; }
   if(!r.ok){ LISTA = []; pintar(); aviso.textContent = 'No se pudo leer la lista (' + r.status + '). Revise su internet.'; return; }
   LISTA = await r.json();
   FOTOS = {}; RECIENTES = {}; ORDEN = [];
-  if(rf && rf.ok){ try{ const f = await rf.json(); if(Array.isArray(f)){ ORDEN = f; } if(Array.isArray(f)) f.forEach(x => { FOTOS[x.trabajo_id] = (FOTOS[x.trabajo_id] || 0) + 1; (RECIENTES[x.trabajo_id] = RECIENTES[x.trabajo_id] || []).length < 4 && RECIENTES[x.trabajo_id].push(x.id); }); }catch{} }
+  if(rf && rf.ok){ try{ const f = await rf.json(); if(Array.isArray(f)){ ORDEN = f; } if(Array.isArray(f)){ f.forEach(x => { FOTOS[x.trabajo_id] = (FOTOS[x.trabajo_id] || 0) + 1; }); RECIENTES = portadasSinMedidor(f, MEDIDOR); } }catch{} }
   pintar();
   // Miniaturas de verdad en "Fotos recientes" y en la portada de cada fila: una sola llamada firmada.
   const ids = Object.values(RECIENTES).flat();
@@ -140,7 +150,7 @@ async function guardarForma(){
     if(!Array.isArray(filas) || !filas.length) throw new Error('la base no devolvió la fila');
     const t = filas[0];
     const i = LISTA.findIndex(x => x.id === t.id); if(i >= 0) LISTA[i] = t; else LISTA.unshift(t);
-    abrir(t, true);
+    marcarLimpio('pForma'); abrir(t, true);
   }catch(e){ aviso.textContent = 'No se pudo guardar. ' + String(e && e.message || e); }
   b.disabled = false; b.textContent = 'Guardar';
 }

@@ -1,15 +1,15 @@
 // Scanova · la ficha de un proyecto (diseño de Amilcar, 12 oct 2026): portada, nombre, dirección, etapa, cliente,
 // encargado y fecha; pestañas Rooms · Photos · Dry Logs · Floor Plan · Measurements · Notes · Documents · Activity.
 // Rooms = niveles (Basement, First Floor…) y sus cuartos (Kitchen…). Photos = las fotos por nivel y por cuarto.
-import { $, $$, authFetch, irA, atras, esManager, PERFIL } from './app.js?v=2026-10-14-15';
-import * as trabajos from './trabajos.js?v=2026-10-14-15';
-import * as fotos from './fotos.js?v=2026-10-14-15';
-import * as panel from './panel.js?v=2026-10-14-15';
-import * as planos from './planos.js?v=2026-10-14-15';
-import * as camara from './camara.js?v=2026-10-14-15';
-import * as detalles from './detalles.js?v=2026-10-14-15';
-import * as drylog from './drylog.js?v=2026-10-14-15';
-import * as documentos from './documentos.js?v=2026-10-14-15';
+import { $, $$, authFetch, irA, atras, esManager, PERFIL, marcarLimpio, preguntar } from './app.js?v=2026-10-14-16';
+import * as trabajos from './trabajos.js?v=2026-10-14-16';
+import * as fotos from './fotos.js?v=2026-10-14-16';
+import * as panel from './panel.js?v=2026-10-14-16';
+import * as planos from './planos.js?v=2026-10-14-16';
+import * as camara from './camara.js?v=2026-10-14-16';
+import * as detalles from './detalles.js?v=2026-10-14-16';
+import * as drylog from './drylog.js?v=2026-10-14-16';
+import * as documentos from './documentos.js?v=2026-10-14-16';
 
 const esc = (v) => trabajos.esc(v);
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -299,7 +299,9 @@ export function pintarFotos(urls){
   const titulo = (FILTRO.cuarto !== 'todos' ? nombreCuarto(FILTRO.cuarto) : FILTRO.nivel === 'todos' ? 'All' : FILTRO.nivel === 'sin' ? 'No Level' : nombreNivel(FILTRO.nivel)) + ' Photos';
   const fs = ordenarFotos(filtrarFotos(todas, FILTRO), ORDEN);
   const d = destinoActual();
-  const destino = (T.estado === 'archivado' ? '' : `<p class="pdestino">${IC('pin')}New photos go to: <b>${esc(nombreDestino(d))}</b></p>`);
+  // Prueba en vivo (14-oct): "New photos go to" parecía botón y no hacía nada. Ahora lo es: escoge el cuarto (y ahí mismo
+  // se agregan niveles y cuartos, que en la computadora estaban escondidos en ••• > Levels & Rooms).
+  const destino = (T.estado === 'archivado' ? '' : `<button type="button" class="pdestino" data-cambiar-destino>${IC('pin')}New photos go to: <b>${esc(nombreDestino(d))}</b>${IC('chev')}<span class="pdestino-cambiar">Change</span></button>`);
   const tarjeta = (f) => fotoCardHtml(f, URLS[f.id], etiquetaFoto(f, CUARTOS, NIVELES), SEL.has(f.id));
   let cuerpo;
   if(!todas.length) cuerpo = '<div class="vacio-fotos">' + IC('camara') + '<div><b>No photos in this project yet.</b><br>Tap Upload Photos, or the blue camera button to take several in a row.</div></div>';
@@ -375,8 +377,10 @@ async function crearCuarto(nivel_id, nombre, tipo){
 function cerrarEscoger(){ $('#hojaCuarto').hidden = true; AL_ESCOGER = null; }
 
 // ---------- formas: nivel y cuarto ----------
+// De dónde se abrió la forma del nivel: al guardar se regresa ahí (Dry Log o Floor Plan), no a Levels & Rooms.
+let VOLVER_TAB = 'cuartos';
 function abrirFormaNivel(n){
-  EDIT_NIVEL = n || null;
+  EDIT_NIVEL = n || null; VOLVER_TAB = ['secado', 'plano', 'fotos'].includes(TAB) ? TAB : 'cuartos';
   $('#nivelTitulo').textContent = n ? 'Edit Level' : 'Add Level';
   $('#nNombre').value = n ? n.nombre : ''; $('#nDesc').value = n ? (n.descripcion || '') : ''; $('#nivelAviso').textContent = '';
   const usados = new Set(NIVELES.map(x => x.nombre));
@@ -384,7 +388,7 @@ function abrirFormaNivel(n){
   irA('pNivel', 'pTrabajo');
 }
 function abrirFormaCuarto(c, nivelId){
-  EDIT_CUARTO = c || null;
+  EDIT_CUARTO = c || null; VOLVER_TAB = ['secado', 'plano', 'fotos'].includes(TAB) ? TAB : 'cuartos';
   $('#cuartoFormaTitulo').textContent = c ? 'Edit Room' : 'Add Room';
   $('#cNombre').value = c ? c.nombre : ''; $('#cNotas').value = c ? (c.notas || '') : ''; $('#cuartoAviso').textContent = '';
   $('#cNivel').innerHTML = NIVELES.map(n => `<option value="${esc(n.id)}">${esc(n.nombre)}</option>`).join('');
@@ -421,7 +425,7 @@ async function guardarNivel(){
     const fila = (await r.json())[0]; if(!fila) throw new Error('the database did not return the level');
     if(EDIT_NIVEL){ const i = NIVELES.findIndex(x => x.id === fila.id); if(i >= 0) NIVELES[i] = fila; } else NIVELES.push(fila);
     NIVELES = ordenarNiveles(NIVELES);
-    SUBTAB = 'niveles'; atras(); irTab('cuartos');
+    SUBTAB = 'niveles'; marcarLimpio('pNivel'); atras(); irTab(VOLVER_TAB);
   }catch(e){ av.textContent = 'Could not save. ' + String(e && e.message || e); }
   b.disabled = false;
 }
@@ -441,13 +445,13 @@ async function guardarCuarto(){
     const fila = (await r.json())[0]; if(!fila) throw new Error('the database did not return the room');
     if(EDIT_CUARTO){ const i = CUARTOS.findIndex(x => x.id === fila.id); if(i >= 0) CUARTOS[i] = fila; } else CUARTOS.push(fila);
     NIVEL_CUARTOS = fila.nivel_id; SUBTAB = 'cuartos';
-    if(EDIT_CUARTO){ atras(); irTab('cuartos'); }
+    if(EDIT_CUARTO){ marcarLimpio('pCuarto'); atras(); irTab(VOLVER_TAB); }
     else {
       // Se queda en la página: mismo nivel, campos limpios, para agregar el siguiente cuarto.
       pintarTodo();
       $('#cNombre').value = ''; $('#cNotas').value = ''; $$('#cTipos .chip').forEach(x => x.classList.remove('on'));
       av.classList.add('ok'); av.textContent = '✓ ' + fila.nombre + ' added to ' + nombreNivel(fila.nivel_id) + '. Add another room, or tap Done.';
-      pintarHechos(); $('#cNombre').focus();
+      pintarHechos(); marcarLimpio('pCuarto'); $('#cNombre').focus();
     }
   }catch(e){ av.textContent = 'Could not save. ' + String(e && e.message || e); }
   b.disabled = false;
@@ -542,7 +546,12 @@ export function conectar(){
     if((el = q('[data-ptab]'))){ irTab(el.dataset.ptab); return; }
     if((el = q('[data-subtab]'))){ SUBTAB = el.dataset.subtab; pintarCuartos(); return; }
     if(q('[data-nuevo-nivel]')){ abrirFormaNivel(null); return; }
-    if(q('[data-nuevo-cuarto]')){ abrirFormaCuarto(null, NIVEL_CUARTOS); return; }
+    if((el = q('[data-nuevo-cuarto]'))){ abrirFormaCuarto(null, el.dataset.nivel || NIVEL_CUARTOS); return; }
+    if(q('[data-cambiar-destino]')){
+      escogerCuarto('New photos go to…', destinoActual(), (d) => {
+        FILTRO = d.cuarto_id ? { nivel: d.nivel_id, cuarto: d.cuarto_id } : d.nivel_id ? { nivel: d.nivel_id, cuarto: 'todos' } : { nivel: 'todos', cuarto: 'todos' };
+        pintarTodo();
+      }); return; }
     if((el = q('[data-nivel-menu]'))){ e.stopPropagation(); const n = NIVELES.find(x => x.id === el.dataset.nivelMenu); if(!n) return;
       panel.abrirMenuEn(el, `<button type="button" data-p-accion="nivel-cuartos" data-id="${esc(n.id)}">${IC('casa')}See rooms</button><button type="button" data-p-accion="nivel-editar" data-id="${esc(n.id)}">${IC('lapiz')}Edit level</button><button type="button" class="rojo" data-p-accion="nivel-borrar" data-id="${esc(n.id)}">${IC('archivo')}Delete level</button>`); return; }
     if((el = q('[data-cuarto-menu]'))){ e.stopPropagation(); const c = CUARTOS.find(x => x.id === el.dataset.cuartoMenu); if(!c) return;
@@ -629,7 +638,7 @@ export function conectar(){
   $('#nRapidos').addEventListener('click', (e) => { const b = e.target.closest('[data-rapido]'); if(!b) return; $('#nNombre').value = b.dataset.rapido; $$('#nRapidos .chip').forEach(x => x.classList.toggle('on', x === b)); });
   $('#cTipos').addEventListener('click', (e) => { const b = e.target.closest('[data-tipo-cuarto]'); if(!b) return; const ya = b.classList.contains('on'); $$('#cTipos .chip').forEach(x => x.classList.remove('on')); if(!ya){ b.classList.add('on'); const n = $('#cNombre'); const tipos = new Set(TIPOS_CUARTO); if(!n.value.trim() || tipos.has(n.value.trim()) || /^(.+) \d+$/.test(n.value.trim()) && tipos.has(n.value.trim().replace(/ \d+$/, ''))) n.value = b.dataset.tipoCuarto === 'Other' ? '' : nombreLibre(b.dataset.tipoCuarto, cuartosDe($('#cNivel').value).filter(x => !EDIT_CUARTO || x.id !== EDIT_CUARTO.id).map(x => x.nombre)); } });
   $('#cNivel').addEventListener('change', () => { pintarHechos(); $('#cuartoAviso').textContent = ''; });
-  $('#btnCuartoListo').addEventListener('click', () => { atras(); irTab('cuartos'); });
+  $('#btnCuartoListo').addEventListener('click', () => { atras(); irTab(VOLVER_TAB); });
   document.addEventListener('click', async (e) => {
     if(!e.target.closest('#btnNotasGuardar') || !T) return;
     const txt = $('#pNotasTxt').value.trim(); const av = $('#notasAviso'); av.classList.remove('ok'); av.textContent = '';

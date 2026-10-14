@@ -24,7 +24,8 @@ ok('textos de su diseño: No dry logs yet / Start Dry Log / Step 1 of 3 / Where 
 ok('Continue apagado hasta escoger el cuarto; cambiar de nivel borra el cuarto escogido', /data-dl="paso2"\$\{CUARTO \? '' : ' disabled'\}/.test(js) && /if\(NIVEL !== el\.dataset\.dlNivel\)\{ NIVEL = el\.dataset\.dlNivel; CUARTO = null; \}/.test(js));
 ok('textos de sus diseños del teléfono', ['Reading detected', 'Moisture meter value captured successfully.', 'Point the camera at your moisture meter and take a photo.', 'Scan ', 'Retake', 'Save Reading', 'Reading saved for', 'Saved Reading', 'Equipment for', 'Record equipment before moving to another room.', 'Add Equipment', 'No Equipment', 'records zero for'].every(t => js.includes(t)));
 ok('el número lo lee NUESTRO lector (gratis, en el teléfono) y la persona lo puede corregir antes de guardar', /import \{ leerPantalla \} from '\.\/lector\.js/.test(js) && /id="dlValor"/.test(js) && /corregido: !!\(FOTO\.lectura && FOTO\.lectura\.valor !== valor\)/.test(js));
-ok('la foto de la lectura se guarda en Photos, en su piso y cuarto (es la prueba)', /fotos\.subirCopia\(archivo, \{ nivel_id: FOTO\.nivel, cuarto_id: FOTO\.cuarto \}\)/.test(js) && /foto_id: foto \? foto\.id : null/.test(js));
+ok('la foto de la lectura se guarda en Photos, marcada como del medidor (nunca portada)', /medidor: true/.test(js));
+ok('la foto de la lectura se guarda en Photos, en su piso y cuarto (es la prueba)', /fotos\.subirCopia\(archivo, \{ nivel_id: FOTO\.nivel, cuarto_id: FOTO\.cuarto \}, \{ medidor: true \}\)/.test(js) && /foto_id: foto \? foto\.id : null/.test(js));
 ok('se comprueba que el servidor de verdad guardó', /if\(!filas\.length\) throw new Error/.test(js));
 ok('el botón azul de abajo toma la foto en el Dry Log (no abre la otra cámara)', /closest\('\[data-nav="capture"\]'\)/.test(js) && /e\.stopImmediatePropagation\(\)/.test(js));
 ok('cada paso tiene Back abajo', (js.match(/class="dl-atras"/g) || []).length >= 2);

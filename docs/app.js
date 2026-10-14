@@ -1,15 +1,15 @@
 // Scanova · arranque, sesión y navegación. Las pantallas viven en index.html; lo de trabajos en trabajos.js.
-import { SUPABASE_URL, ANON_KEY, APP_BUILD } from './config.js?v=2026-10-14-15';
-import { ESQUEMA_APARATO, urlEntrarGoogle } from './google.js?v=2026-10-14-15';
-import * as trabajos from './trabajos.js?v=2026-10-14-15';
-import * as personas from './personas.js?v=2026-10-14-15';
-import * as fotos from './fotos.js?v=2026-10-14-15';
-import * as panel from './panel.js?v=2026-10-14-15';
-import * as camara from './camara.js?v=2026-10-14-15';
-import * as direccion from './direccion.js?v=2026-10-14-15';
-import * as proyecto from './proyecto.js?v=2026-10-14-15';
-import * as foto from './foto.js?v=2026-10-14-15';
-import * as editor from './editor.js?v=2026-10-14-15';
+import { SUPABASE_URL, ANON_KEY, APP_BUILD } from './config.js?v=2026-10-14-16';
+import { ESQUEMA_APARATO, urlEntrarGoogle } from './google.js?v=2026-10-14-16';
+import * as trabajos from './trabajos.js?v=2026-10-14-16';
+import * as personas from './personas.js?v=2026-10-14-16';
+import * as fotos from './fotos.js?v=2026-10-14-16';
+import * as panel from './panel.js?v=2026-10-14-16';
+import * as camara from './camara.js?v=2026-10-14-16';
+import * as direccion from './direccion.js?v=2026-10-14-16';
+import * as proyecto from './proyecto.js?v=2026-10-14-16';
+import * as foto from './foto.js?v=2026-10-14-16';
+import * as editor from './editor.js?v=2026-10-14-16';
 
 export const $ = (s, r = document) => r.querySelector(s);
 export const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -285,7 +285,44 @@ export function cerrarEntrar(){ MODAL = false; document.body.classList.remove('m
 
 // ---------- navegación: una pantalla a la vez, con su salida al pie ----------
 const pila = [];
-export function irA(id, desde){
+// ---------- cambios sin guardar (prueba en vivo del 14-oct, su pedido) ----------
+// En Add/Edit Project, Add/Edit Level y Add/Edit Room, si escribió algo y se va sin guardar, la app pregunta.
+// Se toma una "foto" de los campos al abrir la pantalla; si al salir no son iguales, hay cambios.
+const CON_GUARDIA = ['pForma', 'pNivel', 'pCuarto'];
+const FOTO_FORMA = {};
+const pantallaVisible = () => { const p = $$('.pantalla').find(x => !x.hidden); return p ? p.id : ''; };
+// Pura (para la prueba): lo escrito en una pantalla, en una sola cadena.
+export function fotoDeCampos(raiz){
+  if(!raiz) return '';
+  const campos = [...raiz.querySelectorAll('input, textarea, select')].filter(e => e.type !== 'file' && e.type !== 'hidden' && e.type !== 'button').map(e => (e.type === 'checkbox' || e.type === 'radio') ? String(e.checked) : String(e.value || '').trim());
+  const chips = [...raiz.querySelectorAll('.chip.on')].map(c => c.textContent.trim());
+  return campos.join('\u0001') + '\u0002' + chips.join('|');
+}
+export function marcarLimpio(id){ id = id || pantallaVisible(); if(CON_GUARDIA.includes(id)) FOTO_FORMA[id] = fotoDeCampos($('#' + id)); }
+export function hayCambios(){ const id = pantallaVisible(); return CON_GUARDIA.includes(id) && FOTO_FORMA[id] != null && fotoDeCampos($('#' + id)) !== FOTO_FORMA[id]; }
+// La pregunta de la app (en vez de la ventana del navegador). Devuelve true si escogió la opción de "sí".
+export function preguntar({ titulo = 'Unsaved Changes', texto = '', si = 'Leave Without Saving', no = 'Keep Editing' } = {}){
+  const d = $('#dlgPregunta'); if(!d) return Promise.resolve(confirm(texto));
+  $('#dlgPreguntaT').textContent = titulo; $('#dlgPreguntaTxt').textContent = texto;
+  d.querySelector('[data-dlg-p="si"]').textContent = si; d.querySelector('[data-dlg-p="no"]').textContent = no;
+  d.hidden = false;
+  return new Promise(res => {
+    const fin = (v) => { d.hidden = true; d.removeEventListener('click', clic); document.removeEventListener('keydown', tecla, true); res(v); };
+    const clic = (e) => { const b = e.target.closest('[data-dlg-p]'); if(b) fin(b.dataset.dlgP === 'si'); else if(e.target === d) fin(false); };
+    const tecla = (e) => { if(e.key === 'Escape'){ e.stopPropagation(); fin(false); } };
+    d.addEventListener('click', clic); document.addEventListener('keydown', tecla, true);
+    setTimeout(() => { const b = d.querySelector('[data-dlg-p="no"]'); if(b) b.focus(); }, 30);
+  });
+}
+// Si hay cambios: pregunta y, si dice que sí, sigue. Devuelve true cuando se puede seguir ya.
+function guardia(seguir){
+  if(!hayCambios()) return true;
+  preguntar({ texto: 'You have not saved this yet. If you leave, what you typed will be lost.' }).then(ok => { if(ok){ FOTO_FORMA[pantallaVisible()] = null; seguir(); } });
+  return false;
+}
+if(typeof window !== 'undefined') window.addEventListener('beforeunload', (e) => { if(hayCambios()){ e.preventDefault(); e.returnValue = ''; } });
+export function irA(id, desde, forzar){
+  if(!forzar && id !== pantallaVisible() && !guardia(() => irA(id, desde, true))) return;
   const enVentana = MODAL && (id === 'pEntrar' || id === 'pCrear' || id === 'pEspera' || id === 'pCodigo' || id === 'pClave');
   if(!enVentana){ MODAL = false; document.body.classList.remove('modal-entrar'); ocultarInicio(); }
   if(desde) pila.push(desde);
@@ -304,6 +341,7 @@ export function irA(id, desde){
   $$('[data-nav]').forEach(b => b.classList.toggle('on', !!seccion && b.dataset.nav === seccion));
   $('#subtitulo').textContent = { pEntrar:'Scanova360', pClave:'Contraseña nueva', pCrear:'Crear cuenta', pEspera:'Cuenta en espera', pInicio:'Home', pProyectos:'Projects', pPersonas:'Team', pForma:'Project', pTrabajo:'Project', pNivel:'Level', pCuarto:'Room', pFoto:'Photo', pGaleria:'Gallery', pMas:'More' }[id] || 'Scanova360';
   const m = $('#main'); if(m) m.scrollTo(0, 0); window.scrollTo(0, 0);
+  if(CON_GUARDIA.includes(id)) FOTO_FORMA[id] = fotoDeCampos($('#' + id));
 }
 // 14-oct, su pedido: en el teléfono el Back ya no va arriba: el botón Home de la barra de abajo SE VUELVE Back en
 // cuanto se entra a algo (en Home sigue siendo Home). Ese Back regresa un paso: primero lo de adentro de la pantalla
@@ -320,7 +358,7 @@ export function volverUno(){
   if(dentro.length){ dentro[dentro.length - 1].click(); return; }
   atras();
 }
-export function atras(){ const a = pila.pop(); if(a) irA(a); else irA('pInicio'); if(!a || a === 'pInicio' || a === 'pProyectos'){ trabajos.pintar(); trabajos.cargar(); } }
+export function atras(forzar){ if(!forzar && !guardia(() => atras(true))) return; const a = pila.pop(); if(a) irA(a); else irA('pInicio'); if(!a || a === 'pInicio' || a === 'pProyectos'){ trabajos.pintar(); trabajos.cargar(); } }
 // Una sección que todavía no tiene diseño: pantalla que lo dice (no finge que funciona).
 let PRONTO = '';
 const TEXTO_PRONTO = {
