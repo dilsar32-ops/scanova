@@ -2,8 +2,8 @@
 // (el mismo escáner de Field Reports, que ya viene dentro de la app: plugin RoomScan) y se dibuja con el
 // mismo código de Field Reports (plano.js, copiado por tools/extraer_plano.py). Un escaneo por piso;
 // un escaneo nuevo no borra el anterior (queda de historial), se ve el más reciente.
-import * as plano from './plano.js?v=2026-10-14-7';
-import { authFetch, esAparato } from './app.js?v=2026-10-14-7';
+import * as plano from './plano.js?v=2026-10-14-8';
+import { authFetch, esAparato } from './app.js?v=2026-10-14-8';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
@@ -85,9 +85,26 @@ async function cargar(){
     if(!T || T.id !== id) return;
     if(r.status === 404){ PLANOS = []; CARGADO = 'falta-sql'; }
     else if(!r.ok){ PLANOS = []; CARGADO = 'error'; }
-    else { PLANOS = await r.json(); CARGADO = id; }
+    else { PLANOS = await r.json(); CARGADO = id; pintarConteo(pisosConPlano(PLANOS)); }
   }catch(e){ PLANOS = []; CARGADO = 'error'; }
   pintar();
+}
+// Cuántos pisos tienen plano, para la pestaña ("Floor Plan (2)"). Cada piso cuenta una vez aunque se haya guardado
+// varias veces; uno sin piso cuenta como uno. Se pinta al abrir el proyecto (consulta chiquita, sin los planos)
+// y cada vez que se cargan o se guardan los planos.
+export function pisosConPlano(lista){ return new Set((lista || []).map(p => p.nivel_id || '-')).size; }
+function pintarConteo(n){ const s = typeof document !== 'undefined' ? document.getElementById('planoConteo') : null; if(s) s.textContent = n == null ? '' : '(' + n + ')'; }
+let CONTEO_PARA = '';
+export async function contarPlanos(trabajoId){
+  CONTEO_PARA = trabajoId;
+  if(CARGADO === trabajoId){ pintarConteo(pisosConPlano(PLANOS)); return; }   // ya están cargados
+  pintarConteo(null);
+  try{
+    const r = await authFetch('/rest/v1/fotos_planos?trabajo_id=eq.' + encodeURIComponent(trabajoId) + '&borrado_at=is.null&select=nivel_id&limit=500');
+    if(!r.ok) return;
+    const filas = await r.json();
+    if(CONTEO_PARA === trabajoId && CARGADO !== trabajoId) pintarConteo(pisosConPlano(filas));   // si ya se cargaron los planos, esos mandan
+  }catch(e){}
 }
 function nivelesConPlanos(){
   const l = NIVELES.map(n => ({ id: n.id, nombre: n.nombre }));
@@ -281,7 +298,7 @@ async function escanear(){
     const g = await authFetch('/rest/v1/fotos_planos', { method:'POST', headers:{ Prefer:'return=representation' }, body: JSON.stringify(fila) });
     const guardada = g.ok ? (await g.json())[0] : null;
     if(!guardada || !guardada.id) throw new Error(g.status === 404 ? 'falta correr sql/fotos-07-planos.sql' : 'HTTP ' + g.status);
-    PLANOS = [guardada].concat(PLANOS); NIV_SEL = niv.id; OCUPADO = false;
+    PLANOS = [guardada].concat(PLANOS); NIV_SEL = niv.id; OCUPADO = false; pintarConteo(pisosConPlano(PLANOS));
     avisar('Floor plan saved for ' + niv.nombre + ' (' + fmtPies(res.area) + ' sq ft, ' + res.cuartos + ' rooms).', true);
   }catch(e){ OCUPADO = false; avisar('Could not save the floor plan. ' + String(e && e.message || e)); }
 }

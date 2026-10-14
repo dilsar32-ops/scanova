@@ -72,5 +72,13 @@ ok('cambiar de pantalla cierra Edit Labels / datos del cliente / escoger cuarto'
   ok('niveles con número y Main / Crawl Space', nom(['Level 2', 'Crawl Space', 'Main Level', 'Floor 3']) === 'Floor 3 / Level 2 / Main Level / Crawl Space');
   ok('nombres que no son pisos se quedan en el orden en que se crearon', nom(['Exterior', 'Garage', 'Shed']) === 'Exterior / Garage / Shed');
   ok('"Living Room" o "cuarto" no se confunden con un piso', P.rangoNivel('Cuarto de lavado') === 100 && P.rangoNivel('Living Room') === 100); }
+// 13-oct: la pestaña Floor Plan dice cuántos pisos tienen plano; "Select" va junto a cada grupo de fotos.
+{ const src = (await import('node:fs')).readFileSync(new URL('../docs/proyecto.js', import.meta.url), 'utf8');
+  ok('la pestaña Floor Plan trae su contador', /id="planoConteo"/.test(P.tabsHtml('fotos', { fotos: 3 })));
+  ok('Select ya no está arriba en la barra de herramientas', !/class="btn btn-outline btn-chico psel-btn/.test(src));
+  ok('cada grupo (piso, cuarto o fecha) trae su Select', /<div class="pgrupo-cab"><h4>[\s\S]{0,120}selGrupo\(g\.fotos\.map/.test(src) && /data-sel-grupo/.test(src));
+  ok('con la selección abierta hay Cancel en la barra', /<div class="psel-barra"><button type="button" class="btn btn-outline btn-chico" id="btnSeleccionar">Cancel/.test(src)); }
+{ const PL = await import('../docs/planos.js');
+  ok('pisos con plano: cada piso cuenta una vez', PL.pisosConPlano([{ nivel_id: 'a' }, { nivel_id: 'a' }, { nivel_id: 'b' }, { nivel_id: null }]) === 3 && PL.pisosConPlano([]) === 0); }
 console.log(`\nproyecto: ${pass} ok, ${fail} fallas`);
 if(fail) process.exit(1);

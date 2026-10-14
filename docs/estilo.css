@@ -536,6 +536,10 @@ body.modal-entrar .cerrar-modal:hover{ background:var(--line); color:var(--ink);
 .pdestino b{ color:var(--ink); }
 .psel-barra{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; background:var(--accent-soft); border-radius:12px; padding:8px 10px; margin-bottom:12px; }
 .psel-barra b{ margin-right:auto; font-size:14px; color:var(--accent); }
+/* Una sola fila (14-oct): si no caben, se desliza de lado, nunca se parte en dos renglones. */
+.psel-barra{ flex-wrap:nowrap; overflow-x:auto; overflow-y:hidden; touch-action:pan-x pan-y; scrollbar-width:none; }
+.psel-barra::-webkit-scrollbar{ display:none; }
+.psel-barra .btn{ flex:1 1 auto; min-width:0; white-space:nowrap; padding:0 10px; gap:6px; }
 .ptitulo{ margin-top:6px; }
 .ptitulo .sec-t{ font-size:17px; }
 .ver-cuarto{ font:inherit; font-size:14px; font-weight:600; color:var(--accent); background:none; border:0; cursor:pointer; display:inline-flex; align-items:center; gap:2px; padding:4px 0; }
@@ -560,6 +564,12 @@ body.modal-entrar .cerrar-modal:hover{ background:var(--line); color:var(--ink);
 .pgrupo{ margin-bottom:18px; }
 .pgrupo h4{ margin:0 0 10px; font-size:15px; font-weight:700; }
 .pgrupo h4 .n{ color:var(--ink-mute); font-weight:500; margin-left:4px; }
+/* "Select" junto al nombre de cada grupo de fotos (13-oct). */
+.pgrupo-cab{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin:0 0 10px; }
+.pgrupo .pgrupo-cab h4{ margin:0; }
+.pgrupo-sel{ flex:none; }
+.pgrupo-sel.on{ background:var(--accent-soft); border-color:var(--accent); color:var(--accent); }
+.ptitulo .pgrupo-sel{ margin-left:8px; }
 .pnotas textarea{ width:100%; min-height:180px; font:inherit; font-size:16px; color:var(--ink); background:var(--card); border:1px solid var(--line2); border-radius:10px; padding:10px 12px; resize:vertical; margin:8px 0 12px; }
 .pnotas textarea:focus{ outline:none; border-color:var(--accent); box-shadow:0 0 0 3px rgba(37,99,235,.18); }
 .pact{ position:relative; padding-left:20px; }

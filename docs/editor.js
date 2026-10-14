@@ -186,6 +186,12 @@ function montar(){
   const aMarco = (ev) => { const r = c.getBoundingClientRect(); const v = vista(); const px = (ev.clientX - r.left) / r.width, py = (ev.clientY - r.top) / r.height; return [v.x + px * v.w, v.y + py * v.h]; };
   c.addEventListener('pointerdown', (ev) => {
     if(!E || E.cargando) return; ev.preventDefault(); c.setPointerCapture(ev.pointerId);
+    // Su reporte (13-oct): "cuando uno escribe ya no puede mover el texto". Tocar la foto para terminar de escribir
+    // NO le quita el foco al cuadrito (el preventDefault de arriba lo impide), así que lo escrito se perdía y salía
+    // otro cuadrito vacío: nunca quedaba un texto que arrastrar. Ahora ese toque GUARDA lo escrito, y si el dedo cae
+    // sobre el texto recién puesto, ese mismo toque ya lo arrastra.
+    let recienEscrito = false;
+    if(E.escritura){ const f = E.escrituraListo; if(f) f(true); else quitarEscritura(); recienEscrito = true; }
     const p = aMarco(ev); const fx = p[0] * FW(), fy = p[1] * FH(); const k = c.getBoundingClientRect().width / (vista().w * FW()); const pad = 10 / k;
     if(enRecorte()){ acc = empezarRecorte(p, pad); return; }
     // ¿Tocó la esquina de la marca escogida (tamaño) o una marca (mover)?
@@ -193,7 +199,7 @@ function montar(){
     for(let i = E.marcas.length - 1; i >= 0; i--){ if(dentro(cajaMarca(E.marcas[i], FW(), FH()), fx, fy, pad)){ const ya = E.sel === i; E.sel = i; acc = { modo:'mover', ini: p, ultimo: p, ya, movio: false, guardado: false }; render(); pintarPanel(); return; } }
     if(E.sel >= 0){ E.sel = -1; render(); pintarPanel(); }
     const t = herrActual();
-    if(t === 'texto'){ acc = { modo:'texto', p }; return; }   // el cuadrito para escribir sale al soltar el dedo (iOS solo abre el teclado así)
+    if(t === 'texto'){ if(recienEscrito) return; acc = { modo:'texto', p }; return; }   // el cuadrito para escribir sale al soltar el dedo (iOS solo abre el teclado así)
     if(t === 'humedad'){ const v = String(E.valor).trim(); agregar({ tipo:'humedad', puntos:[p], valor:v, material:E.mat === 'Other' ? '' : E.mat, estado:E.estado || estadoHumedad(v), escala:1 }); return; }
     acc = { modo:'dibujo', m: { tipo:t, color:E.color, ancho:E.ancho, puntos:[p, p] } };
   });
@@ -230,7 +236,7 @@ function montar(){
   c.addEventListener('pointerup', fin); c.addEventListener('pointercancel', fin);
 }
 // Escribir el texto DIRECTO en la foto: un cuadrito encima del lugar tocado. Enter o tocar afuera = listo; Esc = no.
-function quitarEscritura(x){ const z = x || E; if(z && z.escritura){ const n = z.escritura; z.escritura = null; n.remove(); } }
+function quitarEscritura(x){ const z = x || E; if(z && z.escritura){ const n = z.escritura; z.escritura = null; z.escrituraListo = null; n.remove(); } }
 function escribir(p, i){
   quitarEscritura(); const c = E.lienzo; const v = vista(); const m = i >= 0 ? E.marcas[i] : null;
   const inp = document.createElement('input'); inp.type = 'text'; inp.className = 'ed-escribe'; inp.maxLength = 60; inp.placeholder = 'Type here';
@@ -246,6 +252,7 @@ function escribir(p, i){
     render(); pintarPanel(); };
   inp.addEventListener('keydown', (e) => { if(e.key === 'Enter'){ e.preventDefault(); listo(true); } else if(e.key === 'Escape'){ e.preventDefault(); listo(false); } e.stopPropagation(); });
   inp.addEventListener('blur', () => listo(true));
+  E.escrituraListo = listo;
   inp.focus();
 }
 function herrActual(){ return E.herr === 'forma' ? E.forma : E.herr === 'marcador' ? E.marca : E.herr; }

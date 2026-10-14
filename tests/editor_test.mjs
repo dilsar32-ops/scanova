@@ -26,5 +26,12 @@ ok('cajaMarca: la flecha cubre de punta a punta', (() => { const c = E.cajaMarca
 ok('Warmth: calienta (más rojo, menos azul) y 0 no cambia nada', (() => { const a = E.calidezRGB(100, 100, 100, 50), b = E.calidezRGB(100, 100, 100, 0); return a[0] > 100 && a[2] < 100 && b.join() === '100,100,100'; })());
 ok('Sharpness: realza el borde y deja igual lo parejo', (() => { const w = 5, h = 3, d = new Uint8ClampedArray(w * h * 4).fill(100); for(let y = 0; y < h; y++) for(let x = 3; x < w; x++){ const i = (y * w + x) * 4; d[i] = d[i + 1] = d[i + 2] = 200; }
   const r = E.nitidez(new Uint8ClampedArray(d), w, h, 100); const at = (x) => r[(1 * w + x) * 4]; return at(1) === 100 && at(2) < 100 && at(3) > 200; })());
+// Su reporte (13-oct): "cuando uno escribe ya no puede mover el texto". Tocar la foto para terminar de escribir guarda
+// el texto (no lo pierde ni abre otro cuadrito), y ese mismo toque ya puede arrastrarlo. Probado también a mano en la
+// vista previa: con la versión vieja salía otro "Type here" vacío; con esta, el texto se guarda y se arrastra.
+{ const src = (await import('node:fs')).readFileSync(new URL('../docs/editor.js', import.meta.url), 'utf8');
+  ok('tocar la foto mientras se escribe GUARDA el texto', /if\(E\.escritura\)\{ const f = E\.escrituraListo; if\(f\) f\(true\);/.test(src));
+  ok('...y no abre otro cuadrito vacío en ese toque', /if\(t === 'texto'\)\{ if\(recienEscrito\) return;/.test(src));
+  ok('el cuadrito deja guardado cómo terminarlo', /E\.escrituraListo = listo;/.test(src) && /z\.escrituraListo = null;/.test(src)); }
 console.log(`\neditor: ${pass} ok, ${fail} fallas`);
 if(fail) process.exit(1);

@@ -1,13 +1,13 @@
 // Scanova · la ficha de un proyecto (diseño de Amilcar, 12 oct 2026): portada, nombre, dirección, etapa, cliente,
 // encargado y fecha; pestañas Rooms · Photos · Measurements · Notes · Documents · Activity.
 // Rooms = niveles (Basement, First Floor…) y sus cuartos (Kitchen…). Photos = las fotos por nivel y por cuarto.
-import { $, $$, authFetch, irA, atras, esManager, PERFIL } from './app.js?v=2026-10-14-7';
-import * as trabajos from './trabajos.js?v=2026-10-14-7';
-import * as fotos from './fotos.js?v=2026-10-14-7';
-import * as panel from './panel.js?v=2026-10-14-7';
-import * as planos from './planos.js?v=2026-10-14-7';
-import * as camara from './camara.js?v=2026-10-14-7';
-import * as detalles from './detalles.js?v=2026-10-14-7';
+import { $, $$, authFetch, irA, atras, esManager, PERFIL } from './app.js?v=2026-10-14-8';
+import * as trabajos from './trabajos.js?v=2026-10-14-8';
+import * as fotos from './fotos.js?v=2026-10-14-8';
+import * as panel from './panel.js?v=2026-10-14-8';
+import * as planos from './planos.js?v=2026-10-14-8';
+import * as camara from './camara.js?v=2026-10-14-8';
+import * as detalles from './detalles.js?v=2026-10-14-8';
 
 const esc = (v) => trabajos.esc(v);
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -124,7 +124,7 @@ export function cabeceraHtml(t, portada, manager){
   </div>`;
 }
 export function tabsHtml(activa, conteos){
-  return '<div class="ptabs" id="fichaTabs" role="tablist">' + TABS.filter(([k]) => k !== 'cuartos').map(([k, txt]) => `<button type="button" class="ptab${k === activa ? ' on' : ''}" data-ptab="${k}">${txt}${k === 'fotos' ? ' <span class="n" id="fotosConteo">(' + (conteos.fotos || 0) + ')</span>' : ''}</button>`).join('') + '</div>';
+  return '<div class="ptabs" id="fichaTabs" role="tablist">' + TABS.filter(([k]) => k !== 'cuartos').map(([k, txt]) => `<button type="button" class="ptab${k === activa ? ' on' : ''}" data-ptab="${k}">${txt}${k === 'fotos' ? ' <span class="n" id="fotosConteo">(' + (conteos.fotos || 0) + ')</span>' : ''}${k === 'plano' ? ' <span class="n" id="planoConteo"></span>' : ''}</button>`).join('') + '</div>';
 }
 export function fotoCardHtml(f, url, etiqueta, sel){
   return `<div class="pfoto${sel ? ' sel' : ''}">
@@ -196,6 +196,8 @@ export function abrir(t, portada){
     '<p class="aviso" id="fichaAviso"></p>';
   detalles.abrir(t);
   cargarCuartos();
+  // Su pedido (13-oct): la pestaña Floor Plan dice de una vez si el proyecto tiene plano, como Photos (38).
+  planos.contarPlanos(t.id);
 }
 export const tabActual = () => TAB;
 function irTab(k){
@@ -280,7 +282,6 @@ export function pintarFotos(urls){
       <div class="vistas"><button type="button" class="vista${VISTA === 'grid' ? ' on' : ''}" data-vista="grid" aria-label="Grid">${IC('cuadros')}</button><button type="button" class="vista${VISTA === 'lista' ? ' on' : ''}" data-vista="lista" aria-label="List">${IC('lista')}</button></div>
       <span class="pherr-salto"></span>
       ${selCuarto}
-      <button type="button" class="btn btn-outline btn-chico psel-btn${MODO_SEL ? ' on' : ''}" id="btnSeleccionar">${MODO_SEL ? 'Cancel' : 'Select'}</button>
       ${fotos.botonesSubir()}
     </div>`;
   const porNivel = (FILTRO.nivel === 'todos' && NIVELES.length) ? '<h3 class="psub solo-movil">By Level</h3><div class="plista solo-movil">' + NIVELES.map(nv => { const m = miniDe(todas.filter(f => f.nivel_id === nv.id));
@@ -293,12 +294,17 @@ export function pintarFotos(urls){
   let cuerpo;
   if(!todas.length) cuerpo = '<div class="vacio-fotos">' + IC('camara') + '<div><b>No photos in this project yet.</b><br>Tap Upload Photos, or the blue camera button to take several in a row.</div></div>';
   else if(!fs.length) cuerpo = '<p class="vacio">No photos here yet.</p>';
-  else if(gruposVisibles(fs)) cuerpo = gruposVisibles(fs).map(g => `<section class="pgrupo"><h4>${esc(g.titulo)} <span class="n">${g.fotos.length}</span></h4><div class="pgrid ${VISTA}">${g.fotos.map(tarjeta).join('')}</div></section>`).join('');
+  // Su pedido (13-oct): "Select" va junto a cada grupo (Third Floor, Second Floor, o la fecha si se ve por fecha) y
+  // escoge de una vez todas las fotos de ese grupo; tocarlo otra vez las suelta. Ya no arriba en la barra.
+  const selGrupo = (ids, i) => { const todas = ids.length && ids.every(id => SEL.has(id));
+    return `<button type="button" class="btn btn-outline btn-chico pgrupo-sel${todas ? ' on' : ''}" data-sel-grupo="${i}">${todas ? 'Unselect' : 'Select'}</button>`; };
+  if(fs.length && gruposVisibles(fs)) cuerpo = gruposVisibles(fs).map((g, i) => `<section class="pgrupo"><div class="pgrupo-cab"><h4>${esc(g.titulo)} <span class="n">${g.fotos.length}</span></h4>${selGrupo(g.fotos.map(f => f.id), i)}</div><div class="pgrid ${VISTA}">${g.fotos.map(tarjeta).join('')}</div></section>`).join('');
   else cuerpo = `<div class="pgrid ${VISTA}">${fs.map(tarjeta).join('')}</div>`;
-  const barraSel = MODO_SEL ? `<div class="psel-barra"><b>${SEL.size} selected</b><button type="button" class="btn btn-outline btn-chico" data-sel-accion="mover"${SEL.size ? '' : ' disabled'}>${IC('carpeta')}Move to room</button><button type="button" class="btn btn-outline btn-chico btn-rojo" data-sel-accion="papelera"${SEL.size ? '' : ' disabled'}>${IC('archivo')}Delete</button></div>` : '';
+  // Su pedido (14-oct): sin el "N selected" y los tres botones en UNA fila (Cancel, Move to room, Delete).
+  const barraSel = MODO_SEL ? `<div class="psel-barra"><button type="button" class="btn btn-outline btn-chico" id="btnSeleccionar">Cancel</button><button type="button" class="btn btn-outline btn-chico" data-sel-accion="mover"${SEL.size ? '' : ' disabled'}>${IC('carpeta')}Move to room</button><button type="button" class="btn btn-outline btn-chico btn-rojo" data-sel-accion="papelera"${SEL.size ? '' : ' disabled'}>${IC('archivo')}Delete</button></div>` : '';
   caja.classList.toggle('pmodo-sel', MODO_SEL);
   caja.innerHTML = destino + fotos.tandaHtml() + herr + porNivel + barraSel +
-    `<div class="sec-cab ptitulo"><h2 class="sec-t">${FILTRO.nivel !== 'todos' ? `<button type="button" class="ptitulo-atras solo-movil" data-filtro-atras aria-label="Back">${IC('atras')}</button>` : ''}${esc(titulo)} (${fs.length})</h2>${todas.length ? `<button type="button" class="ver-por" id="btnVerPor" aria-haspopup="menu">View by: ${VER_TXT[VER_POR]}${IC('chev')}</button>` : ''}</div>` + cuerpo;
+    `<div class="sec-cab ptitulo"><h2 class="sec-t">${FILTRO.nivel !== 'todos' ? `<button type="button" class="ptitulo-atras solo-movil" data-filtro-atras aria-label="Back">${IC('atras')}</button>` : ''}${esc(titulo)} (${fs.length})</h2>${todas.length ? `<button type="button" class="ver-por" id="btnVerPor" aria-haspopup="menu">View by: ${VER_TXT[VER_POR]}${IC('chev')}</button>` : ''}${fs.length && !gruposVisibles(fs) ? selGrupo(fs.map(f => f.id), -1) : ''}</div>` + cuerpo;
   if(TAB === 'cuartos') pintarCuartos();
 }
 
@@ -575,6 +581,13 @@ export function conectar(){
     if((el = q('[data-ver-por]'))){ VER_POR = el.dataset.verPor; panel.cerrarMenu(); pintarFotos(); return; }
     if((el = q('[data-orden-fotos]'))){ ORDEN = el.dataset.ordenFotos; panel.cerrarMenu(); pintarFotos(); return; }
     if(q('#btnSeleccionar')){ MODO_SEL = !MODO_SEL; SEL.clear(); pintarFotos(); return; }
+    if((el = q('[data-sel-grupo]'))){
+      const fs = ordenarFotos(filtrarFotos(fotos.lista(), FILTRO), ORDEN), i = Number(el.dataset.selGrupo);
+      const g = i >= 0 ? (gruposVisibles(fs) || [])[i] : { fotos: fs }; if(!g) return;
+      const ids = g.fotos.map(f => f.id), todas = ids.every(id => SEL.has(id));
+      MODO_SEL = true; ids.forEach(id => todas ? SEL.delete(id) : SEL.add(id));
+      if(!SEL.size) MODO_SEL = false;
+      pintarFotos(); return; }
     if((el = q('[data-sel-accion]'))){ const ids = [...SEL]; if(el.dataset.selAccion === 'mover') mover(ids); else papelera(ids); return; }
     if((el = q('[data-abrir-tipos]'))){ ESC_ABRIR = ESC_ABRIR === el.dataset.abrirTipos ? '' : el.dataset.abrirTipos; pintarEscoger(); return; }
     if((el = q('[data-crear-nivel]'))){ let nombre = el.dataset.crearNivel;
