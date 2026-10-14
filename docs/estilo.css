@@ -2178,3 +2178,66 @@ button.pdestino:hover .pdestino-cambiar{ text-decoration:underline; }
 .dl-lec.muy-apretado .dl-mat-sel select{ flex:1; min-width:0; height:44px; font-size:17px; }
 .dl-lec.muy-apretado .dl-det{ padding:6px 12px; }
 .dl-lec.muy-apretado .dl-det-sub{ display:none; }
+/* Su pedido (14-oct): con la cámara o la lectura en pantalla no queda hueco arriba de la barra de abajo */
+@media (max-width:899px){
+  body.dl-fijo #main{ padding-bottom:4px; }
+  body.dl-fijo #panel-secado .dl-tel > .card:last-child{ margin-bottom:0; }
+}
+/* Escribiendo el número de la lectura (su pedido del 14-oct): solo la foto y la caja del número arriba del teclado */
+body.dl-escribiendo #pie{ display:none !important; }
+body.dl-escribiendo #panel-secado .dl-lec-acc{ display:none; }
+body.dl-escribiendo #panel-secado .dl-lec-sub{ display:none; }
+/* Su pedido (14-oct): "Dry Logs" más chico y todo un poco más arriba, para que la foto/cámara quede más grande */
+@media (max-width:899px){
+  #panel-secado .dl-tel-cab h2{ font-size:15px; line-height:1.2; }
+  #panel-secado .dl-tel{ gap:8px; }
+  body.dl-fijo #fichaTabs{ margin-bottom:8px; }
+}
+body.dl-escribiendo #panel-secado .dl-lec-t{ display:none; }
+/* Su pedido (14-oct): sin la palabra "Material", la barra a todo lo ancho */
+.dl-mat-sel select, .dl-lec.muy-apretado .dl-mat-sel select{ width:100%; flex:1; }
+/* La barra de Material que se abre en su lugar (su pedido del 14-oct): tres opciones a la vista, se desliza */
+.dl-det[hidden]{ display:none !important; }
+.dl-mat-sel{ position:relative; }
+.dl-mat-bar{ width:100%; height:52px; display:flex; align-items:center; justify-content:space-between; gap:10px; padding:0 14px; font:inherit; font-size:18px; color:var(--ink); background:var(--card); border:1px solid var(--line2); border-radius:12px; cursor:pointer; text-align:left; }
+.dl-mat-bar .ic{ width:18px; height:18px; color:var(--ink-soft); flex:none; }
+.dl-mat-val.vacia{ color:var(--ink-mute); }
+.dl-mat-lista{ position:absolute; left:0; right:0; bottom:calc(100% + 6px); height:156px; overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; scroll-snap-type:y mandatory; background:var(--card); border:1px solid var(--line2); border-radius:14px; box-shadow:0 12px 32px rgba(15,23,42,.22); z-index:30; }
+.dl-mat-lista[hidden]{ display:none !important; }
+.dl-mat-op{ display:flex; align-items:center; justify-content:space-between; width:100%; height:52px; padding:0 16px; scroll-snap-align:start; border:0; border-bottom:1px solid var(--line); background:none; font:inherit; font-size:17px; color:var(--ink); text-align:left; cursor:pointer; }
+.dl-mat-op:last-child{ border-bottom:0; }
+.dl-mat-op .ic{ width:18px; height:18px; color:var(--accent); visibility:hidden; }
+.dl-mat-op.on{ color:var(--accent); font-weight:600; }
+.dl-mat-op.on .ic{ visibility:visible; }
+.dl-lec.muy-apretado .dl-mat-bar{ height:46px; font-size:17px; }
+.dl-lec .dl-mat-sel{ margin:0; }
+/* Paso 4 (su imagen del 14-oct): "Material", la rueda con tres a la vista (el del centro resaltado) y el botón OK */
+.dl-lec.eligiendo .dl-det{ display:none !important; }
+.dl-rueda-t{ margin:0; font-size:14px; color:var(--ink-soft); }
+.dl-rueda{ position:relative; height:132px; border:1px solid var(--line2); border-radius:16px; background:var(--card); overflow:hidden; }
+.dl-rueda-marca{ position:absolute; left:16px; right:16px; top:50%; height:44px; transform:translateY(-50%); border-radius:12px; background:color-mix(in srgb, var(--accent) 9%, #fff); border:1px solid color-mix(in srgb, var(--accent) 22%, #fff); box-shadow:0 2px 8px rgba(37,99,235,.10); pointer-events:none; }
+.dl-rueda-lista{ position:relative; height:100%; overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; scroll-snap-type:y mandatory; padding:44px 0; box-sizing:border-box; scrollbar-width:none; -webkit-mask-image:linear-gradient(to bottom, rgba(0,0,0,.35), #000 35%, #000 65%, rgba(0,0,0,.35)); mask-image:linear-gradient(to bottom, rgba(0,0,0,.35), #000 35%, #000 65%, rgba(0,0,0,.35)); }
+.dl-rueda-lista::-webkit-scrollbar{ display:none; }
+.dl-rueda-op{ display:block; width:100%; height:44px; padding:0 16px; border:0; background:none; font:inherit; font-size:18px; color:var(--ink-mute); text-align:center; scroll-snap-align:center; cursor:pointer; transition:color .12s; }
+.dl-rueda-op.on{ color:var(--ink); font-weight:700; font-size:19px; }
+.dl-rueda-ok{ width:100%; min-height:50px; font-size:18px; }
+/* Su pedido (14-oct): la rueda de materiales con look de cristal (estilo Apple, como su diseño) */
+.dl-rueda{
+  border:1px solid rgba(255,255,255,.85);
+  background:
+    radial-gradient(55% 130% at 0% 50%, rgba(129,166,255,.30), transparent 62%),
+    radial-gradient(55% 130% at 100% 50%, rgba(129,166,255,.30), transparent 62%),
+    linear-gradient(180deg, rgba(255,255,255,.72), rgba(234,240,252,.62));
+  -webkit-backdrop-filter:blur(18px) saturate(1.6); backdrop-filter:blur(18px) saturate(1.6);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.95), inset 0 -1px 0 rgba(15,23,42,.05), 0 0 0 1px rgba(148,170,215,.28), 0 10px 26px rgba(37,99,235,.10);
+}
+.dl-rueda-marca{
+  left:14px; right:14px; height:46px;
+  background:linear-gradient(180deg, rgba(255,255,255,.80), rgba(219,231,255,.62));
+  border:1px solid rgba(255,255,255,.95);
+  box-shadow:0 0 0 1px rgba(129,166,255,.30), 0 6px 18px rgba(59,130,246,.16), inset 0 1px 0 #fff, inset 0 -6px 12px rgba(129,166,255,.12);
+  -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px);
+}
+.dl-rueda-op{ color:rgba(15,23,42,.36); }
+.dl-rueda-op.on{ color:#0f172a; }
+.dl-rueda-t{ color:rgba(15,23,42,.55); }

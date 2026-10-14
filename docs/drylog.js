@@ -6,11 +6,11 @@
 // TELÉFONO (su diseño del 14-oct): Dry Logs abre con la cámara prendida. Arriba "Dry Logs" y en qué cuarto va
 // (Room 1 of 4), luego Level y Room para escoger dónde, y la cámara llena lo que sobra. El botón azul de cámara de
 // abajo (el de siempre) toma la foto directo. Lo que sigue después de la foto espera su siguiente diseño.
-import { $, $$, authFetch, registrarAtras, preguntar } from './app.js?v=2026-10-14-24';
-import { RESTRICCIONES, errorCamara, puedeCamaraPropia } from './camara.js?v=2026-10-14-24';
-import * as fotos from './fotos.js?v=2026-10-14-24';
-import { leerPantalla } from './lector.js?v=2026-10-14-24';
-import * as R from './registro.js?v=2026-10-14-24';
+import { $, $$, authFetch, registrarAtras, preguntar } from './app.js?v=2026-10-14-35';
+import { RESTRICCIONES, errorCamara, puedeCamaraPropia } from './camara.js?v=2026-10-14-35';
+import * as fotos from './fotos.js?v=2026-10-14-35';
+import { leerPantalla } from './lector.js?v=2026-10-14-35';
+import * as R from './registro.js?v=2026-10-14-35';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -321,16 +321,42 @@ function lecturaHtml(){
     </div>
   </div>`;
 }
-// Lo de abajo de la lectura (su diseño del 14-oct, la captura): Material siempre a la vista, "Take next reading"
-// (guarda y abre la lista de materiales) y "Continue" (guarda y va al equipo).
+// Lo de abajo de la lectura (su diseño del 14-oct, paso a paso):
+//  · Paso 3: la barra de materiales a lo ancho, "Take next reading" y "Continue".
+//  · Paso 4 (su imagen): al tocar "Take next reading" (o la barra) se ve "Material", una rueda con tres materiales a la
+//    vista — el del centro resaltado — que se desliza arriba y abajo, y el botón azul OK. Con OK vuelve la cámara.
+// El <select> escondido guarda el valor (lo lee el guardado).
+let RUEDA = false;
 function accionesLecturaHtml(){
   const ops = MATERIALES_DL.includes(MATERIAL) ? MATERIALES_DL : [MATERIAL, ...MATERIALES_DL];
-  return `<label class="dl-mat-sel"><small>Material</small><select id="dlMaterial"><option value="" disabled hidden>Choose material…</option>${ops.map(m => `<option${m === MATERIAL ? ' selected' : ''}>${esc(m)}</option>`).join('')}</select></label>
+  const sel = `<select id="dlMaterial" aria-label="Material" hidden><option value="" disabled>Choose material…</option>${ops.map(m => `<option${m === MATERIAL ? ' selected' : ''}>${esc(m)}</option>`).join('')}</select>`;
+  if(RUEDA) return `<p class="dl-rueda-t">Material</p>
+    <div class="dl-rueda"><span class="dl-rueda-marca" aria-hidden="true"></span>
+      <div class="dl-rueda-lista" role="listbox" aria-label="Material">${ops.map(m => `<button type="button" role="option" class="dl-rueda-op${m === MATERIAL ? ' on' : ''}" data-dl-rueda="${esc(m)}">${esc(m)}</button>`).join('')}</div></div>
+    ${sel}
+    <p class="aviso" id="dlAviso"></p>
+    <button type="button" class="btn btn-accent dl-rueda-ok" data-dl-rueda-ok>OK</button>`;
+  return `<div class="dl-mat-sel">
+      <button type="button" class="dl-mat-bar" data-dl-mat-abrir><span class="dl-mat-val">${esc(MATERIAL || 'Choose material…')}</span>${IC('chev')}</button>${sel}</div>
     ${UBIC ? `<p class="dl-punto-txt">${IC('dl-leer')}Same point as last visit: <b>${esc(R.nombrePunto({ material: MATERIAL, ubicacion: UBIC }))}</b></p>` : ''}
     <p class="aviso" id="dlAviso"></p>
     <div class="dl-botones"><button type="button" class="btn btn-outline" data-dl-siguiente>${IC('camara')}Take next reading</button><button type="button" class="btn btn-accent" data-dl-guardar>Continue</button></div>`;
 }
-function pintarAcciones(){ const a = $('#panel-secado .dl-lec-acc'); if(a){ a.innerHTML = accionesLecturaHtml(); medirTel(); } }
+// La rueda: el material del centro es el escogido; al deslizar se resalta el que queda en medio.
+function centroRueda(){
+  const l = $('#panel-secado .dl-rueda-lista'); if(!l) return null;
+  const mid = l.scrollTop + l.clientHeight / 2; let mejor = null, d = 1e9;
+  l.querySelectorAll('.dl-rueda-op').forEach(b => { const x = Math.abs(b.offsetTop + b.offsetHeight / 2 - mid); if(x < d){ d = x; mejor = b; } });
+  return mejor;
+}
+function marcarRueda(){ const c = centroRueda(); $$('#panel-secado .dl-rueda-op').forEach(b => b.classList.toggle('on', b === c)); }
+function irRueda(b, suave){ const l = $('#panel-secado .dl-rueda-lista'); if(!l || !b) return; const top = b.offsetTop - (l.clientHeight - b.offsetHeight) / 2; if(suave) l.scrollTo({ top, behavior: 'smooth' }); else l.scrollTop = top; }
+function abrirRueda(){
+  RUEDA = true; pintarAcciones();
+  const l = $('#panel-secado .dl-rueda-lista'); if(!l) return;
+  irRueda([...l.children].find(b => b.dataset.dlRueda === MATERIAL) || l.firstElementChild, false); marcarRueda();
+}
+function pintarAcciones(){ const a = $('#panel-secado .dl-lec-acc'); if(a){ a.innerHTML = accionesLecturaHtml(); const c = a.closest('.dl-lec'); if(c) c.classList.toggle('eligiendo', RUEDA); medirTel(); } }
 // Lo que marcó la vez pasada este mismo punto (material + dónde): "Last: 45% on Oct 13 ▼ 5".
 function compararHtml(valorTxt){
   const cuarto = FOTO ? FOTO.cuarto : CUARTO, ant = cuarto && R.lecturaAnterior(LECT, cuarto, MATERIAL, UBIC, HOY()); if(!ant) return '<span class="dl-compara" hidden></span>';
@@ -586,18 +612,28 @@ function medirTel(){
   const arriba = v.getBoundingClientRect().top - (m.getBoundingClientRect().top - m.scrollTop) - sube;
   const panel = $('#panel-secado .dl-tel'), ultimo = panel && panel.lastElementChild;
   const resto = ultimo && ultimo !== v ? ultimo.getBoundingClientRect().bottom - v.getBoundingClientRect().bottom : 0;
-  const pie = parseFloat(getComputedStyle(m).paddingBottom) || 0;
-  let cabe = Math.floor(m.clientHeight - arriba - resto - pie - 2);
+  // Escribiendo el número (su pedido del 14-oct): el teclado tapa lo de abajo, así que solo cuenta lo que se ve arriba
+  // del teclado. La caja del número queda justo encima del teclado; Material, los botones y el menú se esconden.
+  const vv = window.visualViewport, escribiendo = PANTALLA === 'lectura' && document.body.classList.contains('dl-escribiendo') && vv;
+  if(escribiendo && window.scrollY) window.scrollTo(0, 0);
+  const alto = escribiendo ? Math.min(m.clientHeight, Math.floor(vv.offsetTop + vv.height - m.getBoundingClientRect().top)) : m.clientHeight;
+  const pie = escribiendo ? 8 : (parseFloat(getComputedStyle(m).paddingBottom) || 0);
+  let cabe = Math.floor(alto - arriba - resto - pie - 2);
   const minimo = PANTALLA === 'lectura' ? 140 : 220;   // en la lectura (su diseño) la foto cede espacio a la caja del número y los botones
   // Su pedido (14-oct): después de la foto la pantalla se queda QUIETA, sin subir. Si no cabe, primero se encoge la
   // foto; si aun así no cabe, se quita la línea "Point the camera…" y se aprietan los espacios (solo en ese caso).
   const card = PANTALLA === 'lectura' && $('#panel-secado .dl-lec');
   if(card){
+    // Se mide desde cero cada vez (antes se medía con lo de la vez pasada y al cerrar el teclado los botones quedaban
+    // detrás del menú): se quitan los apretones, la foto se pone en lo mínimo y se ve cuánto espacio queda libre abajo.
+    m.scrollTop = 0;
     card.classList.remove('apretado', 'muy-apretado');
-    const medir = () => { const top = v.getBoundingClientRect().top - (m.getBoundingClientRect().top - m.scrollTop), r = ultimo.getBoundingClientRect().bottom - v.getBoundingClientRect().bottom; return Math.floor(m.clientHeight - top - r - pie - 2); };   // la foto sube cuando se quita la línea de arriba: se vuelve a medir todo
-    if(cabe < minimo){ card.classList.add('apretado'); cabe = medir(); }
-    if(cabe < 120){ card.classList.add('muy-apretado'); cabe = medir(); }
-    if(cabe >= 60){ v.style.height = cabe + 'px'; const sobra = m.scrollHeight - m.clientHeight; if(sobra > 0) v.style.height = Math.max(60, cabe - sobra) + 'px'; m.scrollTop = 0; return; }   // quieta: nunca sube
+    const fondo = m.getBoundingClientRect().top + alto - pie - 2;   // donde debe terminar la tarjeta
+    const libre = () => { v.style.height = '0px'; const h0 = v.getBoundingClientRect().height; return Math.floor(fondo - ultimo.getBoundingClientRect().bottom + h0); };
+    let espacio = libre();
+    if(espacio < minimo){ card.classList.add('apretado'); espacio = libre(); }
+    if(espacio < 120){ card.classList.add('muy-apretado'); espacio = libre(); }
+    v.style.height = Math.max(60, espacio) + 'px'; m.scrollTop = 0; return;   // quieta: nunca sube
   }
   if(cabe >= minimo){ v.style.height = cabe + 'px'; const sobra = m.scrollHeight - m.clientHeight - sube; if(sobra > 0) v.style.height = Math.max(minimo, cabe - sobra) + 'px'; m.scrollTop = sube; }
   else { document.body.classList.remove('dl-fijo'); v.style.height = (PANTALLA === 'lectura' ? minimo : 360) + 'px'; m.scrollTop = 0; }
@@ -655,7 +691,7 @@ async function disparar(){
   ponerFoto(blob, lectura);
 }
 function ponerFoto(blob, lectura){
-  ESPERA_MAT = null;
+  ESPERA_MAT = null; RUEDA = false;
   // Día 2 en adelante: el punto que toca (el de la visita anterior) ya viene escrito; se puede cambiar.
   const pend = R.puntosPendientes(LECT, CUARTO, HOY())[0];
   if(pend){ MATERIAL = pend.material || MATERIAL; UBIC = pend.ubicacion || ''; }
@@ -687,18 +723,29 @@ async function enviarTel(tabla, fila){
 }
 const avisarTel = (t) => { $$('#panel-secado #dlAviso').forEach(a => { a.className = 'aviso'; a.textContent = t; }); };
 export function valorDe(txt){ const t = String(txt || '').trim().replace(',', '.'); if(!/^\d{1,3}(\.\d)?$/.test(t)) return null; const n = Number(t); return n <= 1000 ? n : null; }
-// "Take next reading" (su pedido del 14-oct): la lectura se guarda y en ese mismo momento se abre la barra de Material
-// (la misma, sin pantalla nueva). Al escoger el material — aunque sea el mismo — vuelve la cámara.
+// Su pedido (14-oct): ya escrito el número y cerrado el teclado (✓, "ya ha sido guardado"), el aviso naranja "Type the
+// reading" se quita del todo: quedan la barra de materiales, Take next reading y Continue (y la foto más grande).
+function estadoDet(){
+  const d = $('#panel-secado .dl-det'), i = $('#dlValor'); if(!d || !i || !FOTO || FOTO.lectura) return;
+  const listo = valorDe(i.value) != null && document.activeElement !== i;
+  if(d.hidden !== listo){ d.hidden = listo; medirTel(); }
+}
+// "Take next reading" (su pedido del 14-oct): la lectura se guarda y se abre la rueda de materiales con OK (paso 4).
+// Con OK — aunque sea el mismo material — vuelve la cámara.
 let ESPERA_MAT = null;
 function siguienteLectura(){
-  const sel = $('#dlMaterial');
-  if(!FOTO){ if(ESPERA_MAT && sel) abrirBarra(sel); return; }   // ya se guardó: solo se vuelve a abrir la barra
+  if(!FOTO){ if(ESPERA_MAT) abrirRueda(); return; }
   if(valorDe(($('#dlValor') || {}).value) == null || OCUPADO_TEL){ guardarLectura(true); return; }   // sin número: el mismo aviso de siempre
-  ESPERA_MAT = guardarLectura(true);   // lee el material de la barra ANTES de dejarla vacía
-  ESPERA_MAT.then(ok => { if(!ok){ ESPERA_MAT = null; if(sel) sel.value = MATERIAL; } });   // guardado por dentro: no se enseña nada (su pedido)
-  if(sel){ sel.value = ''; abrirBarra(sel); }
+  ESPERA_MAT = guardarLectura(true);   // lee el material ANTES de abrir la rueda
+  ESPERA_MAT.then(ok => { if(!ok){ const t = ($('#dlAviso') || {}).textContent || ''; ESPERA_MAT = null; RUEDA = false; pintarAcciones(); if(t) avisarTel(t); } });   // no se guardó: vuelve al paso 3 con el aviso   // guardado por dentro: no se enseña nada (su pedido)
+  abrirRueda();
 }
-function abrirBarra(sel){ try{ if(typeof sel.showPicker === 'function'){ sel.showPicker(); return; } }catch{} try{ sel.focus({ preventScroll: true }); }catch{ sel.focus(); } const m = $('#main'); if(m && document.body.classList.contains('dl-fijo')) m.scrollTop = 0; }
+function okRueda(){
+  const c = centroRueda(), sel = $('#dlMaterial'); if(!c || !sel) return;
+  RUEDA = false; sel.value = c.dataset.dlRueda;
+  if(ESPERA_MAT){ MATERIAL = sel.value; const p = R.puntosPendientes(LECT, CUARTO, HOY()).find(x => String(x.material || '') === MATERIAL); UBIC = p ? (p.ubicacion || '') : ''; }
+  sel.dispatchEvent(new Event('change', { bubbles: true }));   // con lectura guardada: a la cámara; si no, vuelve al paso 3 con ese material
+}
 async function guardarLectura(siguiente){
   if(OCUPADO_TEL || !FOTO) return;
   const valor = valorDe($('#dlValor').value);
@@ -745,7 +792,7 @@ const anchoNumero = (inp) => {
   catch{ inp.style.width = Math.max(1.2, String(inp.value || '').length * 0.62) + 'em'; }
 };
 // La ficha la llama al cambiar a otra pestaña.
-export function salir(){ apagarCam(); document.body.classList.remove('dl-fijo'); if(['cam', 'lectura', 'guardado', 'equipo', 'dia'].includes(PANTALLA)) PANTALLA = 'vacio'; }
+export function salir(){ apagarCam(); document.body.classList.remove('dl-fijo', 'dl-escribiendo'); if(['cam', 'lectura', 'guardado', 'equipo', 'dia'].includes(PANTALLA)) PANTALLA = 'vacio'; }
 
 // ---------- toques ----------
 export function conectar(){
@@ -768,6 +815,15 @@ export function conectar(){
   });
   document.addEventListener('keydown', (e) => { if(e.key === 'Enter' && e.target && e.target.id === 'dlEqNuevo'){ e.preventDefault(); agregarTipo(); } });
   registrarAtras(atrasTel);
+  let marcando = false;
+  document.addEventListener('scroll', (e) => { if(e.target && e.target.classList && e.target.classList.contains('dl-rueda-lista') && !marcando){ marcando = true; requestAnimationFrame(() => { marcando = false; marcarRueda(); }); } }, true);
+  // El teclado del número: al entrar se esconde lo de abajo y la foto se acomoda; al salir (✓ del teclado) vuelve todo.
+  const alTeclado = () => { if(PANTALLA === 'lectura' && !esCompu()) requestAnimationFrame(() => medirTel()); };
+  // El teclado tarda en terminar de subir (o bajar): se vuelve a medir varias veces hasta que se acomoda.
+  const variasVeces = () => { alTeclado(); [120, 300, 600, 1000, 1600].forEach(ms => setTimeout(alTeclado, ms)); };
+  document.addEventListener('focusin', (e) => { if(e.target && e.target.id === 'dlValor'){ estadoDet(); if(!esCompu()){ document.body.classList.add('dl-escribiendo'); variasVeces(); } } });
+  document.addEventListener('focusout', (e) => { if(e.target && e.target.id === 'dlValor'){ setTimeout(estadoDet, 0); document.body.classList.remove('dl-escribiendo'); variasVeces(); } });
+  if(window.visualViewport){ window.visualViewport.addEventListener('resize', alTeclado); window.visualViewport.addEventListener('scroll', () => { if(document.body.classList.contains('dl-escribiendo')) alTeclado(); }); }
   document.addEventListener('input', (e) => { if(e.target && e.target.id === 'dlValor'){ if(e.target.closest('.dl-num')) anchoNumero(e.target); repintarComparar(); } if(e.target && e.target.id === 'dlUbic') repintarComparar(); });
   document.addEventListener('change', (e) => { if(!e.target || e.target.id !== 'dlMaterial') return;
     if(PANTALLA === 'lectura'){ if(!e.target.value) return; MATERIAL = e.target.value; const p = R.puntosPendientes(LECT, FOTO ? FOTO.cuarto : CUARTO, HOY()).find(x => String(x.material || '') === MATERIAL); UBIC = p ? (p.ubicacion || '') : '';
@@ -788,6 +844,9 @@ export function conectar(){
       if(a === 'telefono') camaraDelTelefono(); else if(a === 'otra') encenderCam(); else if(a === 'otra-foto'){ PANTALLA = 'cam'; AVISO_TEL = ''; pintarAqui(); }
       return; }
     if(q('[data-dl-guardar]')){ if(!FOTO && ESPERA_MAT){ ESPERA_MAT = null; abrirEquipo(); return; } guardarLectura(false); return; }
+    if(q('[data-dl-mat-abrir]')){ abrirRueda(); return; }
+    if((el = q('[data-dl-rueda]'))){ irRueda(el, true); return; }
+    if(q('[data-dl-rueda-ok]')){ okRueda(); return; }
     if(q('[data-dl-siguiente]')){ siguienteLectura(); return; }
     if(q('[data-dl-web-guardar]')){ guardarWeb(); return; }
     if((el = q('[data-dl-equipo]'))){ if(el.dataset.dlEquipo === 'no') sinEquipo(); else abrirEquipo(); return; }

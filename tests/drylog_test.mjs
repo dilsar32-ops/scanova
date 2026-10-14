@@ -59,7 +59,10 @@ ok('registro: "+ New Reading" lleva al paso 1 y Back del paso 1 regresa al regis
 { const hoy = [{ material:'Drywall', ubicacion:null }, { material:'Drywall', ubicacion:'#2' }, { material:'Studs', ubicacion:'East wall' }];
   ok('mismo material otra vez hoy: no tapa al anterior, queda #2, #3', DL.ubicLibre([], 'Drywall', '') === '' && DL.ubicLibre(hoy.slice(0,1), 'Drywall', '') === '#2' && DL.ubicLibre(hoy, 'Drywall', '') === '#3');
   ok('mismo material con lugar del día anterior: si ya se leyó, "East wall #2"; otro material sin cambio', DL.ubicLibre(hoy, 'Studs', 'East wall') === 'East wall #2' && DL.ubicLibre(hoy, 'Carpet', '') === ''); }
-ok('Take next reading guarda y abre la MISMA barra de Material (sin pantalla nueva); al escoger, la cámara', /ESPERA_MAT = guardarLectura\(true\)/.test(js) && /sel\.value = ''; abrirBarra\(sel\)/.test(js) && /ESPERA_MAT = null; PANTALLA = 'cam'; pintarAqui\(\)/.test(js) && !/materialHtml/.test(js));
-ok('después de la foto: Material a la vista + Take next reading + Continue', /<label class="dl-mat-sel"><small>Material<\/small><select id="dlMaterial">/.test(js) && /data-dl-siguiente>\$\{IC\('camara'\)\}Take next reading/.test(js));
+ok('Take next reading guarda y abre la MISMA barra de Material (sin pantalla nueva); al escoger, la cámara', /ESPERA_MAT = guardarLectura\(true\)/.test(js) && /abrirRueda\(\);\n\}/.test(js) && /ESPERA_MAT = null; PANTALLA = 'cam'; pintarAqui\(\)/.test(js) && !/materialHtml/.test(js));
+ok('después de la foto: la barra de Material a lo ancho (sin la palabra) + Take next reading + Continue', /<button type="button" class="dl-mat-bar" data-dl-mat-abrir/.test(js) && /<select id="dlMaterial" aria-label="Material" hidden>/.test(js) && /data-dl-siguiente>\$\{IC\('camara'\)\}Take next reading/.test(js));
+ok('número escrito y teclado cerrado: el aviso naranja se quita', /function estadoDet\(\)/.test(js) && /d\.hidden = listo/.test(js) && /setTimeout\(estadoDet, 0\)/.test(js));
+ok('paso 4 (su imagen): Take next reading abre "Material", la rueda de 3 a la vista y el botón OK', /function abrirRueda\(\)/.test(js) && /<p class="dl-rueda-t">Material<\/p>/.test(js) && /data-dl-rueda-ok>OK<\/button>/.test(js) && /\.dl-rueda\{[^}]*height:132px/.test(fs.readFileSync(new URL('../docs/estilo.css', import.meta.url), 'utf8')));
+ok('OK de la rueda: el material del centro; con la lectura guardada vuelve la cámara', /function okRueda\(\)/.test(js) && /sel\.value = c\.dataset\.dlRueda/.test(js));
 console.log(`\ndrylog: ${pass} ok, ${fail} fallas`);
 if(fail) process.exit(1);

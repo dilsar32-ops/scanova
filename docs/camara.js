@@ -1,8 +1,8 @@
 // Scanova · la cámara propia: se queda abierta y toma una foto tras otra (la del teléfono solo deja una por vez).
 // Cada foto entra a la cola de subida del proyecto en cuanto se toma, y se sube mientras uno sigue tomando.
 // Si el teléfono no deja usar la cámara dentro de la página, cae a la cámara normal del teléfono (una por vez).
-import { $ } from './app.js?v=2026-10-14-24';
-import * as fotos from './fotos.js?v=2026-10-14-24';
+import { $ } from './app.js?v=2026-10-14-35';
+import * as fotos from './fotos.js?v=2026-10-14-35';
 
 // ---------- lo puro ----------
 // Lo que se le pide al teléfono: la cámara de atrás y la resolución más alta que dé (4:3, como una foto).
