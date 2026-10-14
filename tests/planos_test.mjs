@@ -38,7 +38,11 @@ ok('exportar lleva abajo la tabla de medidas (como Field Reports); la pantalla n
   const chueco = d => { let peor = 0; d.rooms.forEach(r => (r.walls||[]).forEach(w => { if(Math.hypot(w.end.x-w.start.x, w.end.y-w.start.y) < 2) return; const g = Math.abs(Math.atan2(w.end.y-w.start.y, w.end.x-w.start.x))*180/Math.PI % 90; peor = Math.max(peor, Math.min(g, 90-g)); })); return peor; };
   const crudo = girar(data, 33), listo = PL.prepararPlano(crudo);
   ok('plano de lado (33°) sale derecho: ninguna pared chueca', chueco(crudo) > 30 && chueco(listo) < 0.5);
-  ok('enderezar no cambia el área', Math.abs(PL.resumenPlano(crudo).area - r.area) < 1);
+  // Se compara contra el MISMO plano sin girar y sin la marca de 'editado a mano' (13-oct: al plano sin editar
+  // se le devuelven a la sala las paredes que el Hallway solo vio, y eso le quita el piso contado dos veces).
+  const derecho = JSON.parse(JSON.stringify(data)); delete derecho._handEdited;
+  ok('enderezar no cambia el área', Math.abs(PL.resumenPlano(crudo).area - PL.resumenPlano(derecho).area) < 1, [PL.resumenPlano(crudo).area, PL.resumenPlano(derecho).area]);
+  ok('el piso que la sala y el pasillo contaban dos veces ya no se suma', PL.resumenPlano(derecho).area < r.area - 30, [PL.resumenPlano(derecho).area, r.area]);
   ok('enderezar no toca lo guardado (trabaja sobre una copia)', chueco(crudo) > 30);
   ok('el dibujo usa el plano enderezado', PL.svgDelPlano(crudo, {}, true) === PL.svgDelPlano(listo, {}, true) || /LIVING ROOM/.test(PL.svgDelPlano(crudo, {}, true)));
   const src = fs.readFileSync(new URL('../docs/planos.js', import.meta.url), 'utf8');
@@ -75,7 +79,8 @@ ok('exportar lleva abajo la tabla de medidas (como Field Reports); la pantalla n
   a.doors.push({ id: 'p1', wallId: 'a1', position: { x: 12, y: 2.5 }, widthFt: 2.5 });
   a.doors.push({ id: 'p2', wallId: 'a2', position: { x: 6, y: 10 }, widthFt: 3 });
   const sv = PL.svgDelPlano({ merged: true, rooms: [a, b] }, {}, true);
-  ok('puerta del closet corrediza (sin arco); la otra puerta con su arco', (sv.match(/<path d="M [^"]* A /g) || []).length === 1);
+  // 13-oct: ninguna puerta lleva ya el arco que se curvea (su pedido); la de la recámara es una sola hoja entreabierta.
+  ok('puerta del closet corrediza; la otra, solo su hoja entreabierta (sin arco)', (sv.match(/<path d="M [^"]* A /g) || []).length === 0 && (sv.match(/stroke-width="2.4" stroke-linecap="round"/g) || []).length === 1);
   const c = JSON.parse(JSON.stringify(data)); const mb = c.rooms.find(r => /master/i.test(r.roomName)); mb._labelOffsetPx = { dx: 900, dy: 900 };
   const vc = PL.svgDelPlano(c, {}, true), vn = PL.svgDelPlano(data, {}, true);
   const xDe = (sv2) => { const m = sv2.match(/<text x="([\d.]+)"[^>]*>MASTER BEDROOM</); return m ? +m[1] : NaN; };

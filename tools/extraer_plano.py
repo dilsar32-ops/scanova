@@ -15,7 +15,9 @@ ROOTS = ['buildFloorplanSvg', 'buildFloorplanSvgUnmerged', 'floorplanLevels', 'f
          # el nombre dicho al escanear sale en inglés (su pedido del 13-oct)
          'fpNombreDeCuartoEnIngles',
          # los cuartos sin acceso, deducidos por sus paredes y su puerta (13-oct)
-         'fpAutoCompletarEspacios']
+         'fpAutoCompletarEspacios',
+         # las paredes del cuarto de al lado que se vieron por una abertura vuelven a su dueño (13-oct)
+         'fpResolverParedesAjenas']
 ROOTS += [r for r in (sys.argv[2].split(',') if len(sys.argv) > 2 else []) if r]
 defs = {}   # nombre -> (orden, texto)
 SIG = re.compile(r'\n  (?=[A-Za-z_$/])')

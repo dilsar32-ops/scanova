@@ -3,12 +3,12 @@
 // Arriba: Download, Share, •••, Edit Photo y Save a Copy. El panel se esconde y se vuelve a sacar con la flechita.
 // Datos: la nota de la foto (fotos_fotos.nota), sus etiquetas (fotos_etiquetas + fotos_foto_etiquetas) y sus comentarios
 // (fotos_comentarios) ya existían desde fotos-01; las tareas de la foto usan fotos_tareas (sql/fotos-06-foto.sql).
-import { $, $$, authFetch, irA, atras, esManager, PERFIL, esAparato } from './app.js?v=2026-10-14-5';
-import * as trabajos from './trabajos.js?v=2026-10-14-5';
-import * as fotos from './fotos.js?v=2026-10-14-5';
-import * as proyecto from './proyecto.js?v=2026-10-14-5';
-import * as panel from './panel.js?v=2026-10-14-5';
-import * as editor from './editor.js?v=2026-10-14-5';
+import { $, $$, authFetch, irA, atras, esManager, PERFIL, esAparato } from './app.js?v=2026-10-14-6';
+import * as trabajos from './trabajos.js?v=2026-10-14-6';
+import * as fotos from './fotos.js?v=2026-10-14-6';
+import * as proyecto from './proyecto.js?v=2026-10-14-6';
+import * as panel from './panel.js?v=2026-10-14-6';
+import * as editor from './editor.js?v=2026-10-14-6';
 
 const esc = (v) => trabajos.esc(v);
 const IC = (n) => '<svg class="ic"><use href="#i-' + n + '"/></svg>';
