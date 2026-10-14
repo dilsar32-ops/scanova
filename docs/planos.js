@@ -2,8 +2,8 @@
 // (el mismo escáner de Field Reports, que ya viene dentro de la app: plugin RoomScan) y se dibuja con el
 // mismo código de Field Reports (plano.js, copiado por tools/extraer_plano.py). Un escaneo por piso;
 // un escaneo nuevo no borra el anterior (queda de historial), se ve el más reciente.
-import * as plano from './plano.js?v=2026-10-14-4';
-import { authFetch, esAparato } from './app.js?v=2026-10-14-4';
+import * as plano from './plano.js?v=2026-10-14-5';
+import { authFetch, esAparato } from './app.js?v=2026-10-14-5';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
@@ -53,6 +53,9 @@ export function prepararPlano(data){
     plano.floorplanAlignRooms(d);
     if(!d._handEdited){ plano.floorplanRectifyWalls(d); plano.floorplanRefineGeometry(d); plano.floorplanCloseCorners(d); }
   }catch(e){ console.warn('enderezar plano', e); }
+  // Los cuartos sin acceso que las paredes ya dibujan (clóset del master, laundry): la app los deduce sola y
+  // los nombra por su puerta (13-oct, el plano de Harold). Mismo código que Field Reports.
+  try{ if(!d._handEdited) plano.fpAutoCompletarEspacios(d); }catch(e){ console.warn('autocompletar', e); }
   // Clósets y rincones (su pedido, 14-oct): la app los reconoce y los nombra igual que Field Reports.
   try{ plano.floorplanDetectSubAreas(d); }catch(e){ console.warn('closets', e); }
   LISTOS.set(data, d); return d;

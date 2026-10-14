@@ -13,6 +13,9 @@ xcodebuild -workspace App.xcworkspace -scheme App -configuration Release -sdk ip
 xcodebuild -exportArchive -archivePath "$W/App.xcarchive" -exportPath "$W/export" -exportOptionsPlist "$R/ios/distribucion/export.plist" -allowProvisioningUpdates > "$W/export.log" 2>&1 || { tail -20 "$W/export.log"; exit 1; }
 sed -i '' 's#<string>App</string>#<string>Scanova360</string>#' "$W/export/manifest.plist"
 mkdir -p "$PAGES/app/scanova"
+# La versión que el aviso de la página compara (la del CURRENT_PROJECT_VERSION de este aparato).
+BUILD=$(grep -o 'CURRENT_PROJECT_VERSION = [0-9]*' "$R/ios/App/App.xcodeproj/project.pbxproj" | head -1 | grep -o '[0-9]*$')
+printf '%s\n' "$BUILD" > "$PAGES/app/scanova/version.txt"
 cp "$W/export/App.ipa" "$PAGES/app/scanova/Scanova360.ipa"; cp "$W/export/manifest.plist" "$PAGES/app/scanova/manifest.plist"
 ICONO="$R/ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png"
 sips -z 57 57 "$ICONO" --out "$PAGES/app/scanova/icono-57.png" >/dev/null; sips -z 512 512 "$ICONO" --out "$PAGES/app/scanova/icono-512.png" >/dev/null

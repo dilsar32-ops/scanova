@@ -1,5 +1,5 @@
 // GENERADO por tools/extraer_plano.py desde Field Reports (no editar a mano: se vuelve a generar).
-// Dibuja el plano igual que Field Reports. 114 piezas.
+// Dibuja el plano igual que Field Reports. 118 piezas.
 /* eslint-disable */
 const document = (typeof globalThis !== "undefined" && globalThis.document) || undefined;
   const $ = (sel, el) => { const d = el || (typeof document !== 'undefined' ? document : null); return d && d.querySelector ? d.querySelector(sel) : null; };
@@ -526,6 +526,8 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
     return Array.from(set).sort((a,b) => a-b);
   }
   let floorplanSelectedLevel = 1;
+  let fpIdCounter = 0;
+  function fpNewId(){ return 'man-' + Date.now().toString(36) + '-' + (fpIdCounter++); }
   let fpMeasurePrefs = { interior: true, openings: true, roomArea: true, furniture: false, extents: true };
   const FP_MOVABLE_CATEGORIES = ['bed', 'sofa', 'chair', 'table', 'television'];
   function fpBuildNodes(wallRefs){
@@ -647,6 +649,307 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
       if((ux*vx + uy*vy)/(lu*lv) <= -0.98) return true;   // turns back on itself
     }
     return false;
+  }
+  function fpAiFindVoids(work){
+    if(work.merged === false) return [];
+    const multi = floorplanLevels(work).length > 1;
+    const level = floorplanSelectedLevel;
+    const rooms = (work.rooms||[]).filter(r => !r.deleted && (r.walls||[]).length && (!multi || (r.level||1) === level));
+    if(!rooms.length) return [];
+    let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
+    const walls = [];
+    rooms.forEach(r => (r.walls||[]).forEach(w => {
+      if(!w.start || !w.end) return;
+      walls.push(w);
+      [w.start, w.end].forEach(p => {
+        minX=Math.min(minX,p.x); maxX=Math.max(maxX,p.x);
+        minY=Math.min(minY,p.y); maxY=Math.max(maxY,p.y);
+      });
+    }));
+    if(!walls.length) return [];
+    const CELL = 0.5, PAD = 1.5;
+    minX-=PAD; minY-=PAD; maxX+=PAD; maxY+=PAD;
+    const nx = Math.ceil((maxX-minX)/CELL), ny = Math.ceil((maxY-minY)/CELL);
+    if(nx*ny > 40000) return []; // absurdly large plan - skip rather than stall
+    // A room whose outline doubles back on itself cannot say which floor
+    // it owns: fpPointInPolygon is an even-odd ray cast, so the crossed
+    // lobe reads as OUTSIDE and a diagonal wedge of the room's OWN floor
+    // comes back "unclaimed". That is exactly how a 13'-5" x 12'-11"
+    // phantom space landed on top of a real 16'-2" x 13'-5" Master
+    // Bedroom and the tech was asked to name his own bedroom. AI Fix's
+    // gap-closing step already refuses to trust these outlines
+    // (fpAiFragileOutline, used ~60 lines above) - this step did not.
+    // Their BOUNDING BOX is still a hard fact, so it still claims space;
+    // only the fine-grained polygon answer is thrown away.
+    const polys = [];
+    const fragileBoxes = [];
+    rooms.forEach(r => {
+      if(fpAiFragileOutline(r) || fpOutlineDoublesBack(r)){
+        // Only a real room falls back to its box. A 2-wall fragment has
+        // no outline at all, and letting its box claim floor swallowed a
+        // genuine enclosed pocket lying between two rooms.
+        if((r.walls||[]).length >= 3){
+          const b = floorplanRoomBounds(r);
+          if(b && isFinite(b.minX)) fragileBoxes.push(b);
+        }
+        return;
+      }
+      const p = fpOrderedRoomPolygon(r);
+      if(p && p.length >= 3) polys.push(p);
+    });
+    // 0 free / 1 wall or room / 2 outside
+    const grid = new Uint8Array(nx*ny);
+    for(let gy=0; gy<ny; gy++) for(let gx=0; gx<nx; gx++){
+      const px = minX + (gx+0.5)*CELL, py = minY + (gy+0.5)*CELL;
+      const pt = {x:px, y:py};
+      let covered = polys.some(p => fpPointInPolygon(pt, p));
+      if(!covered) covered = fragileBoxes.some(b => px >= b.minX && px <= b.maxX && py >= b.minY && py <= b.maxY);
+      if(!covered){
+        // 0.45ft = wall half-thickness + a little slack. Bigger radii
+        // swallowed a real 2.4ft-wide closet strip whole.
+        covered = walls.some(w => {
+          const dx=w.end.x-w.start.x, dy=w.end.y-w.start.y;
+          const L2=dx*dx+dy*dy; if(L2<1e-6) return false;
+          let t=((px-w.start.x)*dx+(py-w.start.y)*dy)/L2;
+          t=Math.max(0,Math.min(1,t));
+          return Math.hypot(px-(w.start.x+dx*t), py-(w.start.y+dy*t)) <= 0.45;
+        });
+      }
+      if(covered) grid[gy*nx+gx] = 1;
+    }
+    // flood the OUTSIDE from the border
+    const stack = [];
+    for(let gx=0; gx<nx; gx++){ stack.push([gx,0], [gx,ny-1]); }
+    for(let gy=0; gy<ny; gy++){ stack.push([0,gy], [nx-1,gy]); }
+    while(stack.length){
+      const [gx,gy] = stack.pop();
+      if(gx<0||gy<0||gx>=nx||gy>=ny) continue;
+      const k = gy*nx+gx;
+      if(grid[k] !== 0) continue;
+      grid[k] = 2;
+      stack.push([gx+1,gy],[gx-1,gy],[gx,gy+1],[gx,gy-1]);
+    }
+    // remaining 0-cells are enclosed voids - collect components
+    const voids = [];
+    for(let gy=0; gy<ny; gy++) for(let gx=0; gx<nx; gx++){
+      if(grid[gy*nx+gx] !== 0) continue;
+      const comp = [];
+      const st = [[gx,gy]];
+      while(st.length){
+        const [cx2,cy2] = st.pop();
+        if(cx2<0||cy2<0||cx2>=nx||cy2>=ny) continue;
+        const k = cy2*nx+cx2;
+        if(grid[k] !== 0) continue;
+        grid[k] = 3;
+        comp.push([cx2,cy2]);
+        st.push([cx2+1,cy2],[cx2-1,cy2],[cx2,cy2+1],[cx2,cy2-1]);
+      }
+      const areaSqFt = comp.length * CELL * CELL;
+      if(areaSqFt < 8) continue;
+      // A giant "unclaimed" region is a broken-outline artifact, not a
+      // pantry - real nameless spaces are closet-sized. Oversized ones
+      // stay with the human in Plan review (adversarially confirmed: an
+      // 84 sqft phantom void appeared when a room's polygon collapsed).
+      if(areaSqFt > 50) continue;
+      let bx0=Infinity, by0=Infinity, bx1=-Infinity, by1=-Infinity;
+      comp.forEach(([cx2,cy2]) => {
+        bx0=Math.min(bx0,cx2); bx1=Math.max(bx1,cx2);
+        by0=Math.min(by0,cy2); by1=Math.max(by1,cy2);
+      });
+      // A real nameless space is a compact pocket. A component that does
+      // not fill its own bounding box is a thin band snaking between
+      // walls - the signature of a broken outline. The phantom "laundry
+      // room" measured 12.4 x 12.4 ft of bbox holding 38.8 sq ft of real
+      // cells: 25% full. Without this the printed w x d is a straight
+      // lie, because w/d come from the bbox while area is the cell count.
+      const bboxArea = (bx1-bx0+1) * (by1-by0+1) * CELL * CELL;
+      if(bboxArea > 0 && areaSqFt / bboxArea < 0.55) continue;
+      // The wall-coverage radius shaved ~0.45ft off each side - put it
+      // back so the reported size matches the real clear space.
+      const sp = {
+        cx: minX + ((bx0+bx1)/2 + 0.5)*CELL,
+        cy: minY + ((by0+by1)/2 + 0.5)*CELL,
+        w: Math.round(((bx1-bx0+1)*CELL + 0.9)*100)/100,
+        d: Math.round(((by1-by0+1)*CELL + 0.9)*100)/100,
+        area: Math.round(areaSqFt*10)/10, level
+      };
+      // Already labeled on a previous pass? Then it is done. Same FLOOR
+      // only - an upstairs label at the same plan x/y is a different
+      // physical space.
+      // The old test was a fixed 3ft radius against existing space labels
+      // ONLY - meaningless against a 12ft void, blind to room names and to
+      // the CLOSET pockets floorplanDetectSubAreas draws, and one-way, so
+      // a phantom label suppressed its own corrected replacement and the
+      // plan could never heal by pressing AI Fix again. Now the radius
+      // scales with the space being proposed, and every family of label
+      // that is already on the drawing counts.
+      // DENTRO, no CERCA. El radio (aunque escalara con el hueco) medía
+      // distancia a un punto, y un rotulo cerca no es un rotulo encima.
+      // Caso real del 8 de septiembre: el ancla del nombre "Hallway"
+      // quedaba a 2.58 pies -- dentro del radio de 3 -- de un closet real
+      // de 8'0" x 1'6" que esta FUERA del pasillo, y lo borraba. Un
+      // pasillo es angosto y su nombre queda cerca de todo lo que lo
+      // rodea, asi que el radio lo hacia dueno de sus vecinos.
+      //
+      // La prueba correcta es si el rotulo cae DENTRO del hueco
+      // propuesto. Escala sola con el tamano del hueco y sigue atrapando
+      // el caso que motivo esta reja: el ancla del Master Bedroom SI caia
+      // dentro del fantasma de 12.4 x 12.4 pies.
+      const hw = Math.max(0.5, (sp.w - 0.9)/2) + 0.5;
+      const hd = Math.max(0.5, (sp.d - 0.9)/2) + 0.5;
+      const onIt = (x, y) => Math.abs(x - sp.cx) <= hw && Math.abs(y - sp.cy) <= hd;
+      const sameLevel = q => (q.level||1) === (sp.level||1);
+      const already = (work._spaceLabels||[]).some(q => sameLevel(q) && onIt(q.x, q.y))
+        || rooms.some(r => {
+             // Only rooms that actually draw a name count. A 2-wall
+             // fragment has no meaningful anchor, and letting it vote
+             // here silently swallowed a genuine enclosed pocket.
+             if((r.walls||[]).length < 3) return false;
+             const a = floorplanLabelAnchor(r);
+             return a && onIt(a.x, a.y);
+           })
+        || rooms.some(r => (r._subAreas||[]).some(sa => onIt(sa.cx, sa.cy)));
+      if(!already) voids.push(sp);
+    }
+    return voids;
+  }
+  function fpAutoCompletarEspacios(data){
+    const hecho = [];
+    if(!data || data.merged === false || !(data.rooms || []).length) return hecho;
+    const niveles = floorplanLevels(data);
+    const nivelAntes = floorplanSelectedLevel;
+    const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+    const distSeg = (p, a, b) => {
+      const dx = b.x - a.x, dy = b.y - a.y, L2 = dx*dx + dy*dy;
+      if(L2 < 1e-9) return dist(p, a);
+      const t = Math.max(0, Math.min(1, ((p.x - a.x)*dx + (p.y - a.y)*dy) / L2));
+      return Math.hypot(p.x - (a.x + dx*t), p.y - (a.y + dy*t));
+    };
+    // Corte de un rayo p + t*u con el segmento ab (t > 0), o null.
+    const corte = (p, u, a, b) => {
+      const ex = b.x - a.x, ey = b.y - a.y, den = u.x*ey - u.y*ex;
+      if(Math.abs(den) < 1e-9) return null;
+      const t = ((a.x - p.x)*ey - (a.y - p.y)*ex) / den;
+      const s = ((a.x - p.x)*u.y - (a.y - p.y)*u.x) / den;
+      return (t > 0.3 && s >= -0.02 && s <= 1.02) ? t : null;
+    };
+    try{
+      for(const lvl of niveles){
+        floorplanSelectedLevel = lvl;
+        const cuartos = data.rooms.filter(r => !r.deleted && (r.walls || []).length && (r.level || 1) === lvl);
+        if(cuartos.length < 2) continue;
+        const paredes = [];
+        cuartos.forEach(r => (r.walls || []).forEach(w => { if(w.start && w.end) paredes.push({ w, r }); }));
+        // 1. La pared de afuera sigue derecha: dos paredes exteriores de cuartos
+        //    distintos en la misma línea, con un hueco corto que nadie escaneó.
+        const puentes = [];
+        for(let i = 0; i < paredes.length; i++) for(let j = i + 1; j < paredes.length; j++){
+          const A = paredes[i], B = paredes[j];
+          if(A.r === B.r) continue;
+          const a1 = A.w.start, a2 = A.w.end, b1 = B.w.start, b2 = B.w.end;
+          const ua = { x: a2.x - a1.x, y: a2.y - a1.y }, la = Math.hypot(ua.x, ua.y);
+          const ub = { x: b2.x - b1.x, y: b2.y - b1.y }, lb = Math.hypot(ub.x, ub.y);
+          if(la < 2 || lb < 2) continue;
+          if(Math.abs((ua.x*ub.x + ua.y*ub.y) / (la*lb)) < 0.995) continue;
+          const lejos = Math.abs((b1.x - a1.x)*ua.y - (b1.y - a1.y)*ua.x) / la;
+          if(lejos > 0.4) continue;
+          // las dos puntas más cercanas
+          let par = null;
+          for(const p of [a1, a2]) for(const q of [b1, b2]){
+            const d = dist(p, q);
+            if(!par || d < par.d) par = { p, q, d };
+          }
+          if(!par || par.d < 0.8 || par.d > 6) continue;
+          const m = { x: (par.p.x + par.q.x)/2, y: (par.p.y + par.q.y)/2 };
+          // que el hueco sea de verdad un hueco: sin pared, sin puerta, y afuera de todo cuarto
+          if(paredes.some(o => o !== A && o !== B && distSeg(m, o.w.start, o.w.end) < 0.5)) continue;
+          if(cuartos.some(r => ['doors','windows','openings'].some(k => (r[k] || []).some(o => o.position && dist(o.position, m) < 2)))) continue;
+          if(cuartos.some(r => { const pg = fpOrderedRoomPolygon(r); return pg && pg.length >= 3 && fpPointInPolygon(m, pg); })) continue;
+          if(!floorplanIsExteriorWall(A.w, A.r, cuartos) || !floorplanIsExteriorWall(B.w, B.r, cuartos)) continue;
+          puentes.push({ a: { x: par.p.x, y: par.p.y }, b: { x: par.q.x, y: par.q.y } });
+        }
+        // 2. Los espacios cerrados que ningún cuarto reclama (con los puentes puestos).
+        const conPuentes = extra => {
+          const w = JSON.parse(JSON.stringify(data));
+          w.rooms.push({ level: lvl, walls: puentes.concat(extra || []).map((s, k) => ({ id: 'tmp' + k, start: s.a, end: s.b })),
+                         doors: [], windows: [], openings: [], objects: [] });
+          return w;
+        };
+        const huecos = fpAiFindVoids(conPuentes());
+        if(!huecos.length) continue;
+        const puertas = [];
+        cuartos.forEach(r => ['doors','openings'].forEach(k => (r[k] || []).forEach(o => {
+          if(o.position && !o._removed) puertas.push({ p: o.position, w: o.widthFt || 2.5, r });
+        })));
+        const puertasDe = h => puertas.filter(d => Math.abs(d.p.x - h.cx) <= h.w/2 + 1.0 && Math.abs(d.p.y - h.cy) <= h.d/2 + 1.0);
+        const dentro = (p, h) => Math.abs(p.x - h.cx) <= h.w/2 + 0.3 && Math.abs(p.y - h.cy) <= h.d/2 + 0.3;
+        for(const h of huecos){
+          // 3. ¿Una pared apunta hacia adentro y, si se sigue, lo parte en dos
+          //    (cada parte con su puerta)? Se queda la partición más "cuadrada".
+          let mejor = null;
+          for(const { w } of paredes){
+            for(const [p, o] of [[w.start, w.end], [w.end, w.start]]){
+              if(!dentro(p, h)) continue;
+              const L = dist(p, o); if(L < 1) continue;
+              const u = { x: (p.x - o.x)/L, y: (p.y - o.y)/L };
+              let t = Infinity;
+              for(const q of paredes){ if(q.w === w) continue; const c = corte(p, u, q.w.start, q.w.end); if(c != null && c < t) t = c; }
+              for(const s of puentes){ const c = corte(p, u, s.a, s.b); if(c != null && c < t) t = c; }
+              if(!isFinite(t) || t > 20) continue;
+              const fin = { x: p.x + u.x*t, y: p.y + u.y*t };
+              const partes = fpAiFindVoids(conPuentes([{ a: p, b: fin }])).filter(v => dentro({ x: v.cx, y: v.cy }, h));
+              if(partes.length !== 2) continue;
+              if(Math.abs(partes[0].area + partes[1].area - h.area) > h.area * 0.3) continue;
+              if(partes.some(v => !puertasDe(v).length)) continue;
+              const relleno = Math.min(...partes.map(v => v.area / Math.max(0.1, (v.w - 0.9) * (v.d - 0.9))));
+              if(!mejor || relleno > mejor.relleno) mejor = { partes, relleno, seg: { a: p, b: fin } };
+            }
+          }
+          const partes = mejor ? mejor.partes : [h];
+          // 4. Cada parte, un cuarto deducido, nombrado por su puerta.
+          const lineas = paredes.map(x => [x.w.start, x.w.end]).concat(puentes.map(s => [s.a, s.b])).concat(mejor ? [[mejor.seg.a, mejor.seg.b]] : []);
+          const pegar = (v, eje) => {
+            // el borde se pega a la pared paralela más cercana (a menos de 0.8 ft)
+            let mejorD = 0.8, val = v;
+            for(const [a, b] of lineas){
+              if(eje === 'x' && Math.abs(a.x - b.x) < 0.3){ const d = Math.abs((a.x + b.x)/2 - v); if(d < mejorD){ mejorD = d; val = (a.x + b.x)/2; } }
+              if(eje === 'y' && Math.abs(a.y - b.y) < 0.3){ const d = Math.abs((a.y + b.y)/2 - v); if(d < mejorD){ mejorD = d; val = (a.y + b.y)/2; } }
+            }
+            return val;
+          };
+          for(const v of partes){
+            const x0 = pegar(v.cx - v.w/2, 'x'), x1 = pegar(v.cx + v.w/2, 'x');
+            const y0 = pegar(v.cy - v.d/2, 'y'), y1 = pegar(v.cy + v.d/2, 'y');
+            if(x1 - x0 < 1.2 || y1 - y0 < 1.2) continue;
+            const deQuien = puertasDe(v).map(d => String(d.r.roomName || d.r.voiceName || ''));
+            const junto = re => cuartos.some(r => re.test(String(r.roomName || r.voiceName || '')) && (() => {
+              const b = floorplanRoomBounds(r);
+              return b && x0 <= b.maxX + 1 && x1 >= b.minX - 1 && y0 <= b.maxY + 1 && y1 >= b.minY - 1;
+            })());
+            let nombre;
+            if(deQuien.some(n => FP_ES_RECAMARA.test(n))) nombre = 'Closet';
+            else if(deQuien.some(n => /kitchen|cocina/i.test(n))) nombre = 'Pantry';
+            else if(deQuien.some(n => FP_ES_PASILLO.test(n)) && junto(/kitchen|cocina/i)) nombre = 'Laundry Room';
+            else nombre = 'Closet';
+            // La altura no se inventa: la que el escáner midió en las paredes vecinas (la más común).
+            const alturas = paredes.map(x => x.w.heightFt).filter(v => v > 0).map(v => Math.round(v * 10) / 10);
+            const cuenta = {}; alturas.forEach(v => { cuenta[v] = (cuenta[v] || 0) + 1; });
+            const altura = alturas.length ? Number(Object.keys(cuenta).sort((m, n) => cuenta[n] - cuenta[m])[0]) : null;
+            const pa = (a, b) => ({ id: fpNewId(), start: a, end: b, lengthFt: Math.round(dist(a, b)*100)/100,
+                                    ...(altura ? { heightFt: altura } : {}), _added: true, _inferido: true });
+            const c = [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }];
+            data.rooms.push({ roomName: nombre, level: lvl, _inferido: true, _auto: true,
+              walls: [pa(c[0], c[1]), pa(c[1], c[2]), pa(c[2], c[3]), pa(c[3], c[0])],
+              doors: [], windows: [], openings: [], objects: [] });
+            hecho.push(nombre + ' ' + fpFeetInches(x1 - x0) + ' x ' + fpFeetInches(y1 - y0) + ' (no escaneado: deducido)');
+          }
+        }
+      }
+    }finally{
+      floorplanSelectedLevel = nivelAntes;
+    }
+    if(hecho.length) data._autoCompletado = hecho;
+    return hecho;
   }
   function floorplanRoomBounds(room){
     let minX=Infinity, maxX=-Infinity, minY=Infinity, maxY=-Infinity;
@@ -2777,4 +3080,4 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
     return data.merged ? buildFloorplanSvgMerged(data, level) : buildFloorplanSvgUnmerged(data, level);
   }
   export function ponerVista(limpia){ fpEstiloVista = true; fpSheetExport = false; fpConTablaMedidas = !limpia; }
-export { buildFloorplanSvg, buildFloorplanSvgUnmerged, floorplanLevels, fpRoomDisplayAreaSqFt, fpDisplayTotalAreaSqFt, fpOrderedRoomPolygon, fpPolygonAreaSqFt, fpFeetInches, fpPlanMeasurements, fpRoomMeasurements, floorplanIsExteriorWall, floorplanAlignRooms, floorplanRectifyWalls, floorplanRefineGeometry, floorplanCloseCorners, floorplanDetectSubAreas, fpReconocerClosets, fpNombreDeCuartoEnIngles };
+export { buildFloorplanSvg, buildFloorplanSvgUnmerged, floorplanLevels, fpRoomDisplayAreaSqFt, fpDisplayTotalAreaSqFt, fpOrderedRoomPolygon, fpPolygonAreaSqFt, fpFeetInches, fpPlanMeasurements, fpRoomMeasurements, floorplanIsExteriorWall, floorplanAlignRooms, floorplanRectifyWalls, floorplanRefineGeometry, floorplanCloseCorners, floorplanDetectSubAreas, fpReconocerClosets, fpNombreDeCuartoEnIngles, fpAutoCompletarEspacios };

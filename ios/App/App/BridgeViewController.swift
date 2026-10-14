@@ -61,6 +61,7 @@ class BridgeViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(CerebroVozPlugin())    // el modelo del telefono que interpreta lo que oye
         bridge?.registerPluginInstance(MensajePlugin())      // mandar el invoice por Mensajes, ya dirigido al cliente
         bridge?.registerPluginInstance(EntrarWebPlugin())    // Scanova360: Continuar con Google en la hoja segura de iOS
+        bridge?.registerPluginInstance(AparatoPlugin())      // Scanova360: qué versión del aparato tiene este teléfono (aviso de versión nueva)
 
         // Scanova360: sin actualizador (la web vive en el sitio).
     }
@@ -100,5 +101,30 @@ public class EntrarWebPlugin: CAPPlugin, CAPBridgedPlugin, ASWebAuthenticationPr
 
     public func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
         return bridge?.viewController?.view.window ?? ASPresentationAnchor()
+    }
+}
+
+
+// EL AVISO DE APARATO NUEVO (Scanova360, 13 oct 2026). La página vive en el sitio y se
+// actualiza sola, pero el escáner (Swift) no: la página pregunta aquí qué versión trae este
+// teléfono y, si en el enlace hay una más nueva, avisa con una barra que abre el enlace en Safari.
+@objc(AparatoPlugin)
+public class AparatoPlugin: CAPPlugin, CAPBridgedPlugin {
+    public let identifier = "AparatoPlugin"
+    public let jsName = "Aparato"
+    public let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "version", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "abrirSafari", returnType: CAPPluginReturnPromise)
+    ]
+    @objc func version(_ call: CAPPluginCall) {
+        let info = Bundle.main.infoDictionary ?? [:]
+        call.resolve(["build": info["CFBundleVersion"] as? String ?? "",
+                      "version": info["CFBundleShortVersionString"] as? String ?? ""])
+    }
+    @objc func abrirSafari(_ call: CAPPluginCall) {
+        guard let texto = call.getString("url"), let url = URL(string: texto) else { call.reject("falta la url"); return }
+        DispatchQueue.main.async {
+            UIApplication.shared.open(url) { ok in ok ? call.resolve() : call.reject("no se pudo abrir") }
+        }
     }
 }

@@ -1,15 +1,15 @@
 // Scanova · arranque, sesión y navegación. Las pantallas viven en index.html; lo de trabajos en trabajos.js.
-import { SUPABASE_URL, ANON_KEY, APP_BUILD } from './config.js?v=2026-10-14-4';
-import { ESQUEMA_APARATO, urlEntrarGoogle } from './google.js?v=2026-10-14-4';
-import * as trabajos from './trabajos.js?v=2026-10-14-4';
-import * as personas from './personas.js?v=2026-10-14-4';
-import * as fotos from './fotos.js?v=2026-10-14-4';
-import * as panel from './panel.js?v=2026-10-14-4';
-import * as camara from './camara.js?v=2026-10-14-4';
-import * as direccion from './direccion.js?v=2026-10-14-4';
-import * as proyecto from './proyecto.js?v=2026-10-14-4';
-import * as foto from './foto.js?v=2026-10-14-4';
-import * as editor from './editor.js?v=2026-10-14-4';
+import { SUPABASE_URL, ANON_KEY, APP_BUILD } from './config.js?v=2026-10-14-5';
+import { ESQUEMA_APARATO, urlEntrarGoogle } from './google.js?v=2026-10-14-5';
+import * as trabajos from './trabajos.js?v=2026-10-14-5';
+import * as personas from './personas.js?v=2026-10-14-5';
+import * as fotos from './fotos.js?v=2026-10-14-5';
+import * as panel from './panel.js?v=2026-10-14-5';
+import * as camara from './camara.js?v=2026-10-14-5';
+import * as direccion from './direccion.js?v=2026-10-14-5';
+import * as proyecto from './proyecto.js?v=2026-10-14-5';
+import * as foto from './foto.js?v=2026-10-14-5';
+import * as editor from './editor.js?v=2026-10-14-5';
 
 export const $ = (s, r = document) => r.querySelector(s);
 export const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -401,8 +401,47 @@ async function buscarVersionNueva(){
     location.replace(location.pathname + '?v=' + encodeURIComponent(v) + location.hash);
   }catch{} finally { BUSCANDO = false; }
 }
+// EL APARATO NUEVO (13-oct). La página se actualiza sola, el escáner del teléfono no: si en el
+// enlace de instalación hay un aparato más nuevo que el de este teléfono, una barra azul lo dice y
+// abre el enlace en Safari. Solo dentro de la app del iPhone; en el navegador no sale nunca.
+export const APARATO_PAGINA = 'https://dilsar32-ops.github.io/amg-reportes/app/';
+const APARATO_TXT = 'https://dilsar32-ops.github.io/amg-reportes/app/scanova/version.txt';
+// Un teléfono sin la pieza que dice su versión (los primeros aparatos) cuenta como viejo.
+export function aparatoViejo(remota, local){
+  const r = parseInt(String(remota || '').trim(), 10), l = parseInt(String(local || '').trim(), 10) || 0;
+  return Number.isFinite(r) && r > 0 && r > l;
+}
+let BUSCANDO_APARATO = false;
+async function buscarAparatoNuevo(){
+  const C = typeof window !== 'undefined' ? window.Capacitor : null;
+  if(BUSCANDO_APARATO || !C || !C.isNativePlatform || !C.isNativePlatform()) return;
+  BUSCANDO_APARATO = true;
+  try{
+    let local = '';
+    try{ const A = C.Plugins && C.Plugins.Aparato; if(A){ const v = await A.version(); local = v && v.build || ''; } }catch{}
+    const r = await fetch(APARATO_TXT + '?cb=' + Date.now(), { cache:'no-store' }); if(!r.ok) return;
+    const remota = (await r.text()).trim();
+    let cerrada = ''; try{ cerrada = sessionStorage.getItem('scanova.aparatoCerrado') || ''; }catch{}
+    if(aparatoViejo(remota, local) && cerrada !== remota) barraAparato(remota);
+  }catch{} finally { BUSCANDO_APARATO = false; }
+}
+function barraAparato(remota){
+  if(document.getElementById('barraAparato')) return;
+  const b = document.createElement('div');
+  b.id = 'barraAparato'; b.className = 'barra-aparato'; b.setAttribute('role', 'button');
+  b.innerHTML = '<span><b>New scanner version available</b> · Tap here to install it from Safari</span><button type="button" aria-label="Close">✕</button>';
+  b.addEventListener('click', (ev) => {
+    if(ev.target.closest('button')){ try{ sessionStorage.setItem('scanova.aparatoCerrado', remota); }catch{} b.remove(); return; }
+    const A = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Aparato;
+    if(A && A.abrirSafari) A.abrirSafari({ url: APARATO_PAGINA }).catch(() => window.open(APARATO_PAGINA, '_blank'));
+    else window.open(APARATO_PAGINA, '_blank');
+  });
+  document.body.appendChild(b);
+}
 if(typeof document !== 'undefined'){
   document.addEventListener('DOMContentLoaded', arrancar); console.info('Scanova360', APP_BUILD);
+  window.addEventListener('load', () => setTimeout(buscarAparatoNuevo, 2500));
+  document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible') buscarAparatoNuevo(); });
   window.addEventListener('load', () => setTimeout(buscarVersionNueva, 1500));
   document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible') buscarVersionNueva(); });
 }

@@ -1541,3 +1541,8 @@ body.fv-editando .fv-asa{ visibility:hidden; }
   body:has(#pTrabajo:not([hidden])) .tope .tope-volver{ display:inline-flex; margin-right:auto; margin-left:max(0px, calc((100% - 1560px) / 2)); padding:0; align-self:center; }   /* misma orilla que el proyecto (centrado, máx. 1560) */
   body:has(#pTrabajo:not([hidden])) .ptrabajo-main > .volver{ display:none; }
 }
+
+/* El aviso de aparato nuevo (13-oct): barra azul arriba (absolute: body no se desplaza, solo main), solo dentro de la app del iPhone. */
+.barra-aparato{ position:absolute; left:12px; right:12px; top:calc(10px + env(safe-area-inset-top)); z-index:200; display:flex; align-items:center; gap:10px; padding:12px 12px 12px 16px; border-radius:14px; background:#2563eb; color:#fff; font-size:14px; line-height:1.35; box-shadow:0 10px 30px rgba(10,17,35,.28); cursor:pointer; }
+.barra-aparato span{ flex:1; }
+.barra-aparato button{ flex:0 0 auto; width:30px; height:30px; border:0; border-radius:50%; background:rgba(255,255,255,.2); color:#fff; font-size:14px; cursor:pointer; }
