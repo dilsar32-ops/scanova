@@ -1,15 +1,15 @@
 // Scanova · arranque, sesión y navegación. Las pantallas viven en index.html; lo de trabajos en trabajos.js.
-import { SUPABASE_URL, ANON_KEY, APP_BUILD } from './config.js?v=2026-10-14-10';
-import { ESQUEMA_APARATO, urlEntrarGoogle } from './google.js?v=2026-10-14-10';
-import * as trabajos from './trabajos.js?v=2026-10-14-10';
-import * as personas from './personas.js?v=2026-10-14-10';
-import * as fotos from './fotos.js?v=2026-10-14-10';
-import * as panel from './panel.js?v=2026-10-14-10';
-import * as camara from './camara.js?v=2026-10-14-10';
-import * as direccion from './direccion.js?v=2026-10-14-10';
-import * as proyecto from './proyecto.js?v=2026-10-14-10';
-import * as foto from './foto.js?v=2026-10-14-10';
-import * as editor from './editor.js?v=2026-10-14-10';
+import { SUPABASE_URL, ANON_KEY, APP_BUILD } from './config.js?v=2026-10-14-11';
+import { ESQUEMA_APARATO, urlEntrarGoogle } from './google.js?v=2026-10-14-11';
+import * as trabajos from './trabajos.js?v=2026-10-14-11';
+import * as personas from './personas.js?v=2026-10-14-11';
+import * as fotos from './fotos.js?v=2026-10-14-11';
+import * as panel from './panel.js?v=2026-10-14-11';
+import * as camara from './camara.js?v=2026-10-14-11';
+import * as direccion from './direccion.js?v=2026-10-14-11';
+import * as proyecto from './proyecto.js?v=2026-10-14-11';
+import * as foto from './foto.js?v=2026-10-14-11';
+import * as editor from './editor.js?v=2026-10-14-11';
 
 export const $ = (s, r = document) => r.querySelector(s);
 export const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -199,7 +199,7 @@ export function irA(id, desde){
   const enVentana = MODAL && (id === 'pEntrar' || id === 'pCrear' || id === 'pEspera' || id === 'pCodigo' || id === 'pClave');
   if(!enVentana){ MODAL = false; document.body.classList.remove('modal-entrar'); ocultarInicio(); }
   if(desde) pila.push(desde);
-  document.body.classList.remove('menu-abierto', 'pl-fijo');   // la página fija del plano es solo de la pestaña Floor Plan
+  document.body.classList.remove('menu-abierto', 'pl-fijo', 'dl-fijo');   // las páginas fijas (plano, cámara de Dry Logs) son solo de su pestaña
   if(id !== 'pFoto' && editor.activo()) editor.cerrar(true);
   if(id !== 'pTrabajo'){ const k = $('#cajonDetalles'); if(k){ k.hidden = true; document.body.classList.remove('con-cajon'); } }
   // Las hojas del proyecto (Edit Labels, datos del cliente, escoger cuarto) no se quedan encima de otra pantalla.

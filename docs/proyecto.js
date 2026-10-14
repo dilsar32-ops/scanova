@@ -1,14 +1,14 @@
 // Scanova · la ficha de un proyecto (diseño de Amilcar, 12 oct 2026): portada, nombre, dirección, etapa, cliente,
 // encargado y fecha; pestañas Rooms · Photos · Dry Logs · Floor Plan · Measurements · Notes · Documents · Activity.
 // Rooms = niveles (Basement, First Floor…) y sus cuartos (Kitchen…). Photos = las fotos por nivel y por cuarto.
-import { $, $$, authFetch, irA, atras, esManager, PERFIL } from './app.js?v=2026-10-14-10';
-import * as trabajos from './trabajos.js?v=2026-10-14-10';
-import * as fotos from './fotos.js?v=2026-10-14-10';
-import * as panel from './panel.js?v=2026-10-14-10';
-import * as planos from './planos.js?v=2026-10-14-10';
-import * as camara from './camara.js?v=2026-10-14-10';
-import * as detalles from './detalles.js?v=2026-10-14-10';
-import * as drylog from './drylog.js?v=2026-10-14-10';
+import { $, $$, authFetch, irA, atras, esManager, PERFIL } from './app.js?v=2026-10-14-11';
+import * as trabajos from './trabajos.js?v=2026-10-14-11';
+import * as fotos from './fotos.js?v=2026-10-14-11';
+import * as panel from './panel.js?v=2026-10-14-11';
+import * as planos from './planos.js?v=2026-10-14-11';
+import * as camara from './camara.js?v=2026-10-14-11';
+import * as detalles from './detalles.js?v=2026-10-14-11';
+import * as drylog from './drylog.js?v=2026-10-14-11';
 
 const esc = (v) => trabajos.esc(v);
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -210,6 +210,7 @@ function irTab(k){
   const b = $('#fichaTabs .ptab.on'); if(b && b.scrollIntoView) b.scrollIntoView({ block:'nearest', inline:'center' });
   pintarTodo();
   if(k === 'plano') planos.enfocar(); else document.body.classList.remove('pl-fijo');
+  if(k !== 'secado') drylog.salir();
 }
 function pintarTodo(){ pintarCuartos(); pintarFotos(); pintarNotas(); pintarActividad(); pintarPronto(); pintarPlano(); pintarDryLog(); camara.pintarCuarto(); }
 // Dry Logs (su diseño del 14-oct): se dibuja con la pestaña abierta, con los niveles y cuartos del proyecto.

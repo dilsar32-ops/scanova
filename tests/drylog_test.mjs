@@ -13,9 +13,20 @@ ok('WEB: con cuartos creados en Photos abre directo en el paso 1; sin cuartos, l
 ok('TELÉFONO: por ahora sigue igual (portada y Start), su diseño del teléfono viene aparte', DL.abreEnPaso1(false, CUA, false) === false);
 ok('si toca Back en la web, se queda en la portada (no lo regresa solo al paso 1)', DL.abreEnPaso1(true, CUA, true) === false);
 ok('WEB: la tarjeta llega al fondo de la pantalla (alto de la pantalla menos donde empieza), nunca más chica que 420', DL.altoTarjeta(786, 230, 16) === 540 && DL.altoTarjeta(500, 400, 16) === 420);
+// TELÉFONO (sus 3 diseños): cámara -> lectura detectada -> guardada + equipo
+ok('TELÉFONO: con cuartos abre directo en la cámara; sin cuartos, la portada', DL.abreEnCamara(false, CUA) === true && DL.abreEnCamara(false, []) === false && DL.abreEnCamara(true, CUA) === false);
+ok('el cuarto que sigue: en el orden de los pisos y de sus cuartos; el último no tiene siguiente', DL.siguienteCuarto(NIV, CUA, 'a').id === 'b' && DL.siguienteCuarto(NIV, CUA, 'd').id === 'e' && DL.siguienteCuarto(NIV, CUA, 'e') === null);
+ok('el número escrito: 18, 18.5, "18,5"; nada raro (letras, dos decimales, más de 3 cifras)', DL.valorDe('18') === 18 && DL.valorDe('18.5') === 18.5 && DL.valorDe('18,5') === 18.5 && DL.valorDe('abc') === null && DL.valorDe('1.25') === null && DL.valorDe('1234') === null && DL.valorDe('') === null);
+{ const g = DL.guiaEnVideo(1920, 1080, 400, 400, { x: 56, y: 113, w: 288, h: 170 });   // video ancho en un cuadro cuadrado ("cover")
+  ok('el cuadro guía se pasa bien a la foto (el video se ve recortado)', Math.abs(g.x - 571.2) < 1 && Math.abs(g.w - 777.6) < 1 && Math.abs(g.y - 305.1) < 1); }
 const js = fs.readFileSync(new URL('../docs/drylog.js', import.meta.url), 'utf8');
 ok('textos de su diseño: No dry logs yet / Start Dry Log / Step 1 of 3 / Where are you taking the reading?', ['No dry logs yet', 'Start by scanning the first meter reading for this project.', 'Start Dry Log', "You'll choose a level, room, material and measurement point next.", 'New Dry Log · Step 1 of 3', 'Where are you taking the reading?', 'First select a level, then choose a room to take a moisture reading.', '1. Select level', '2. Select room'].every(t => js.includes(t)));
 ok('Continue apagado hasta escoger el cuarto; cambiar de nivel borra el cuarto escogido', /data-dl="paso2"\$\{CUARTO \? '' : ' disabled'\}/.test(js) && /if\(NIVEL !== el\.dataset\.dlNivel\)\{ NIVEL = el\.dataset\.dlNivel; CUARTO = null; \}/.test(js));
+ok('textos de sus diseños del teléfono', ['Reading detected:', 'Confirm the number matches the meter.', 'Retake Photo', 'Save Reading', 'Reading saved for', 'Saved Reading', 'Equipment for', 'Record equipment before moving to another room.', 'Add Equipment', 'No Equipment', 'records zero for'].every(t => js.includes(t)));
+ok('el número lo lee NUESTRO lector (gratis, en el teléfono) y la persona lo puede corregir antes de guardar', /import \{ leerPantalla \} from '\.\/lector\.js/.test(js) && /id="dlValor"/.test(js) && /corregido: !!\(FOTO\.lectura && FOTO\.lectura\.valor !== valor\)/.test(js));
+ok('la foto de la lectura se guarda en Photos, en su piso y cuarto (es la prueba)', /fotos\.subirCopia\(archivo, \{ nivel_id: FOTO\.nivel, cuarto_id: FOTO\.cuarto \}\)/.test(js) && /foto_id: foto \? foto\.id : null/.test(js));
+ok('se comprueba que el servidor de verdad guardó', /if\(!filas\.length\) throw new Error/.test(js));
+ok('el botón azul de abajo toma la foto en el Dry Log (no abre la otra cámara)', /closest\('\[data-nav="capture"\]'\)/.test(js) && /e\.stopImmediatePropagation\(\)/.test(js));
 ok('cada paso tiene Back abajo', (js.match(/class="dl-atras"/g) || []).length >= 2);
 const idx = fs.readFileSync(new URL('../docs/index.html', import.meta.url), 'utf8');
 ok('los íconos de los cuartos existen en la app', ['dl-hoja', 'dl-cocina', 'dl-comedor', 'dl-sofa', 'dl-puerta', 'dl-cama', 'dl-bano', 'dl-lavar', 'dl-cuarto'].every(n => idx.includes('id="i-' + n + '"')));

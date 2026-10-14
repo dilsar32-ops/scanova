@@ -1693,3 +1693,77 @@ body.fv-editando .fv-asa{ visibility:hidden; }
   .dl-atras{ font-size:16px; }
   .dl-seguir{ min-width:190px; min-height:48px; font-size:16px; }
 }
+
+/* ===== Dry Logs en el TELÉFONO (14-oct, sus 3 diseños): cámara con Level/Room, lectura detectada, lectura guardada + equipo.
+   Sin fijar nada a la pantalla (eso falla en su iPhone): la cámara mide lo que sobra (drylog.js medirTel), como el plano. ===== */
+.dl-tel{ display:flex; flex-direction:column; gap:12px; }
+.dl-tel-cab{ display:flex; align-items:center; gap:10px; }
+.dl-tel-cab h2{ margin:0 auto 0 0; font-size:22px; font-weight:700; letter-spacing:-.01em; }
+.dl-prog{ display:flex; gap:4px; }
+.dl-prog i{ width:22px; height:4px; border-radius:99px; background:var(--line2); }
+.dl-prog i.on{ background:var(--accent); }
+.dl-prog-n{ color:var(--ink-soft); font-size:14px; white-space:nowrap; }
+.dl-tel-sel{ display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px; }
+.dl-caja{ position:relative; display:flex; align-items:center; gap:10px; min-height:58px; padding:8px 12px; background:var(--card); border:1px solid var(--line2); border-radius:12px; cursor:pointer; }
+.dl-caja .dl-caja-ic{ width:24px; height:24px; color:var(--ink); stroke-width:1.5; }
+.dl-caja-txt{ display:flex; flex-direction:column; min-width:0; flex:1; }
+.dl-caja-txt small{ color:var(--ink-soft); font-size:12px; }
+.dl-caja-txt b{ font-size:16px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.dl-caja .dl-caja-chev{ width:18px; height:18px; color:var(--ink-soft); }
+.dl-caja select{ position:absolute; inset:0; width:100%; height:100%; opacity:0; font-size:16px; cursor:pointer; }
+.dl-tel-aviso{ display:flex; align-items:center; gap:8px; margin:0; padding:10px 12px; border-radius:10px; background:var(--accent-soft); color:var(--accent); font-size:14px; font-weight:600; }
+.dl-tel-aviso .ic{ width:18px; height:18px; flex:none; }
+.dl-visor{ position:relative; height:360px; border-radius:14px; overflow:hidden; background:#000; }
+.dl-visor video, .dl-visor img{ display:block; width:100%; height:100%; object-fit:cover; }
+.dl-visor-foto img{ object-fit:contain; }
+.dl-visor-tira{ height:110px; flex:none; }
+/* El cuadro guía: donde se pone la pantallita del medidor (lo de adentro es lo que se lee). */
+.dl-guia{ position:absolute; left:50%; top:46%; width:72%; aspect-ratio:1.7; max-height:58%; transform:translate(-50%,-50%); border-radius:12px; box-shadow:0 0 0 2000px rgba(0,0,0,.35); pointer-events:none; }
+.dl-guia i{ position:absolute; width:26px; height:26px; border:3px solid #fff; }
+.dl-guia i:nth-child(1){ left:-2px; top:-2px; border-right:0; border-bottom:0; border-radius:12px 0 0 0; }
+.dl-guia i:nth-child(2){ right:-2px; top:-2px; border-left:0; border-bottom:0; border-radius:0 12px 0 0; }
+.dl-guia i:nth-child(3){ left:-2px; bottom:-2px; border-right:0; border-top:0; border-radius:0 0 0 12px; }
+.dl-guia i:nth-child(4){ right:-2px; bottom:-2px; border-left:0; border-top:0; border-radius:0 0 12px 0; }
+.dl-visor-pista{ position:absolute; left:12px; right:12px; bottom:12px; margin:0; text-align:center; color:#fff; font-size:13px; text-shadow:0 1px 3px rgba(0,0,0,.8); }
+.dl-visor-aviso{ position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; padding:20px; text-align:center; color:#fff; background:rgba(0,0,0,.75); }
+.dl-visor-aviso[hidden]{ display:none; }
+.dl-visor-aviso p{ margin:0; font-size:14px; line-height:1.45; }
+.dl-leido{ display:flex; align-items:center; gap:16px; padding:16px 18px; border-radius:14px; background:var(--accent-soft); }
+.dl-leido-ic{ flex:none; width:60px; height:60px; border-radius:12px; display:grid; place-items:center; background:var(--card); border:1px solid var(--line2); }
+.dl-leido-ic .ic{ width:34px; height:34px; color:var(--accent); stroke-width:1.6; }
+.dl-leido-txt{ display:flex; flex-direction:column; min-width:0; }
+.dl-leido-txt small{ color:var(--ink-soft); font-size:15px; }
+.dl-num{ display:flex; align-items:baseline; gap:2px; }
+.dl-num input{ width:1.6em; min-width:0; font:inherit; font-size:46px; font-weight:800; letter-spacing:-.02em; line-height:1.1; color:var(--ink); background:transparent; border:0; border-bottom:2px dashed transparent; padding:0; }
+.dl-num input:focus{ outline:none; border-bottom-color:var(--accent); }
+.dl-leido.sin-leer .dl-num input{ border-bottom-color:var(--line2); }
+.dl-num span{ font-size:40px; font-weight:800; }
+.dl-mat{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.dl-mini{ display:flex; flex-direction:column; gap:4px; }
+.dl-mini small{ color:var(--ink-soft); font-size:12px; font-weight:600; }
+.dl-mini select, .dl-mini input{ height:44px; font:inherit; font-size:16px; color:var(--ink); background:var(--card); border:1px solid var(--line2); border-radius:10px; padding:0 10px; }
+.dl-confirma{ margin:0; color:var(--ink-soft); font-size:15px; }
+.dl-botones{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.dl-botones .btn, .dl-equipo .btn{ min-height:50px; font-size:16px; }
+.dl-listo{ display:flex; align-items:center; gap:12px; padding:14px 16px; border-radius:14px; background:var(--accent-soft); color:var(--accent); }
+.dl-listo .ic{ flex:none; width:30px; height:30px; padding:6px; border-radius:50%; background:var(--accent); color:#fff; stroke-width:2.6; }
+.dl-listo b{ font-size:17px; }
+.dl-tarjeta{ padding:14px; border:1px solid var(--line2); border-radius:14px; background:var(--card); }
+.dl-tarjeta > small{ display:block; color:var(--ink-soft); font-size:14px; margin-bottom:8px; }
+.dl-tarjeta-c{ display:flex; gap:14px; align-items:center; }
+.dl-tarjeta-c img{ width:96px; height:96px; flex:none; object-fit:cover; border-radius:10px; background:#000; }
+.dl-tarjeta-c b{ display:block; font-size:16px; }
+.dl-tarjeta-n{ display:block; font-size:36px; font-weight:800; letter-spacing:-.02em; line-height:1.15; }
+.dl-tarjeta-c small{ display:flex; align-items:center; gap:6px; color:var(--ink-soft); font-size:14px; }
+.dl-tarjeta-c small .ic{ width:16px; height:16px; }
+.dl-equipo{ display:flex; flex-direction:column; gap:10px; padding:16px; border-radius:14px; background:var(--accent-soft); }
+.dl-equipo-cab{ display:flex; gap:12px; align-items:center; }
+.dl-equipo-ic{ flex:none; width:52px; height:52px; border-radius:12px; display:grid; place-items:center; background:var(--card); border:1px solid var(--line2); }
+.dl-equipo-ic .ic{ width:28px; height:28px; color:var(--accent); }
+.dl-equipo-cab b{ display:block; font-size:17px; }
+.dl-equipo-cab small{ display:block; color:var(--ink-soft); font-size:14px; line-height:1.35; }
+.dl-equipo-nota{ text-align:center; color:var(--ink-soft); font-size:13px; line-height:1.4; }
+@media (max-width:899px){
+  body.dl-fijo #main{ overflow:hidden; padding-bottom:10px; }
+  body.dl-fijo #fichaAviso:empty{ display:none; }
+}
