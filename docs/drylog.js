@@ -6,11 +6,12 @@
 // TELÉFONO (su diseño del 14-oct): Dry Logs abre con la cámara prendida. Arriba "Dry Logs" y en qué cuarto va
 // (Room 1 of 4), luego Level y Room para escoger dónde, y la cámara llena lo que sobra. El botón azul de cámara de
 // abajo (el de siempre) toma la foto directo. Lo que sigue después de la foto espera su siguiente diseño.
-import { $, $$, authFetch, registrarAtras, preguntar } from './app.js?v=2026-10-14-35';
-import { RESTRICCIONES, errorCamara, puedeCamaraPropia } from './camara.js?v=2026-10-14-35';
-import * as fotos from './fotos.js?v=2026-10-14-35';
-import { leerPantalla } from './lector.js?v=2026-10-14-35';
-import * as R from './registro.js?v=2026-10-14-35';
+import { $, $$, authFetch, registrarAtras, preguntar } from './app.js?v=2026-10-14-44';
+import { RESTRICCIONES, errorCamara, puedeCamaraPropia } from './camara.js?v=2026-10-14-44';
+import * as fotos from './fotos.js?v=2026-10-14-44';
+import { leerPantalla } from './lector.js?v=2026-10-14-44';
+import * as R from './registro.js?v=2026-10-14-44';
+import { APP_BUILD } from './config.js?v=2026-10-14-44';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -102,7 +103,7 @@ function pintarAqui(){
     const r = recorrido(), c = r.find(x => !R.lecturasDelDia(LECT, x.id, HOY()).length) || r[0];
     if(c){ NIVEL = c.nivel_id; CUARTO = c.id; AUTO = true; }
   }
-  if(PANTALLA === 'cam' || PANTALLA === 'guardado'){
+  if(PANTALLA === 'cam'){
     if(!NIVEL || !cuartosDeNivel(CUARTOS, NIVEL).length) NIVEL = nivelInicial(NIVELES, CUARTOS);
     CUARTO = cuartoInicial(CUARTOS, NIVEL, CUARTO);
     // La cámara ya está en pantalla: solo se repintan Level y Room (volver a dibujar todo apagaría la imagen).
@@ -110,18 +111,15 @@ function pintarAqui(){
   }
   // Escribiendo el número (pantalla 2): no se vuelve a dibujar encima de lo que está escribiendo.
   if(PANTALLA === 'lectura' && c.dataset.dlPantalla === 'lectura' && c.querySelector('#dlValor')) return;
-  if(PANTALLA !== 'cam' && PANTALLA !== 'guardado') apagarCam();
+  if(PANTALLA !== 'cam') apagarCam();
   c.dataset.dlPantalla = PANTALLA;
   c.innerHTML = PANTALLA === 'paso1' ? paso1Html() : PANTALLA === 'paso2' ? paso2Html() : PANTALLA === 'paso3' ? paso3Html() : PANTALLA === 'cam' ? camHtml() : PANTALLA === 'lectura' ? lecturaHtml() : PANTALLA === 'guardado' ? guardadoHtml() : PANTALLA === 'equipo' ? equipoHtml() : PANTALLA === 'dia' ? diaHtml() : PANTALLA === 'registro' ? registroHtml() : vacioHtml();
   if(PANTALLA === 'cam'){ medirTel(); encenderCam(); }
   else if(PANTALLA === 'lectura') medirTel();
-  else if(PANTALLA === 'guardado'){
-    document.body.classList.remove('dl-fijo'); encenderCam();
-    // La cabecera del cliente se queda a la vista (su pedido del 14-oct); se baja con el dedo para ver el equipo.
-    const m = $('#main'); if(m && !web) m.scrollTop = 0;
-  }
+  else if((PANTALLA === 'guardado' || PANTALLA === 'equipo') && !web) requestAnimationFrame(medirQuieta);
   else document.body.classList.remove('dl-fijo');
   ajustarAlto();
+  pintarBarra();
 }
 // WEB (su pedido del 14-oct, "debe utilizar toda la pantalla"): la tarjeta del paso llega hasta abajo de la
 // pantalla y Back / Continue quedan al pie. Se mide dentro de #main (lo que se desplaza en la computadora).
@@ -259,7 +257,6 @@ function camHtml(){
     ${antesHtml()}
     <div class="dl-visor"><video id="dlVideo" playsinline muted autoplay></video>
       <div class="dl-guia" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
-      <button type="button" class="dl-saltar" data-dl-saltar>Skip room${IC('chev-der')}</button>
       <div class="dl-visor-aviso" id="dlVisorAviso" hidden><p id="dlVisorTxt"></p><button type="button" class="btn btn-outline btn-chico" data-dl-cam="otra">Try again</button><button type="button" class="btn btn-outline btn-chico" data-dl-cam="telefono">Use the phone camera</button></div>
       <p class="dl-visor-pista">Put the meter screen inside the box, then tap the blue camera button</p></div>
   </div>`;
@@ -311,7 +308,7 @@ function lecturaHtml(){
       <div class="dl-tel-sel">${selectoresHtml()}</div>
       <h3 class="dl-lec-t">Scan ${esc(cuarto || 'this room')}</h3>
       <p class="dl-lec-sub">Point the camera at your moisture meter and take a photo.</p>
-      <div class="dl-visor dl-visor-foto">${FOTO ? `<img src="${FOTO.url}" alt="Meter reading photo">` : ''}<button type="button" class="dl-retomar" data-dl-cam="otra-foto">${IC('girar-der')}Retake</button></div>
+      <div class="dl-visor dl-visor-foto">${FOTO ? `<img src="${FOTO.url}" alt="Meter reading photo">` : ''}</div>
       <div class="dl-det${r ? '' : ' sin'}">
         <span class="dl-det-ic">${r ? IC('check') : '!'}</span>
         <div class="dl-det-txt"><b>${r ? 'Reading detected' : 'Type the reading'}</b>${compararHtml(valor) || ''}<small class="dl-det-sub">${r ? 'Moisture meter value captured successfully.' : 'Could not read the meter. Type the number you see.'}</small></div>
@@ -339,8 +336,7 @@ function accionesLecturaHtml(){
   return `<div class="dl-mat-sel">
       <button type="button" class="dl-mat-bar" data-dl-mat-abrir><span class="dl-mat-val">${esc(MATERIAL || 'Choose material…')}</span>${IC('chev')}</button>${sel}</div>
     ${UBIC ? `<p class="dl-punto-txt">${IC('dl-leer')}Same point as last visit: <b>${esc(R.nombrePunto({ material: MATERIAL, ubicacion: UBIC }))}</b></p>` : ''}
-    <p class="aviso" id="dlAviso"></p>
-    <div class="dl-botones"><button type="button" class="btn btn-outline" data-dl-siguiente>${IC('camara')}Take next reading</button><button type="button" class="btn btn-accent" data-dl-guardar>Continue</button></div>`;
+    <p class="aviso" id="dlAviso"></p>`;   // su diseño D: Take next reading = la cámara de abajo; Retake y Continue en la barra
 }
 // La rueda: el material del centro es el escogido; al deslizar se resalta el que queda en medio.
 function centroRueda(){
@@ -368,40 +364,51 @@ function tendGuardada(g){
   const ant = R.lecturaAnterior(LECT, g.cuarto_id, g.material, g.ubicacion, HOY()), t = ant && R.tendencia(ant.valor, Number(g.texto));
   return t ? ` <span class="dl-tend ${t.tipo}">${esc(t.texto)} from ${esc(R.fechaCorta(ant.dia))}</span>` : '';
 }
-// Otro punto en el mismo cuarto: el que falta de la visita anterior, o uno nuevo.
-function otroPuntoHtml(g){
-  const cuarto = g ? g.cuarto_id : CUARTO, pend = R.puntosPendientes(LECT, cuarto, HOY());
-  return pend.length
-    ? `<button type="button" class="dl-otro dl-otro-pend" data-dl-otro>${IC('camara')}<span>Next point: <b>${esc(pend[0].nombre)}</b><small>${esc(fmtValor(pend[0].valor))}% last time${pend.length > 1 ? ' · ' + (pend.length - 1) + ' more' : ''}</small></span>${IC('chev-der')}</button>`
-    : `<button type="button" class="dl-otro" data-dl-otro>${IC('mas-circulo')}<span>Take another reading here</span>${IC('chev-der')}</button>`;
-}
+// Su diseño (14-oct): al tocar Continue sale esta pantalla. Arriba la lectura que quedó guardada (verde, con la foto
+// del medidor) y abajo el equipo del cuarto: Add Equipment (abre la rueda del equipo) o No Equipment (cero y sigue).
+const horaCorta = (iso) => { const d = new Date(iso || Date.now()); return isNaN(d) ? '' : d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }); };
 function guardadoHtml(){
-  const g = GUARDADA, cuarto = g ? g.cuarto_nombre : '';
-  const sig = siguienteCuarto(NIVELES, CUARTOS, g ? g.cuarto_id : CUARTO, recorrido());
-  return `<div class="dl-tel">
-    <div class="dl-visor dl-visor-tira"><video id="dlVideo" playsinline muted autoplay></video>
-      <div class="dl-visor-aviso" id="dlVisorAviso" hidden><p id="dlVisorTxt"></p></div></div>
+  const g = GUARDADA && GUARDADA.cuarto_id === CUARTO ? GUARDADA : null;
+  const cuarto = nombreDe(CUARTOS, CUARTO) || 'this room';
+  const sig = siguienteCuarto(NIVELES, CUARTOS, CUARTO, recorrido());
+  const lineas = g ? [[g.material, g.ubicacion].filter(Boolean).join(' '), R.fechaLarga(g.dia), horaCorta(g.created_at)].filter(Boolean) : [];
+  return `<div class="dl-tel dl-listo2">
+    <div class="dl-tel-cab"><h2>Dry Logs</h2>${barritaCuartos()}</div>
     <div class="dl-tel-sel">${selectoresHtml()}</div>
-    ${g ? `<div class="dl-listo">${IC('check')}<b>Reading saved for ${esc(cuarto)}</b></div>
-    <div class="dl-tarjeta"><small>Saved Reading</small>
-      <div class="dl-tarjeta-c"><img src="${g.url}" alt="">
-        <div><b>${esc([g.material, g.ubicacion].filter(Boolean).join(' • '))}</b><span class="dl-tarjeta-n">${esc(g.texto)}%</span><small>${IC('calendario')}Today${tendGuardada(g)}</small></div></div></div>` : ''}
-    ${otroPuntoHtml(g)}
-    <div class="dl-equipo">
-      <div class="dl-equipo-cab"><span class="dl-equipo-ic">${IC('dl-herramientas')}</span><div><b>Equipment for ${esc(cuarto || nombreDe(CUARTOS, CUARTO))}</b><small>Record equipment before moving to another room.</small></div></div>
-      <button type="button" class="btn btn-accent" data-dl-equipo="si">Add Equipment</button>
-      <button type="button" class="btn btn-outline" data-dl-equipo="no">No Equipment</button>
-      <small class="dl-equipo-nota">No Equipment records zero for ${esc(cuarto || 'this room')}${sig ? `, then advances to ${esc(sig.nombre)}` : ''}.</small>
+    <div class="dl-escan"><h3>Scan Room</h3><p>Point the camera at your moisture meter and take a photo.</p></div>
+    ${g ? `<div class="card dl-leida"><div class="dl-leida-c">
+      <span class="dl-leida-ok">${IC('check')}</span>
+      <b class="dl-leida-n">${esc(g.texto)}%</b>
+      <span class="dl-leida-txt">${lineas.map(t => `<span>${esc(t)}</span>`).join('')}</span>
+      ${g.url ? `<img src="${g.url}" alt="Meter photo">` : ''}
+    </div></div>` : ''}
+    <div class="card dl-eq0">
+      <h3>Equipment for ${esc(cuarto)}</h3>
+      <p>Record what is in this room before moving on.</p>
+      <small>Choosing No Equipment will record zero equipment for ${esc(cuarto)} and then ${sig ? 'advance to the next room' : 'show today’s summary'}.</small>
       <p class="aviso" id="dlAviso"></p>
     </div>
   </div>`;
+}
+function abrirListo(){
+  if(GUARDADA){ NIVEL = GUARDADA.nivel_id || NIVEL; CUARTO = GUARDADA.cuarto_id || CUARTO; }
+  PANTALLA = 'guardado'; pintarAqui();
+  const m = $('#main'); if(m && !esCompu()) m.scrollTop = 0;
 }
 // ---------- TELÉFONO: el equipo del cuarto (su diseño del 14-oct, paso 4 de 5) ----------
 // Una fila por equipo con − y +. Los números salen con lo último que se anotó en ese cuarto (el equipo casi siempre
 // se queda de un día a otro: solo se cambia lo que se movió). "Add equipment type" agrega otro tipo y se recuerda
 // en este teléfono. "Save Equipment & Next Room" guarda y pasa al siguiente cuarto con la cámara.
-export const EQUIPOS_DL = [['Fans / Air Movers', 'eq-ventilador'], ['Dehumidifiers', 'eq-deshum'], ['HEPA Air Scrubber', 'eq-hepa'],
-  ['Dry Mat', 'eq-tapete'], ['Air Duct', 'eq-ducto'], ['Heater', 'eq-calentador'], ['Poles', 'eq-postes']];
+export const EQUIPOS_DL = [['Fans / Air Movers', 'eq-ventilador'], ['Dehumidifiers', 'eq-deshum'], ['Drip Pan', 'eq-bandeja'], ['HEPA Air Scrubber', 'eq-hepa'],
+  ['Dry Mat', 'eq-tapete'], ['Air Duct', 'eq-ducto'], ['Heater', 'eq-calentador'], ['Poles', 'eq-postes'],
+  // Su pedido (14-oct): más equipo de agua dentro de la lista (Water Bucket viene en su diseño).
+  ['Water Bucket', 'eq-cubeta'], ['Desiccant Dehumidifier', 'eq-desecante'], ['Wall Cavity Dryer', 'eq-pared'], ['Generator', 'eq-generador'], ['Hydroxyl Generator', 'eq-hidroxilo']];
+// En la rueda del teléfono el nombre va como en su diseño ("Dehumidifier"); lo que se guarda no cambia (el historial
+// y los días de equipo siguen juntos).
+const ETIQUETA_EQ = { 'Dehumidifiers': 'Dehumidifier', 'Drip Pan': 'Drip Pans', 'Air Duct': 'Air Ducts', 'Heater': 'Heaters' };
+// Su pedido (14-oct): el equipo se enseña con dibujos modernos a color (img/eq-*.svg), no con los íconos de línea.
+const DIBUJOS_EQ = new Set(['eq-ventilador', 'eq-deshum', 'eq-bandeja', 'eq-hepa', 'eq-tapete', 'eq-ducto', 'eq-calentador', 'eq-postes', 'eq-cubeta', 'eq-desecante', 'eq-pared', 'eq-generador', 'eq-hidroxilo', 'eq-otro']);
+const dibujoEq = (ic) => DIBUJOS_EQ.has(ic) ? `<img class="dl-eq-img" src="img/${ic}.svg?v=${APP_BUILD}" alt="" width="40" height="40">` : IC(ic, 'dl-eq-ic');
 const CLAVE_TIPOS = 'scanova.dl.tiposEquipo';
 const tiposPropios = () => { try{ const a = JSON.parse(localStorage.getItem(CLAVE_TIPOS) || '[]'); return Array.isArray(a) ? a.filter(x => typeof x === 'string' && x.trim()) : []; }catch{ return []; } };
 // Lo último que se anotó en un cuarto: el día más reciente, y de ese día la anotación más nueva de cada equipo.
@@ -435,31 +442,73 @@ function barritaCuartos(){
   return `<button type="button" class="dl-prog-btn" data-dl-ir="dia" aria-label="Day ${d} summary"><span class="dl-prog dl-prog-cuartos${de > 8 ? ' muchos' : de > 4 ? ' medio' : ''}" role="img" aria-label="${cuarto}">${Array.from({ length: de }, (_, i) => `<i${i < n ? ' class="on"' : ''}></i>`).join('')}</span><span class="dl-prog-n">${d > 1 ? 'Day ' + d + ' · ' : ''}${cuarto}</span></button>`;
 }
 // Las filas del equipo (teléfono y computadora): − cantidad +, y al final "Add equipment type".
-function equipoFilasHtml(){
-  return tiposEq().map(([t, ic], i) => { const n = EQ.cuentas[t] || 0;
-    return `<div class="dl-eq-fila${n ? ' con' : ''}">${IC(ic, 'dl-eq-ic')}<span class="dl-eq-n">${esc(t)}</span>
+function equipoFilaHtml(t, ic, i, tel){
+  const n = EQ.cuentas[t] || 0;
+  return `<div class="dl-eq-fila${n ? ' con' : ''}">${dibujoEq(ic)}<span class="dl-eq-n">${esc(tel ? (ETIQUETA_EQ[t] || t) : t)}</span>
       <button type="button" class="dl-eq-b dl-eq-menos" data-eq-menos="${i}" aria-label="One less ${esc(t)}"${n ? '' : ' disabled'}>${IC('menos')}</button>
       <b class="dl-eq-c" data-eq-c="${i}">${n}</b>
-      <button type="button" class="dl-eq-b dl-eq-mas" data-eq-mas="${i}" aria-label="One more ${esc(t)}">${IC('mas')}</button></div>`; }).join('') +
-    (EQ.agregando
+      <button type="button" class="dl-eq-b dl-eq-mas" data-eq-mas="${i}" aria-label="One more ${esc(t)}">${IC('mas')}</button></div>`;
+}
+function equipoFilasHtml(){ return tiposEq().map(([t, ic], i) => equipoFilaHtml(t, ic, i, false)).join('') + equipoAgregarHtml(); }
+function equipoAgregarHtml(){
+  return (EQ.agregando
       ? `<div class="dl-eq-fila dl-eq-nuevo">${IC('eq-otro', 'dl-eq-ic')}<input id="dlEqNuevo" type="text" maxlength="60" placeholder="Equipment name" autocomplete="off"><button type="button" class="btn btn-accent btn-chico" data-eq-nuevo="si">Add</button><button type="button" class="btn btn-outline btn-chico" data-eq-nuevo="no">Cancel</button></div>`
       : `<button type="button" class="dl-eq-fila dl-eq-agregar" data-eq-agregar>${IC('mas-circulo', 'dl-eq-ic')}<span class="dl-eq-n">Add equipment type</span>${IC('chev-der', 'dl-eq-chev')}</button>`);
 }
 function equipoHtml(){
-  const cuarto = nombreDe(CUARTOS, CUARTO);
-  // Su diseño (14-oct): arriba "Room 1 of 4" (una rayita por cuarto) y el título es solo "Equipment" con su raya azul;
-  // el cuarto ya lo dice la caja Room.
-  // Su pedido (14-oct): arriba, donde dice "Dry Logs", aquí dice "Equipment" (no dos títulos). Al guardar vuelve a "Dry Logs".
-  return `<div class="dl-tel"><div class="dl-tel-cab"><h2 aria-label="Equipment in ${esc(cuarto || 'this room')}">Equipment</h2>${barritaCuartos()}</div>
-    <div class="card dl-eq">
-      <div class="dl-tel-sel">${selectoresHtml()}</div>
-      ${GUARDADA && GUARDADA.cuarto_id === CUARTO ? (() => { const pend = R.puntosPendientes(LECT, CUARTO, HOY());
-        return `<div class="dl-eq-ok">${IC('check')}<span>Saved <b>${esc(GUARDADA.texto)}%</b> · ${esc(R.nombrePunto(GUARDADA))}${tendGuardada(GUARDADA)}</span>${pend.length ? '<button type="button" class="dl-eq-otro pend" data-dl-otro>Next point</button>' : ''}</div>${pend.length ? `<p class="dl-eq-nota">Still to measure here: ${esc(pend.map(p => p.nombre).join(', '))}</p>` : ''}`; })() : ''}
-      ${EQ.previo && EQ.previo < HOY() ? `<p class="dl-eq-nota">On site since the last visit (${esc(R.fechaCorta(EQ.previo))}). Change only what moved.</p>` : ''}
-      <div class="dl-eq-lista">${equipoFilasHtml()}</div>
+  const cuarto = nombreDe(CUARTOS, CUARTO) || 'this room';
+  // Su diseño (14-oct, después de "Add Equipment"): arriba "Dry Logs", Level y Room; en la tarjeta "Equipment in …" con la
+  // lista del equipo que sube y baja (con su barrita a la derecha) y "Add equipment type"; Save va abajo, fuera de la tarjeta.
+  return `<div class="dl-tel"><div class="dl-tel-cab"><h2>Dry Logs</h2>${barritaCuartos()}</div>
+    <div class="dl-tel-sel">${selectoresHtml()}</div>
+    <div class="card dl-eq2">
+      <h3 class="dl-eq2-t"><span>Equipment in ${esc(cuarto)}</span>${EQ_FOTOS[CUARTO] ? `<small class="dl-eq-fotos">${IC('camara')}${EQ_FOTOS[CUARTO]}</small>` : ''}</h3>
+      <div class="dl-eq-lista dl-eq-rueda" role="group" aria-label="Equipment in ${esc(cuarto)}">${tiposEq().map(([t, ic], i) => equipoFilaHtml(t, ic, i, true)).join('')}</div>
+      <span class="dl-eq-barra" aria-hidden="true"><i></i></span>
+      ${EQ.agregando ? equipoAgregarHtml() : ''}
       <p class="aviso" id="dlAviso"></p>
-      <button type="button" class="btn btn-accent btn-block dl-eq-guardar" data-eq-guardar>Save Equipment &amp; Next Room</button>
-    </div></div>`;
+    </div>
+  </div>`;
+}
+// La lista del equipo llena lo que queda de la pantalla hasta Save (como su diseño); si no caben todos, se desliza.
+function medirEq(sobra){
+  const r = $('#panel-secado .dl-eq-rueda'); if(!r) return;
+  const filas = r.querySelectorAll('.dl-eq-fila'); if(!filas.length) return;
+  r.style.height = '';
+  const h = filas[0].getBoundingClientRect().height, gap = parseFloat(getComputedStyle(r).rowGap) || 0;
+  const natural = r.getBoundingClientRect().height, minimo = Math.min(natural, 2.5 * h + 2 * gap);
+  const s = sobra();
+  if(s > 0) r.style.height = Math.max(minimo, natural - s) + 'px';
+  r.scrollTop = 0;   // abre arriba (Fans / Air Movers primero)
+  marcarEqRueda(r);
+}
+// Su pedido (14-oct): estas pantallas también se quedan QUIETAS, en una sola vista y sin deslizar (como la cámara).
+// Si no cabe (teléfono más chico que el suyo), se aprieta; si ni así, que se pueda deslizar.
+function medirQuieta(){
+  const m = $('#main'), panel = $('#panel-secado .dl-tel'); if(!m || !panel || esCompu()) return;
+  if(PANTALLA === 'equipo' && EQ.agregando){ document.body.classList.remove('dl-fijo'); return; }   // con el teclado abierto se deja deslizar
+  document.body.classList.add('dl-fijo'); m.scrollTop = 0;
+  const sobra = () => panel.lastElementChild.getBoundingClientRect().bottom + 4 - (m.getBoundingClientRect().top + m.clientHeight - (parseFloat(getComputedStyle(m).paddingBottom) || 0));
+  if(PANTALLA === 'equipo') medirEq(sobra);
+  else{
+    panel.classList.remove('apretado', 'muy-apretado');
+    if(sobra() > 0) panel.classList.add('apretado');
+    if(sobra() > 0) panel.classList.add('muy-apretado');
+  }
+  if(sobra() > 0) document.body.classList.remove('dl-fijo');
+  m.scrollTop = 0;
+}
+// La barrita de la derecha (su diseño): dice cuánto falta de la lista y dónde va.
+function marcarEqRueda(r){
+  r = r || $('#panel-secado .dl-eq-rueda'); if(!r) return;
+  const card = r.closest('.dl-eq2'), barra = card && card.querySelector('.dl-eq-barra'), t = card && card.querySelector('.dl-eq2-t');
+  if(!barra) return;
+  const sobra = r.scrollHeight - r.clientHeight;
+  barra.hidden = sobra < 2; if(barra.hidden) return;
+  const arriba = t ? t.offsetTop : r.offsetTop, alto = r.offsetTop + r.offsetHeight - arriba;
+  barra.style.top = arriba + 'px'; barra.style.height = alto + 'px';
+  const th = Math.max(28, alto * r.clientHeight / r.scrollHeight), dedo = barra.firstElementChild;
+  dedo.style.height = th + 'px'; dedo.style.transform = 'translateY(' + ((alto - th) * Math.min(1, r.scrollTop / sobra)) + 'px)';
 }
 // Lo que hay en el cuarto: lo último contado (hoy, o la visita anterior: el equipo se queda de un día a otro).
 function cargarEquipo(){
@@ -476,15 +525,17 @@ function abrirEquipo(){
 function avanzar(nombre, hecho){
   const sig = siguienteCuarto(NIVELES, CUARTOS, CUARTO, recorrido());
   GUARDADA = null;
-  if(sig){ NIVEL = sig.nivel_id; CUARTO = sig.id; AVISO_TEL = hecho + ' Next: ' + sig.nombre + '.'; PANTALLA = 'cam'; }
-  else { AVISO_TEL = hecho; PANTALLA = esCompu() ? 'registro' : 'dia'; }   // era el último cuarto: el resumen del día (en la computadora, el registro)
+  // En el teléfono no se avisa (su pedido del 14-oct: el letrero empujaba la cámara; arriba ya dice el cuarto y "Room N of M").
+  const aviso = esCompu() ? hecho : '';
+  if(sig){ NIVEL = sig.nivel_id; CUARTO = sig.id; AVISO_TEL = aviso && aviso + ' Next: ' + sig.nombre + '.'; PANTALLA = 'cam'; }
+  else { AVISO_TEL = aviso; PANTALLA = esCompu() ? 'registro' : 'dia'; }   // era el último cuarto: el resumen del día (en la computadora, el registro)
   pintarAqui();
   const m = $('#main'); if(m && PANTALLA === 'dia') m.scrollTop = 0;
 }
-async function guardarEquipo(){
+async function guardarEquipo(fin){
   if(OCUPADO_TEL || EQ.cargando || !CUARTO) return;
   const nombre = nombreDe(CUARTOS, CUARTO), cuentas = { ...EQ.cuentas };
-  OCUPADO_TEL = true; const b = $('[data-eq-guardar]'); if(b){ b.disabled = true; b.textContent = 'Saving…'; }
+  OCUPADO_TEL = true; const b = $('[data-eq-guardar]'), antes = b ? b.innerHTML : ''; if(b){ b.disabled = true; b.textContent = 'Saving…'; }
   try{
     const base = { trabajo_id: T.id, dia: hoyLocal(), nivel_id: NIVEL || null, cuarto_id: CUARTO, cuarto_nombre: nombre || null };
     const filas = filasEquipo(cuentas).map(f => ({ ...base, ...f }));
@@ -499,9 +550,11 @@ async function guardarEquipo(){
     if(desde) await authFetch('/rest/v1/fotos_drylog_equipos?trabajo_id=eq.' + encodeURIComponent(T.id) + '&cuarto_id=eq.' + encodeURIComponent(CUARTO) + '&dia=eq.' + base.dia + '&created_at=lt.' + encodeURIComponent(desde), { method: 'DELETE' }).catch(() => null);
     EQUI = EQUI.filter(f => !(f.cuarto_id === CUARTO && f.dia === base.dia)).concat(vuelta);
     const txt = resumenEquipo(cuentas);
+    if(fin) return true;
     avanzar(nombre, txt ? 'Equipment saved for ' + nombre + ': ' + txt + '.' : 'No equipment in ' + nombre + '.');
-  }catch(e){ avisarTel('Not saved: ' + (e.message || e)); }
-  finally{ OCUPADO_TEL = false; const b2 = $('[data-eq-guardar]'); if(b2){ b2.disabled = false; b2.innerHTML = 'Save Equipment &amp; Next Room'; } }
+    return true;
+  }catch(e){ avisarTel('Not saved: ' + (e.message || e)); return false; }
+  finally{ OCUPADO_TEL = false; const b2 = $('[data-eq-guardar]'); if(b2){ b2.disabled = false; b2.innerHTML = antes || 'Save Equipment &amp; Next Room'; } }
 }
 function cambiarEq(i, d){
   const t = (tiposEq()[i] || [])[0]; if(!t) return;
@@ -517,15 +570,16 @@ function agregarTipo(){
   if(!ya){ const l = tiposPropios(); l.push(t); try{ localStorage.setItem(CLAVE_TIPOS, JSON.stringify(l.slice(-20))); }catch{} }
   const nombre = ya ? ya[0] : t; EQ.cuentas[nombre] = Math.max(1, EQ.cuentas[nombre] || 0);
   EQ.agregando = false; pintarAqui();
+  const r = $('#panel-secado .dl-eq-rueda'); if(r) requestAnimationFrame(() => { r.scrollTop = r.scrollHeight; marcarEqRueda(r); });
 }
 // El Back de la barra de abajo (su pedido del 14-oct): dentro del Dry Log del teléfono regresa un paso.
 function atrasTel(){
   const c = caja(); if(!c || c.closest('[hidden]') || esCompu()) return false;
   if(PANTALLA === 'lectura'){ PANTALLA = 'cam'; AVISO_TEL = ''; pintarAqui(); return true; }
   if(PANTALLA === 'guardado'){ PANTALLA = 'cam'; pintarAqui(); return true; }
-  if(PANTALLA === 'equipo'){ PANTALLA = 'cam'; AVISO_TEL = ''; pintarAqui(); return true; }
+  if(PANTALLA === 'equipo'){ PANTALLA = GUARDADA && GUARDADA.cuarto_id === CUARTO ? 'guardado' : 'cam'; AVISO_TEL = ''; pintarAqui(); return true; }
   if(PANTALLA === 'dia'){ PANTALLA = 'cam'; AVISO_TEL = ''; pintarAqui(); return true; }
-  if(PANTALLA === 'registro'){ PANTALLA = 'dia'; pintarAqui(); return true; }
+  if(PANTALLA === 'registro'){ PANTALLA = 'dia'; pintarAqui(); const m = $('#main'); if(m) m.scrollTop = 0; return true; }
   return false;
 }
 // ---------- TELÉFONO: el resumen del día (al terminar el último cuarto, o tocando "Room X of N") ----------
@@ -654,7 +708,7 @@ async function encenderCam(){
   try{
     const s = await navigator.mediaDevices.getUserMedia(RESTRICCIONES);
     const v2 = $('#dlVideo');
-    if(!v2 || !v2.offsetParent || (PANTALLA !== 'cam' && PANTALLA !== 'guardado')){ s.getTracks().forEach(t => t.stop()); return; }   // ya se fue de la pantalla
+    if(!v2 || !v2.offsetParent || PANTALLA !== 'cam'){ s.getTracks().forEach(t => t.stop()); return; }   // ya se fue de la pantalla
     STREAM = s; v2.srcObject = s; await v2.play().catch(() => {});
     // Si se va de la pestaña o de la pantalla, la cámara se apaga sola (no se queda prendida gastando batería).
     if(!VIGIA) VIGIA = setInterval(() => { const x = $('#dlVideo'); if(!x || !x.offsetParent || document.hidden) apagarCam(); }, 1000);
@@ -767,7 +821,7 @@ async function guardarLectura(siguiente){
     GUARDADA = { ...fila, texto: String(valor), url: FOTO.url };
     FOTO = null;
     if(siguiente){ AVISO_TEL = ''; return true; }   // su pedido (14-oct): se guarda por dentro, sin letrero; la cámara queda libre   // la barra de Material ya está abierta (ver data-dl-siguiente)
-    else abrirEquipo();   // su pedido (14-oct): "Continue" va directo al equipo, sin pantalla de en medio
+    else abrirListo();   // su diseño (14-oct): Continue enseña la lectura guardada y pregunta por el equipo
   }catch(e){ avisarTel('Not saved: ' + (e.message || e)); return false; }
   finally{ OCUPADO_TEL = false; const b2 = $(bot); if(b2){ b2.disabled = false; b2.innerHTML = antes; } }
 }
@@ -791,31 +845,114 @@ const anchoNumero = (inp) => {
     inp.style.width = Math.max(parseFloat(cs.fontSize) * 0.9, ctx.measureText(inp.value || '0').width + 4) + 'px'; }
   catch{ inp.style.width = Math.max(1.2, String(inp.value || '').length * 0.62) + 'em'; }
 };
+// ---------- TELÉFONO: la barra de abajo dentro del Dry Log (su diseño D, 14-oct) ----------
+// Mientras se toman las lecturas, Projects / Clients / Settings se vuelven las acciones de ese paso. Back y la cámara
+// del centro se quedan (la cámara toma la foto que toca en ese paso). Finish termina: enseña el resumen del día y
+// vuelven los botones de siempre.
+const BARRA = {
+  cam: [['dl-herramientas', 'Equipment', 'equipo'], ['dl-sig', 'Next room', 'saltar'], ['dl-fin', 'Finish', 'fin']],
+  lectura: [['girar-der', 'Retake', 'retomar'], ['flecha-der', 'Continue', 'continuar'], ['dl-fin', 'Finish', 'fin']],
+  guardado: [['prohibido', 'No equip.', 'sin-equipo'], ['dl-herramientas', 'Add equip.', 'equipo'], ['dl-fin', 'Finish', 'fin']],
+  equipo: [['mas-circulo', 'Add type', 'tipo'], ['dl-guardar', 'Save & next', 'guardar-eq'], ['dl-fin', 'Finish', 'fin']]
+};
+function pintarBarra(){
+  const pie = $('#pie'), c = caja(); if(!pie) return;
+  const p = !esCompu() && c && !c.closest('[hidden]') && BARRA[PANTALLA] ? PANTALLA : '';
+  document.body.classList.toggle('dl-barra', !!p);
+  if(!p) return;
+  if(!pie.querySelector('.dl-tab')){
+    // Tres botones propios, cada uno junto al que reemplaza (los de siempre no se tocan, solo se esconden).
+    ['proyectos', 'clients', 'settings'].forEach(n => { const b = pie.querySelector('[data-nav="' + n + '"]'); if(b) b.insertAdjacentHTML('afterend', '<button type="button" class="tab dl-tab"></button>'); });
+  }
+  pie.querySelectorAll('.dl-tab').forEach((b, i) => { const d = BARRA[p][i]; if(!d) return; const [ic, t, a] = d;
+    if(b.dataset.dlBarra !== a){ b.dataset.dlBarra = a; b.classList.toggle('dl-tab-fin', a === 'fin'); b.innerHTML = IC(ic) + '<span>' + t + '</span>'; } });
+}
+async function accionBarra(a){
+  if(OCUPADO_TEL && a !== 'tipo') return;
+  if(a === 'fin'){ terminar(); return; }
+  if(a === 'saltar'){ const n = nombreDe(CUARTOS, CUARTO); AUTO = false; avanzar(n, 'Skipped ' + n + '.'); return; }
+  if(a === 'equipo'){ if(GUARDADA && GUARDADA.cuarto_id !== CUARTO) GUARDADA = null; abrirEquipo(); return; }
+  if(a === 'retomar'){ PANTALLA = 'cam'; AVISO_TEL = ''; pintarAqui(); return; }
+  if(a === 'continuar'){ if(!FOTO && ESPERA_MAT){ ESPERA_MAT = null; abrirListo(); return; } guardarLectura(false); return; }
+  if(a === 'sin-equipo'){ sinEquipo(); return; }
+  if(a === 'tipo'){ EQ.agregando = true; pintarAqui(); const i = $('#dlEqNuevo'); if(i) i.focus(); return; }
+  if(a === 'guardar-eq'){ guardarEquipo(); return; }
+}
+// Finish: guarda lo que esté abierto (la lectura escrita o el equipo contado) y enseña el resumen del día.
+async function terminar(){
+  if(PANTALLA === 'lectura' && FOTO){ const ok = await guardarLectura(true); if(!ok) return; }
+  else if(PANTALLA === 'lectura' && ESPERA_MAT){ const ok = await ESPERA_MAT; ESPERA_MAT = null; RUEDA = false; if(!ok) return; }
+  else if(PANTALLA === 'equipo'){ const ok = await guardarEquipo(true); if(!ok) return; }
+  GUARDADA = null; AVISO_TEL = ''; PANTALLA = 'dia'; pintarAqui();
+  const m = $('#main'); if(m) m.scrollTop = 0;
+}
+// La cámara de abajo en la pantalla del equipo: foto del equipo del cuarto (va a Photos, a ese cuarto: es la prueba
+// de las unidades para el invoice).
+const EQ_FOTOS = {};
+function fotoEquipo(){
+  const cuarto = CUARTO, nivel = NIVEL;
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*'; inp.setAttribute('capture', 'environment'); inp.hidden = true;
+  inp.addEventListener('change', async () => {
+    const f = inp.files && inp.files[0]; inp.remove(); if(!f) return;
+    try{
+      await fotos.subirCopia(f, { nivel_id: nivel || null, cuarto_id: cuarto || null });
+      EQ_FOTOS[cuarto] = (EQ_FOTOS[cuarto] || 0) + 1;
+      const t = $('#panel-secado .dl-eq2-t');
+      if(t && PANTALLA === 'equipo' && CUARTO === cuarto){ const k = t.querySelector('.dl-eq-fotos'); if(k) k.lastChild.textContent = EQ_FOTOS[cuarto]; else t.insertAdjacentHTML('beforeend', `<small class="dl-eq-fotos">${IC('camara')}${EQ_FOTOS[cuarto]}</small>`); }
+    }catch(e){ avisarTel('Photo not saved: ' + (e.message || e)); }
+  });
+  document.body.appendChild(inp); inp.click();
+}
 // La ficha la llama al cambiar a otra pestaña.
-export function salir(){ apagarCam(); document.body.classList.remove('dl-fijo', 'dl-escribiendo'); if(['cam', 'lectura', 'guardado', 'equipo', 'dia'].includes(PANTALLA)) PANTALLA = 'vacio'; }
+export function salir(){ apagarCam(); document.body.classList.remove('dl-fijo', 'dl-escribiendo', 'dl-barra'); if(['cam', 'lectura', 'guardado', 'equipo', 'dia'].includes(PANTALLA)) PANTALLA = 'vacio'; }
 
 // ---------- toques ----------
 export function conectar(){
   // El botón azul de cámara de abajo: con la cámara del Dry Log en pantalla, toma la foto aquí (no abre la otra cámara).
   document.addEventListener('click', (e) => {
     if(!e.target.closest || !e.target.closest('[data-nav="capture"]')) return;
-    if((PANTALLA !== 'cam' && PANTALLA !== 'guardado') || !$('#dlVideo') || !$('#dlVideo').offsetParent) return;
+    // Su diseño D: con la barra del Dry Log, la cámara toma la foto que toca en cada paso.
+    if(document.body.classList.contains('dl-barra') && PANTALLA !== 'cam'){
+      e.preventDefault(); e.stopImmediatePropagation();
+      if(PANTALLA === 'lectura'){ if(RUEDA) okRueda(); else siguienteLectura(); }
+      else if(PANTALLA === 'guardado'){ GUARDADA = null; AVISO_TEL = ''; PANTALLA = 'cam'; pintarAqui(); }
+      else if(PANTALLA === 'equipo') fotoEquipo();
+      return;
+    }
+    if(PANTALLA !== 'cam' || !$('#dlVideo') || !$('#dlVideo').offsetParent) return;
     e.preventDefault(); e.stopImmediatePropagation();
     if(camViva()) disparar(); else camaraDelTelefono();
   }, true);
+  document.addEventListener('click', (e) => { const b = e.target.closest && e.target.closest('#pie .dl-tab'); if(!b || !document.body.classList.contains('dl-barra')) return; e.preventDefault(); accionBarra(b.dataset.dlBarra); });
   document.addEventListener('change', (e) => {
     const sel = e.target.closest && e.target.closest('[data-dl-sel]'); if(!sel || !caja() || !caja().contains(sel)) return;
     AUTO = false;
     if(sel.dataset.dlSel === 'nivel'){ NIVEL = sel.value; CUARTO = cuartoInicial(CUARTOS, NIVEL, null); } else CUARTO = sel.value;
     const av = $('#panel-secado .dl-tel-aviso'); if(av){ av.remove(); AVISO_TEL = ''; }
     if(PANTALLA === 'equipo'){ pintarAqui(); cargarEquipo(); return; }
+    if(PANTALLA === 'guardado'){ GUARDADA = null; PANTALLA = 'cam'; pintarAqui(); return; }
     if(PANTALLA === 'lectura' && FOTO){ FOTO.nivel = NIVEL; FOTO.cuarto = CUARTO; const t = $('#panel-secado .dl-lec-t'); if(t) t.textContent = 'Scan ' + (nombreDe(CUARTOS, CUARTO) || 'this room'); repintarComparar(); }
     pintarSelectores();
     if(PANTALLA === 'cam') medirTel();   // sin el aviso, la cámara vuelve a llenar lo que sobra
   });
   document.addEventListener('keydown', (e) => { if(e.key === 'Enter' && e.target && e.target.id === 'dlEqNuevo'){ e.preventDefault(); agregarTipo(); } });
   registrarAtras(atrasTel);
+  // Tocar + o − rápido (2, 3 fans): el iPhone toma el segundo toque como "doble toque" y acerca la pantalla. Aquí cada
+  // toque cuenta y nunca hace zoom.
+  // Por eso cada toque en − o + lo atiende el botón mismo (si el dedo se movió, era para deslizar la lista).
+  let toqueEq = null;
+  document.addEventListener('touchstart', (e) => {
+    const b = e.target.closest && e.target.closest('#panel-secado .dl-eq-b');
+    toqueEq = b && e.touches.length === 1 ? { b, x: e.touches[0].clientX, y: e.touches[0].clientY } : null;
+  }, { passive: true });
+  document.addEventListener('touchend', (e) => {
+    const t = toqueEq; toqueEq = null; if(!t) return;
+    const p = e.changedTouches && e.changedTouches[0];
+    if(!p || Math.abs(p.clientX - t.x) > 10 || Math.abs(p.clientY - t.y) > 10) return;
+    e.preventDefault(); if(!t.b.disabled) t.b.click();
+  }, { passive: false });
   let marcando = false;
+  document.addEventListener('scroll', (e) => { if(e.target && e.target.classList && e.target.classList.contains('dl-eq-rueda')) marcarEqRueda(e.target); }, true);
   document.addEventListener('scroll', (e) => { if(e.target && e.target.classList && e.target.classList.contains('dl-rueda-lista') && !marcando){ marcando = true; requestAnimationFrame(() => { marcando = false; marcarRueda(); }); } }, true);
   // El teclado del número: al entrar se esconde lo de abajo y la foto se acomoda; al salir (✓ del teclado) vuelve todo.
   const alTeclado = () => { if(PANTALLA === 'lectura' && !esCompu()) requestAnimationFrame(() => medirTel()); };
@@ -843,7 +980,7 @@ export function conectar(){
     if((el = q('[data-dl-cam]'))){ const a = el.dataset.dlCam;
       if(a === 'telefono') camaraDelTelefono(); else if(a === 'otra') encenderCam(); else if(a === 'otra-foto'){ PANTALLA = 'cam'; AVISO_TEL = ''; pintarAqui(); }
       return; }
-    if(q('[data-dl-guardar]')){ if(!FOTO && ESPERA_MAT){ ESPERA_MAT = null; abrirEquipo(); return; } guardarLectura(false); return; }
+    if(q('[data-dl-guardar]')){ if(!FOTO && ESPERA_MAT){ ESPERA_MAT = null; abrirListo(); return; } guardarLectura(false); return; }
     if(q('[data-dl-mat-abrir]')){ abrirRueda(); return; }
     if((el = q('[data-dl-rueda]'))){ irRueda(el, true); return; }
     if(q('[data-dl-rueda-ok]')){ okRueda(); return; }
@@ -855,7 +992,7 @@ export function conectar(){
     if(q('[data-eq-agregar]')){ EQ.agregando = true; pintarAqui(); const i = $('#dlEqNuevo'); if(i) i.focus(); return; }
     if((el = q('[data-eq-nuevo]'))){ if(el.dataset.eqNuevo === 'si') agregarTipo(); else { EQ.agregando = false; pintarAqui(); } return; }
     if(q('[data-eq-guardar]')){ guardarEquipo(); return; }
-    if((el = q('[data-dl-ir]'))){ PANTALLA = el.dataset.dlIr; if(PANTALLA === 'cam') AVISO_TEL = ''; pintarAqui(); const m = $('#main'); if(m && PANTALLA === 'dia') m.scrollTop = 0; return; }
+    if((el = q('[data-dl-ir]'))){ PANTALLA = el.dataset.dlIr; if(PANTALLA === 'cam') AVISO_TEL = ''; pintarAqui(); const m = $('#main'); if(m && (PANTALLA === 'dia' || PANTALLA === 'registro')) m.scrollTop = 0; return; }   // el registro abre arriba, no a media lista
     if((el = q('[data-dl-ir-cuarto]'))){ const k = CUARTOS.find(x => x.id === el.dataset.dlIrCuarto); if(k){ NIVEL = k.nivel_id; CUARTO = k.id; AUTO = false; } AVISO_TEL = ''; GUARDADA = null; PANTALLA = 'cam'; pintarAqui(); return; }
     if(q('[data-dl-saltar]')){ const n = nombreDe(CUARTOS, CUARTO); AUTO = false; avanzar(n, 'Skipped ' + n + '.'); return; }
     if(q('[data-dl-otro]')){ GUARDADA = null; AVISO_TEL = ''; PANTALLA = 'cam'; pintarAqui(); return; }

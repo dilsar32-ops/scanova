@@ -4,9 +4,9 @@
 //  · Equipment Report: el equipo de cada cuarto día por día y los DÍAS DE EQUIPO (lo que se cobra), con la regla dicha.
 // Cada uno se ve aquí mismo (su propia pantalla, con Back) y se baja en PDF (en el teléfono, la hoja de compartir).
 // Los números salen de docs/registro.js (lo mismo que ve el técnico en el teléfono): nada se calcula dos veces.
-import { $, authFetch, esAparato } from './app.js?v=2026-10-14-35';
-import * as R from './registro.js?v=2026-10-14-35';
-import * as fotos from './fotos.js?v=2026-10-14-35';
+import { $, authFetch, esAparato } from './app.js?v=2026-10-14-44';
+import * as R from './registro.js?v=2026-10-14-44';
+import * as fotos from './fotos.js?v=2026-10-14-44';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';

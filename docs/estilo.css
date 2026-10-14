@@ -2241,3 +2241,78 @@ body.dl-escribiendo #panel-secado .dl-lec-t{ display:none; }
 .dl-rueda-op{ color:rgba(15,23,42,.36); }
 .dl-rueda-op.on{ color:#0f172a; }
 .dl-rueda-t{ color:rgba(15,23,42,.55); }
+
+/* ===== Su diseño (14-oct): al tocar Continue — la lectura guardada en verde y el equipo del cuarto ===== */
+#panel-secado .dl-escan h3{ margin:2px 0 2px; font-size:19px; font-weight:800; letter-spacing:-.01em; color:var(--ink); }
+#panel-secado .dl-escan p{ margin:0; color:var(--ink-soft); font-size:14.5px; line-height:1.4; }
+#panel-secado .dl-tel > .card.dl-leida{ margin:0; padding:7px; border:1px solid var(--line); border-radius:16px; }
+.dl-leida-c{ display:flex; align-items:center; gap:12px; padding:10px 10px 10px 12px; border-radius:11px; background:#eef8f1; }
+.dl-leida-ok{ flex:none; width:34px; height:34px; border-radius:50%; display:grid; place-items:center; background:#1f9a3c; color:#fff; }
+.dl-leida-ok .ic{ width:20px; height:20px; stroke-width:3; }
+.dl-leida-n{ flex:none; font-size:26px; font-weight:800; letter-spacing:-.02em; color:var(--ink); font-variant-numeric:tabular-nums; }
+.dl-leida-txt{ flex:1; min-width:0; display:flex; flex-direction:column; padding-left:12px; border-left:1px solid var(--line2); color:var(--ink-soft); font-size:13.5px; line-height:1.3; }
+.dl-leida-c img{ flex:none; width:80px; height:68px; object-fit:cover; border-radius:9px; background:#000; }
+#panel-secado .dl-tel > .card.dl-eq0{ display:flex; flex-direction:column; gap:10px; margin:0; padding:14px 13px; border:1px solid var(--line); border-radius:16px; }
+.dl-eq0 h3{ margin:0; font-size:18px; font-weight:800; letter-spacing:-.01em; color:var(--ink); }
+.dl-eq0 > p{ margin:-6px 0 2px; color:var(--ink-soft); font-size:14.5px; line-height:1.4; }
+.dl-eq0 .btn{ min-height:46px; font-size:16px; gap:12px; border-radius:9px; }
+.dl-eq0 .btn .ic{ width:22px; height:22px; }
+.dl-eq0 .btn.btn-outline{ color:var(--accent); border:1.5px solid var(--accent); background:var(--card); }
+.dl-eq0 small{ color:var(--ink-soft); font-size:12.5px; line-height:1.45; }
+.dl-eq0 .aviso:empty{ display:none; }
+
+/* ===== Su diseño (14-oct): "Equipment in …" — la lista del equipo sube y baja con su barrita a la derecha; Save abajo ===== */
+#panel-secado .dl-tel > .card.dl-eq2{ position:relative; display:flex; flex-direction:column; gap:7px; margin:0; padding:11px 16px 10px 10px; border:1px solid var(--line); border-radius:14px; }
+.dl-eq2 .dl-eq2-t{ margin:0 2px 2px; font-size:18px; font-weight:800; letter-spacing:-.01em; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.dl-eq2 .dl-eq-rueda{ display:flex; flex-direction:column; gap:5px; overflow-y:auto; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; scroll-snap-type:y proximity; scrollbar-width:none; }
+.dl-eq2 .dl-eq-rueda::-webkit-scrollbar{ display:none; }
+.dl-eq2 .dl-eq-barra{ position:absolute; right:5px; width:4px; border-radius:2px; background:#e6eaf1; pointer-events:none; }
+.dl-eq2 .dl-eq-barra[hidden]{ display:none !important; }
+.dl-eq2 .dl-eq-barra i{ display:block; width:4px; border-radius:2px; background:#a9b2c2; }
+.dl-eq2 .dl-eq-fila{ flex:none; min-height:46px; gap:6px; padding:5px 7px 5px 7px; border:1px solid var(--line); border-radius:10px; background:var(--card); scroll-snap-align:start; box-sizing:border-box; }
+.dl-eq2 .dl-eq-ic{ width:34px; height:34px; color:var(--ink); stroke-width:1.4; }
+.dl-eq2 .dl-eq-n{ margin-left:4px; font-size:15px; font-weight:500; color:var(--ink); line-height:1.2; }
+.dl-eq2 .dl-eq-b{ width:37px; height:34px; border-radius:7px; }
+.dl-eq2 .dl-eq-b .ic{ width:19px; height:19px; stroke-width:2.4; }
+.dl-eq2 .dl-eq-menos{ background:#eef1f8; color:var(--ink-soft); }
+.dl-eq2 .dl-eq-menos:disabled{ opacity:1; color:var(--ink-mute); }
+.dl-eq2 .dl-eq-mas{ background:var(--accent); color:#fff; box-shadow:none; }
+.dl-eq2 .dl-eq-c{ width:42px; height:34px; display:grid; place-items:center; border:1px solid var(--line2); border-radius:7px; background:var(--card); font-size:17px; font-weight:600; }
+.dl-eq2 .dl-eq-agregar{ min-height:40px; padding-top:3px; padding-bottom:3px; }
+.dl-eq2 .dl-eq-agregar .dl-eq-ic{ color:var(--accent); width:30px; height:30px; stroke-width:1.6; }
+.dl-eq2 .dl-eq-agregar .dl-eq-n{ color:var(--accent); font-size:15px; }
+.dl-eq2 .dl-eq-agregar .dl-eq-chev{ color:var(--ink-mute); }
+.dl-eq2 .dl-eq-nuevo{ min-height:46px; }
+.dl-eq2 .dl-eq-nuevo .dl-eq-ic{ width:26px; height:26px; }
+.dl-eq2 .aviso:empty{ display:none; }
+#panel-secado .dl-eq2-guardar{ position:relative; width:100%; min-height:44px; font-size:16px; font-weight:500; border-radius:9px; }
+#panel-secado .dl-eq2-guardar .ic{ position:absolute; right:16px; top:50%; transform:translateY(-50%); width:22px; height:22px; }
+/* Teléfono más chico que el suyo: la pantalla de Continue se aprieta para quedar quieta (sin deslizar) */
+#panel-secado .dl-listo2.apretado .dl-escan p{ display:none; }
+#panel-secado .dl-listo2.apretado .dl-escan h3{ margin:0; font-size:18px; }
+#panel-secado .dl-listo2.apretado > .card.dl-leida{ padding:5px; }
+.dl-listo2.apretado .dl-leida-c{ padding:7px 8px 7px 10px; }
+.dl-listo2.apretado .dl-leida-c img{ width:66px; height:56px; }
+.dl-listo2.apretado .dl-leida-n{ font-size:24px; }
+#panel-secado .dl-listo2.apretado > .card.dl-eq0{ gap:8px; padding:12px; }
+.dl-listo2.apretado .dl-eq0 .btn{ min-height:44px; }
+#panel-secado .dl-listo2.muy-apretado .dl-escan{ display:none; }
+.dl-listo2.muy-apretado .dl-eq0 > p{ display:none; }
+/* Tocar + rápido (2, 3 fans) no hace zoom: dentro de la rueda (que se desliza sola) también vale "manipulation" */
+.dl-tel, .dl-tel *{ touch-action:manipulation; }
+/* Su diseño: "HEPA Air Scrubber" en un renglón también en un teléfono más angosto que el suyo */
+@media (max-width:420px){ .dl-eq2 .dl-eq-n{ font-size:14.5px; letter-spacing:-.01em; } .dl-eq2 .dl-eq-ic{ width:32px; height:32px; } }
+
+/* ===== Su diseño D (14-oct): dentro del Dry Log del teléfono la barra de abajo trae las acciones de cada paso ===== */
+.pie .dl-tab{ display:none; }
+body.dl-barra .pie .dl-tab{ display:flex; }
+body.dl-barra .pie [data-nav="proyectos"], body.dl-barra .pie [data-nav="clients"], body.dl-barra .pie [data-nav="settings"]{ display:none; }
+.pie .dl-tab span{ white-space:nowrap; }
+.pie .dl-tab.dl-tab-fin{ color:var(--accent); }
+/* Los dibujos a color del equipo (su pedido: modernos, como su imagen) */
+.dl-eq-img{ flex:none; width:32px; height:32px; object-fit:contain; }
+.dl-eq2 .dl-eq-img{ width:40px; height:40px; }
+.dl-eq2 .dl-eq2-t{ display:flex; align-items:center; gap:8px; }
+.dl-eq2 .dl-eq2-t > span{ min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.dl-eq2 .dl-eq-fotos{ flex:none; display:inline-flex; align-items:center; gap:4px; margin-left:auto; padding:2px 8px; border-radius:999px; background:var(--accent-soft); color:var(--accent); font-size:13px; font-weight:700; }
+.dl-eq2 .dl-eq-fotos .ic{ width:15px; height:15px; }
