@@ -7804,6 +7804,21 @@ fileprivate final class CamaraNueva {
     var fondoMaqueta: UIImageView?
     var maquetaVivo: Double?
     var armada = false
+    // Arriba, debajo de la barra: la ficha, la pista y los avisos, UNO DEBAJO DEL OTRO. Antes la ficha iba pegada a
+    // la mira y tapaba justo lo que se estaba midiendo (su foto del 15 oct, marcada en rojo).
+    let columna = UIStackView()
+    // LA TARJETA DE GUARDAR (su reporte del 15 oct: "ya no pregunta si esa pared lleva insulación"). La pregunta del
+    // compañero se hace al tener la medida completa, y contestar Sí o No ES guardar. Nada viene marcado.
+    let tarjeta = VidrioCamara(radio: 28)
+    let tarjetaDonde = UILabel(), tarjetaNumero = UILabel(), tarjetaPregunta = UILabel(), tarjetaAyuda = UILabel()
+    let tarjetaSi = UIButton(type: .system), tarjetaNo = UIButton(type: .system), tarjetaCorregir = UIButton(type: .system)
+    var tarjetaVisible = false
+    var tarjetaPreguntando = false     // la voz hizo la pregunta con la tarjeta abierta: su respuesta guarda
+    var tarjetaOculta = false          // tocó "Corregir": se esconde hasta que cambie la medida
+    var contestoAntes: Bool?           // ya contestó por voz (al escoger el material): la tarjeta llega marcada
+    var pasoAntesEraCompanero = false
+    var medidaFirma = ""
+    var itemsVistos = -1
 }
 
 extension ARMeasureViewController {
@@ -7827,6 +7842,7 @@ extension ARMeasureViewController {
         armarBarraNueva()
         armarCentroNuevo()
         armarMuelleNuevo()
+        armarTarjetaNueva()
         armarPanelNuevo()
         pintarCamaraNueva()
     }
@@ -7901,13 +7917,7 @@ extension ARMeasureViewController {
         n.aviso.numberOfLines = 3; n.aviso.textAlignment = .center
         n.aviso.layer.cornerRadius = 12; n.aviso.layer.cornerCurve = .continuous; n.aviso.clipsToBounds = true
         n.aviso.isHidden = true
-        view.addSubview(n.aviso)
-        NSLayoutConstraint.activate([
-            n.aviso.topAnchor.constraint(equalTo: n.barra.bottomAnchor, constant: 10),
-            n.aviso.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            n.aviso.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor, constant: -40),
-            n.aviso.heightAnchor.constraint(greaterThanOrEqualToConstant: 40)
-        ])
+        n.aviso.heightAnchor.constraint(greaterThanOrEqualToConstant: 40).isActive = true
     }
 
     private func armarCentroNuevo() {
@@ -7931,19 +7941,24 @@ extension ARMeasureViewController {
         n.pista.font = .systemFont(ofSize: 15, weight: .semibold); n.pista.textColor = Claro.tinta
         n.pista.backgroundColor = UIColor.white.withAlphaComponent(0.94); n.pista.textAlignment = .center
         n.pista.layer.cornerRadius = 12; n.pista.layer.cornerCurve = .continuous; n.pista.clipsToBounds = true
-        view.addSubview(n.ficha); view.addSubview(n.pista)
+        // Arriba, debajo de la barra, nunca encima de la mira: el centro de la cámara queda libre para ver lo que se mide.
+        n.columna.axis = .vertical; n.columna.alignment = .center; n.columna.spacing = 8
+        n.columna.translatesAutoresizingMaskIntoConstraints = false
+        n.columna.isUserInteractionEnabled = false
+        n.aviso.removeFromSuperview()
+        for v in [n.ficha, n.pista, n.aviso] { n.columna.addArrangedSubview(v) }
+        view.addSubview(n.columna)
         NSLayoutConstraint.activate([
             n.mira.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             n.mira.centerYAnchor.constraint(equalTo: view.centerYAnchor),
             n.mira.widthAnchor.constraint(equalToConstant: 56), n.mira.heightAnchor.constraint(equalToConstant: 56),
-            n.ficha.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            n.ficha.bottomAnchor.constraint(equalTo: n.mira.topAnchor, constant: -26),
+            n.columna.topAnchor.constraint(equalTo: n.barra.bottomAnchor, constant: 12),
+            n.columna.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            n.columna.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor, constant: -32),
             pila.leadingAnchor.constraint(equalTo: n.ficha.leadingAnchor, constant: 18),
             pila.trailingAnchor.constraint(equalTo: n.ficha.trailingAnchor, constant: -18),
             pila.topAnchor.constraint(equalTo: n.ficha.topAnchor, constant: 8),
             pila.bottomAnchor.constraint(equalTo: n.ficha.bottomAnchor, constant: -8),
-            n.pista.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            n.pista.topAnchor.constraint(equalTo: n.ficha.bottomAnchor, constant: 8),
             n.pista.heightAnchor.constraint(equalToConstant: 34),
             n.pista.widthAnchor.constraint(greaterThanOrEqualToConstant: 150)
         ])
@@ -8094,10 +8109,19 @@ extension ARMeasureViewController {
         // Panel o muelle: nunca los dos.
         let panel = panelQueToca()
         n.panel.isHidden = panel == nil
-        n.muelle.isHidden = panel != nil
         if let p = panel { pintarPanelNuevo(p) } else { n.firmaPanel = "" }
+        pintarTarjetaNueva()
+        n.muelle.isHidden = panel != nil || n.tarjetaVisible
         pintarMuelleNuevo()
         pintarCentroNuevo()
+        // Al guardar, se dice en la pantalla qué se guardó (2.5 s, en azul: no es un problema).
+        if n.itemsVistos >= 0, items.count > n.itemsVistos, let u = items.last {
+            var que = Self.nombreDeBoton(valor: u.material, etiqueta: u.material)
+            if let w = u.width { que += " \(Self.pies(u.length * w)) pies²" } else { que += " \(Self.pies(u.length)) pies lin." }
+            if let c = u.companion { que += " + " + c }
+            mostrarAvisoNuevo("✓ Guardado · " + que, segundos: 2.5, ok: true)
+        }
+        n.itemsVistos = items.count
     }
 
     private func panelQueToca() -> PanelCamara? {
@@ -8168,6 +8192,166 @@ extension ARMeasureViewController {
         n.derecho.setAttributedTitle(Self.dosRenglones(titulo, sub, color: vivo ? .white : Claro.apagado, fuerte: true), for: .normal)
     }
 
+    private func armarTarjetaNueva() {
+        let n = nueva
+        n.tarjeta.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(n.tarjeta)
+        let c = n.tarjeta.contenido
+        n.tarjetaDonde.font = .systemFont(ofSize: 14, weight: .medium); n.tarjetaDonde.textColor = Claro.gris
+        n.tarjetaNumero.textColor = Claro.tinta; n.tarjetaNumero.adjustsFontSizeToFitWidth = true; n.tarjetaNumero.minimumScaleFactor = 0.6
+        n.tarjetaPregunta.font = .systemFont(ofSize: 20, weight: .bold); n.tarjetaPregunta.textColor = Claro.tinta; n.tarjetaPregunta.numberOfLines = 2
+        n.tarjetaAyuda.font = .systemFont(ofSize: 14); n.tarjetaAyuda.textColor = Claro.gris; n.tarjetaAyuda.numberOfLines = 2
+        let raya = UIView(); raya.backgroundColor = Claro.linea
+        raya.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        for b in [n.tarjetaSi, n.tarjetaNo] {
+            b.backgroundColor = .white
+            b.layer.cornerRadius = 16; b.layer.cornerCurve = .continuous
+            b.layer.borderWidth = 1; b.layer.borderColor = Claro.linea.cgColor
+            b.titleLabel?.numberOfLines = 3; b.titleLabel?.textAlignment = .center
+            b.heightAnchor.constraint(greaterThanOrEqualToConstant: 76).isActive = true
+        }
+        n.tarjetaSi.addTarget(self, action: #selector(tarjetaSiTocada), for: .touchUpInside)
+        n.tarjetaNo.addTarget(self, action: #selector(tarjetaNoTocada), for: .touchUpInside)
+        let botones = UIStackView(arrangedSubviews: [n.tarjetaSi, n.tarjetaNo])
+        botones.axis = .horizontal; botones.spacing = 10; botones.distribution = .fillEqually
+        n.tarjetaCorregir.setTitle("‹ Corregir la medida", for: .normal)
+        n.tarjetaCorregir.titleLabel?.font = .systemFont(ofSize: 16, weight: .medium)
+        n.tarjetaCorregir.setTitleColor(Claro.azul, for: .normal)
+        n.tarjetaCorregir.contentHorizontalAlignment = .leading
+        n.tarjetaCorregir.addTarget(self, action: #selector(tarjetaCorregirTocada), for: .touchUpInside)
+        let pila = UIStackView(arrangedSubviews: [n.tarjetaDonde, n.tarjetaNumero, raya, n.tarjetaPregunta, n.tarjetaAyuda, botones, n.tarjetaCorregir])
+        pila.axis = .vertical; pila.spacing = 6
+        pila.setCustomSpacing(12, after: n.tarjetaNumero); pila.setCustomSpacing(12, after: raya); pila.setCustomSpacing(12, after: n.tarjetaAyuda)
+        pila.translatesAutoresizingMaskIntoConstraints = false
+        c.addSubview(pila)
+        NSLayoutConstraint.activate([
+            n.tarjeta.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 10),
+            n.tarjeta.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10),
+            n.tarjeta.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -4),
+            pila.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: 18),
+            pila.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -18),
+            pila.topAnchor.constraint(equalTo: c.topAnchor, constant: 18),
+            pila.bottomAnchor.constraint(equalTo: c.bottomAnchor, constant: -10)
+        ])
+        n.tarjeta.isHidden = true
+    }
+
+    // ¿La medida ya está completa para guardarse? (con el alto/ancho si va por pie cuadrado)
+    private func medidaCompletaNueva() -> Bool {
+        guard let m = selectedMaterial, accionesPosibles().guardar, !esPorPieza else { return false }
+        guard stage == .lengthDone || stage == .widthDone else { return false }
+        if unidad(for: m.value) == .cuadrado { return currentWidthFeet != nil }
+        return hasLengthMeasurement
+    }
+
+    private func pintarTarjetaNueva() {
+        let n = nueva
+        // Una medida nueva (otra guardada, otro material) borra lo contestado y vuelve a mostrar la tarjeta.
+        let firma = "\(items.count)|\(selectedMaterial?.value ?? "")"
+        if firma != n.medidaFirma {
+            n.medidaFirma = firma
+            n.contestoAntes = nil; n.tarjetaPreguntando = false; n.tarjetaOculta = false
+        }
+        // ¿Contestó la pregunta del compañero por voz? (la pregunta se cierra al contestarla)
+        let ahoraCompanero = pasoAbierto == .llevaCompanero
+        let completa = medidaCompletaNueva()
+        let quiere = completa && currentCompanion != nil && !n.tarjetaOculta && panelQueToca() == nil
+        if n.pasoAntesEraCompanero && !ahoraCompanero {
+            if n.tarjetaVisible && n.tarjetaPreguntando && quiere {
+                // Contestó Sí o No con la tarjeta abierta: eso es guardar (la respuesta ya quedó en includeCompanion).
+                n.pasoAntesEraCompanero = false
+                n.tarjetaPreguntando = false
+                DispatchQueue.main.async { [weak self] in self?.guardarDesdeTarjeta() }
+                return
+            }
+            if !n.tarjetaVisible { n.contestoAntes = includeCompanion }
+        }
+        n.pasoAntesEraCompanero = ahoraCompanero
+        let abre = quiere && !n.tarjetaVisible
+        n.tarjetaVisible = quiere
+        n.tarjeta.isHidden = !quiere
+        guard quiere, let m = selectedMaterial, let comp = currentCompanion else { return }
+        // Lo que dice la tarjeta.
+        let donde = [roomName, section.isEmpty ? "" : Self.sectionSpokenName(section).capitalized, Self.nombreDeBoton(m)].filter { !$0.isEmpty }
+        n.tarjetaDonde.text = donde.joined(separator: " · ")
+        let numero = NSMutableAttributedString()
+        func pon(_ t: String, _ grande: Bool) {
+            numero.append(NSAttributedString(string: t, attributes: [.font: grande ? UIFont.monospacedDigitSystemFont(ofSize: 34, weight: .bold) : UIFont.systemFont(ofSize: 22, weight: .semibold), .foregroundColor: Claro.tinta]))
+        }
+        var cantidadDicha = ""
+        if let w = currentWidthFeet {
+            let area = pathTotalFeet * w
+            pon("\(Self.pies(pathTotalFeet)) × \(Self.pies(w)) = ", false); pon(Self.pies(area), true); pon(" pies²", false)
+            cantidadDicha = "\(Self.pies(area)) pies cuadrados"
+        } else {
+            pon(Self.pies(pathTotalFeet), true); pon(" pies lineales", false)
+            cantidadDicha = "\(Self.pies(pathTotalFeet)) pies lineales"
+        }
+        n.tarjetaNumero.attributedText = numero
+        let nombreComp = Self.nombreDeBoton(valor: comp.value, etiqueta: comp.en)
+        let esPared = section == "wall"
+        if comp.value == "Insulation" {
+            n.tarjetaPregunta.text = esPared ? "¿Lleva Insulación detrás?" : "¿Lleva Insulación?"
+            n.tarjetaAyuda.text = esPared ? "Pared de afuera: casi siempre sí. Pared de adentro: no."
+                : (section == "ceiling" ? "Techo con ático o piso encima: revise si hay insulación." : nil)
+        } else if comp.value == "Shoe Molding" {
+            n.tarjetaPregunta.text = "¿También quitó Shoe Molding?"
+            n.tarjetaAyuda.text = "Va por el mismo largo del zócalo."
+        } else {
+            n.tarjetaPregunta.text = "¿Lleva \(nombreComp)?"
+            n.tarjetaAyuda.text = "Se guarda con la misma medida."
+        }
+        n.tarjetaAyuda.isHidden = n.tarjetaAyuda.text == nil
+        let subSi = esPared && comp.value == "Insulation" ? "pared de afuera" : "se guardan las dos"
+        let subNo = esPared && comp.value == "Insulation" ? "pared de adentro" : "solo \(Self.nombreDeBoton(m).lowercased())"
+        // Nada viene marcado. Solo si YA lo contestó por voz, sale marcada su respuesta (tocar cualquiera guarda).
+        func pintarBoton(_ b: UIButton, _ titulo: String, _ sub: String, marcado: Bool) {
+            b.setAttributedTitle(Self.dosRenglones(titulo, sub, color: Claro.tinta), for: .normal)
+            b.layer.borderWidth = marcado ? 2 : 1
+            b.layer.borderColor = (marcado ? Claro.azul : Claro.linea).cgColor
+            b.backgroundColor = marcado ? Claro.azulSuave : .white
+        }
+        pintarBoton(n.tarjetaSi, "Sí · con \(nombreComp)", subSi, marcado: n.contestoAntes == true)
+        pintarBoton(n.tarjetaNo, "No · sin \(nombreComp)", subNo, marcado: n.contestoAntes == false)
+        n.tarjetaSi.accessibilityLabel = "Sí, con \(nombreComp). Guarda la medida."
+        n.tarjetaNo.accessibilityLabel = "No, sin \(nombreComp). Guarda la medida."
+        // Al abrirse, la pregunta se dice (si no la contestó ya). Contestar por voz también guarda.
+        if abre && n.contestoAntes == nil {
+            let frase = "\(Self.nombreDeBoton(m)), \(cantidadDicha). " + (n.tarjetaPregunta.text ?? "")
+            if pasoAbierto == .llevaCompanero || pasoPorArmar == .llevaCompanero {
+                say(frase, .aviso)          // la pregunta ya estaba abierta: solo se repite
+            } else {
+                preguntar(.llevaCompanero, frase)
+                n.pasoAntesEraCompanero = false
+            }
+            n.tarjetaPreguntando = true
+        }
+    }
+
+    private func guardarDesdeTarjeta() {
+        guard medidaCompletaNueva() else { return }
+        nueva.tarjetaPreguntando = false
+        nueva.tarjetaVisible = false
+        pasoAbierto = nil
+        pasoPorArmar = nil
+        saveContinueTapped()
+        pintarCamaraNueva()
+    }
+    @objc fileprivate func tarjetaSiTocada() {
+        includeCompanion = true
+        guardarDesdeTarjeta()
+    }
+    @objc fileprivate func tarjetaNoTocada() {
+        includeCompanion = false
+        guardarDesdeTarjeta()
+    }
+    @objc fileprivate func tarjetaCorregirTocada() {
+        // Regresa al muelle con todo intacto: Deshacer dice qué quita, y la tarjeta vuelve al completar otra vez.
+        nueva.tarjetaOculta = true
+        nueva.tarjetaPreguntando = false
+        pintarCamaraNueva()
+    }
+
     private static func medidasTexto(_ n: Int) -> String { n == 1 ? "1 medida" : "\(n) medidas" }
     // 4 y no 4.0; 24.5 se queda 24.5.
     private static func pies(_ x: Double) -> String {
@@ -8188,7 +8372,7 @@ extension ARMeasureViewController {
     // La ficha blanca y la pista: el número grande pegado a lo que se mide.
     private func pintarCentroNuevo() {
         let n = nueva
-        let hayPanel = !n.panel.isHidden
+        let hayPanel = !n.panel.isHidden || n.tarjetaVisible
         let midiendo = (stage == .measuringLength || stage == .measuringWidth) && !esPorPieza
         n.mira.isHidden = hayPanel || !midiendo
         func grande(_ numero: String, _ unidad: String, antes: String = "") -> NSAttributedString {
@@ -8288,8 +8472,9 @@ extension ARMeasureViewController {
         nueva.aviso.isHidden = Date() > nueva.avisoHasta
     }
 
-    fileprivate func mostrarAvisoNuevo(_ texto: String, segundos: Double = 4.5) {
+    fileprivate func mostrarAvisoNuevo(_ texto: String, segundos: Double = 4.5, ok: Bool = false) {
         guard experienciaNueva, nueva.armada else { return }
+        nueva.aviso.backgroundColor = ok ? Claro.azulSuave.withAlphaComponent(0.97) : UIColor(red: 1.0, green: 0.95, blue: 0.82, alpha: 0.97)
         nueva.aviso.text = "  " + texto.replacingOccurrences(of: "⚠︎ ", with: "") + "  "
         nueva.avisoHasta = Date().addingTimeInterval(segundos)
         nueva.aviso.isHidden = false
