@@ -6,12 +6,12 @@
 // TELÉFONO (su diseño del 14-oct): Dry Logs abre con la cámara prendida. Arriba "Dry Logs" y en qué cuarto va
 // (Room 1 of 4), luego Level y Room para escoger dónde, y la cámara llena lo que sobra. El botón azul de cámara de
 // abajo (el de siempre) toma la foto directo. Lo que sigue después de la foto espera su siguiente diseño.
-import { $, $$, authFetch, registrarAtras, preguntar, alMostrar } from './app.js?v=2026-10-15-9';
-import { RESTRICCIONES, errorCamara, puedeCamaraPropia } from './camara.js?v=2026-10-15-9';
-import * as fotos from './fotos.js?v=2026-10-15-9';
-import { leerPantalla } from './lector.js?v=2026-10-15-9';
-import * as R from './registro.js?v=2026-10-15-9';
-import { APP_BUILD } from './config.js?v=2026-10-15-9';
+import { $, $$, authFetch, registrarAtras, preguntar, alMostrar } from './app.js?v=2026-10-15-10';
+import { RESTRICCIONES, errorCamara, puedeCamaraPropia } from './camara.js?v=2026-10-15-10';
+import * as fotos from './fotos.js?v=2026-10-15-10';
+import { leerPantalla } from './lector.js?v=2026-10-15-10';
+import * as R from './registro.js?v=2026-10-15-10';
+import { APP_BUILD } from './config.js?v=2026-10-15-10';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';

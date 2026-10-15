@@ -74,6 +74,8 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
             // el punto: los materiales de las CUATRO secciones, la lista de
             // cuartos, la de niveles, y cuanto mide cada cuarto en el plano.
             arVC.modo = call.getString("modo") ?? "unaSeccion"
+            // La bandera de la cámara nueva (Fase 0): sin ella, la cámara de siempre.
+            arVC.experiencia = call.getString("experiencia") ?? "hoy"
             // EL NIVEL YA VIENE RESUELTO DESDE LA PANTALLA. Se escoge con el
             // dedo en Medidas, una sola vez, antes de abrir la camara: adentro
             // ya no se pregunta y se estampa en cada medida del recorrido.
@@ -142,19 +144,83 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
                     case .cancelled:
                         call.resolve(["cancelled": true])
                     case .measured(let items):
-                        let measurements: [[String: Any]] = items.map { item in
-                            var d: [String: Any] = ["length": item.length, "material": item.material,
-                                                    "nivel": item.nivel, "cuarto": item.cuarto,
-                                                    "seccion": item.seccion]
-                            if let width = item.width { d["width"] = width }
-                            if let companion = item.companion { d["companion"] = companion }
-                            return d
+                        call.resolve(["cancelled": false, "measurements": Self.comoDiccionarios(items)])
+                    case .fallo(let items, let porque):
+                        // La cámara se cayó: lo guardado se entrega igual, con el porqué en "aviso".
+                        // Sin medidas, es un cancelado con su "error" (la web ya sabe enseñarlo).
+                        if items.isEmpty {
+                            call.resolve(["cancelled": true, "error": porque])
+                        } else {
+                            call.resolve(["cancelled": false, "measurements": Self.comoDiccionarios(items), "aviso": porque])
                         }
-                        call.resolve(["cancelled": false, "measurements": measurements])
                     }
                 }
             }
             presenter.present(arVC, animated: true)
         }
     }
+
+    static func comoDiccionarios(_ items: [ARMeasureItem]) -> [[String: Any]] {
+        items.map { item in
+            var d: [String: Any] = ["length": item.length, "material": item.material,
+                                    "nivel": item.nivel, "cuarto": item.cuarto,
+                                    "seccion": item.seccion]
+            if let width = item.width { d["width"] = width }
+            if let companion = item.companion { d["companion"] = companion }
+            return d
+        }
+    }
+
+#if targetEnvironment(simulator)
+    // MODO MAQUETA (Fase 2 de la cámara nueva, 15 oct 2026). ARKit no corre en el simulador, así que para enseñar la
+    // pantalla nueva antes de construir lo siguiente se abre sola sobre una foto, con datos de ejemplo:
+    //   xcrun simctl launch booted <app> -maquetaCamara 4
+    // Solo existe en el simulador: en un teléfono este bloque ni se compila.
+    override public func load() {
+        let paso = UserDefaults.standard.integer(forKey: "maquetaCamara")
+        guard paso > 0 else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.abrirMaqueta(paso) }
+    }
+    private func abrirMaqueta(_ paso: Int) {
+        guard let presenter = bridge?.viewController else { return }
+        ARMeasureViewController.tema = TemaCamara(["escogido": "#2563EBF2", "pastilla": "#0F1A2EBD", "tarjeta": "#151E2E",
+                                                   "neutro": "#243046", "primario": "#2563EBF2", "listo": "#1D4ED8F2", "fondo": "#0D1420"])
+        func op(_ v: String, _ l: String, _ u: String, comp: (String, String)? = nil) -> ARMaterialOption {
+            ARMaterialOption(value: v, label: l, companionValue: comp?.0, companionEn: comp?.0, companionEs: comp?.1,
+                             porPieza: u == "EA", unidad: u)
+        }
+        let secciones: [String: [ARMaterialOption]] = [
+            "wall": [op("Drywall", "Drywall / Tablaroca", "SF", comp: ("Insulation", "Insulación")), op("Plaster", "Plaster / Yeso", "SF"),
+                     op("Stud / Framing", "Stud / Framing / Armazón", "SF"), op("Insulation", "Insulación / Insulation", "SF"),
+                     op("Baseboard", "Baseboard / Zócalo", "LF", comp: ("Shoe Molding", "Moldura de zapata")), op("Shoe Molding", "Shoe Molding / Moldura de Zapata", "LF"),
+                     op("Trim", "Trim / Marco", "LF"), op("Crown Molding", "Crown Molding / Moldura de Corona", "LF")],
+            "floor": [op("Laminate", "Laminate / Laminado", "SF", comp: ("Underlayment", "Base")), op("Tile", "Tile / Baldosa", "SF"),
+                      op("Hardwood", "Hardwood / Madera", "SF"), op("Carpet", "Carpet / Alfombra", "SF", comp: ("Carpet Pad", "Almohadilla")),
+                      op("Tackless Strip", "Tackless Strip / Tira de clavos", "LF")],
+            "ceiling": [op("Drywall", "Drywall / Tablaroca", "SF", comp: ("Insulation", "Insulación")), op("Plaster", "Plaster / Yeso", "SF")],
+            "kitchen": [op("Cabinets", "Cabinets / Gabinetes", "LF"), op("Countertop", "Countertop / Cubierta", "SF"),
+                        op("Toe Kick", "Toe Kick / Zócalo de gabinete", "LF"), op("Dishwasher", "Dishwasher / Lavaplatos", "EA")],
+            "bathroom": [op("Shower Tile", "Shower Tile / Azulejo de regadera", "SF"), op("Vanity", "Vanity / Mueble del lavabo", "LF"),
+                         op("Toilet", "Toilet / Inodoro", "EA")],
+            "materiales": [op("6 mil containment plastic", "Plástico de contención / 6 mil plastic", "SF")]
+        ]
+        let arVC = ARMeasureViewController()
+        arVC.modalPresentationStyle = .fullScreen
+        arVC.experiencia = "nueva"
+        arVC.maqueta = paso
+        arVC.modo = "recorrido"
+        arVC.alcance = "nivel"
+        arVC.nivelActual = "2nd Floor"
+        arVC.nivelesDisponibles = ["1st Floor", "2nd Floor"]
+        arVC.crewName = "Juan"
+        arVC.section = "floor"
+        arVC.seccionesDisponibles = secciones
+        arVC.materials = secciones["floor"] ?? []
+        let cuartos = ["Living Room", "Kitchen", "Hallway", "Master Bedroom", "Bathroom", "Laundry Room"]
+        arVC.cuartosDisponibles = cuartos
+        arVC.cuartosPorPlanta = ["2nd Floor": cuartos]
+        arVC.onFinish = { [weak arVC] _ in arVC?.dismiss(animated: true) }
+        presenter.present(arVC, animated: false)
+    }
+#endif
 }

@@ -11,7 +11,7 @@
 //    del trabajo por partida; las notas; y el PDF "Measurements & Demo" (lo arma Documents).
 // Lo que cambia contra Field Reports: aquí el trabajo ya es el proyecto (cliente, dirección y fecha ya están), y los
 // niveles y cuartos son los del proyecto (los mismos de Photos y Dry Logs).
-import { $, authFetch, esAparato, preguntar, PERFIL } from './app.js?v=2026-10-15-9';
+import { $, authFetch, esAparato, preguntar, PERFIL } from './app.js?v=2026-10-15-10';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -421,6 +421,9 @@ async function guardarNota(){
 // Con los colores de Scanova (su decisión del 15-oct: "colores de Scanova", la voz sigue en español). La cámara es la
 // misma de Field Reports; Field Reports no manda tema y se queda con los suyos. Hex con transparencia al final.
 // Sin verde (su corrección del 15-oct: "el color verde no va, no se distingue"): Terminar/Listo van en el azul oscuro de Scanova.
+// LA CÁMARA NUEVA (Fase 2, 15 oct 2026): Scanova la pide primero. Un aparato viejo no conoce la bandera y abre la de
+// siempre; Field Reports no la manda y sigue con la de siempre hasta que esta se pruebe en obra.
+export const EXPERIENCIA_CAMARA = 'nueva';
 export const TEMA_CAMARA = { escogido: '#2563EBF2', pastilla: '#0F1A2EBD', tarjeta: '#151E2E', neutro: '#243046', primario: '#2563EBF2', listo: '#1D4ED8F2', fondo: '#0D1420' };
 function catalogos(){
   const secciones = {};
@@ -444,13 +447,15 @@ async function lanzarCamara(alcance, d){
   let res;
   try{
     res = await ARMeasure.measure({ modo: 'recorrido', alcance, nivel: nivel ? nivel.nombre : '', section: 'floor', materials: secciones.floor, secciones, cuartos, niveles,
-      areasPorCuarto: {}, cuartosPorPlanta, areasPorPlanta: {}, crewName: String((PERFIL && PERFIL.full_name) || '').split(' ')[0], roomName: cuarto ? cuarto.nombre : '', roomAreaSqFt: 0, tema: TEMA_CAMARA });
+      areasPorCuarto: {}, cuartosPorPlanta, areasPorPlanta: {}, crewName: String((PERFIL && PERFIL.full_name) || '').split(' ')[0], roomName: cuarto ? cuarto.nombre : '', roomAreaSqFt: 0, tema: TEMA_CAMARA, experiencia: EXPERIENCIA_CAMARA });
   }catch(e){ avisar('Could not open the measuring camera. ' + msg(e)); return; }
   if(!res || res.cancelled){ if(res && res.error) avisar(res.error); return; }
   const nuevas = filasDeCamara(res.measurements, { nivel: nivel ? nivel.nombre : '', cuarto: cuarto ? cuarto.nombre : '', orden: Date.now() }).map(f => ({ ...f, id: nuevoId() }));
   if(!nuevas.length) return;
   guardarPendientes(tid, nuevas);
   await guardarDeCamara(tid, nuevas);
+  // La cámara se cayó a media sesión, pero trajo lo que ya estaba guardado: se dice por qué terminó así.
+  if(res.aviso) avisar(String(res.aviso));
 }
 // Cada medida con su nivel y su cuarto DEL PROYECTO: si la cuadrilla dijo uno que todavía no existe, se crea (así sale
 // también en Photos y Dry Logs, como un cuarto agregado a mano). Antes se releen del servidor: otro del equipo pudo
