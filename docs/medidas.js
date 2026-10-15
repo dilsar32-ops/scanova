@@ -11,7 +11,7 @@
 //    del trabajo por partida; las notas; y el PDF "Measurements & Demo" (lo arma Documents).
 // Lo que cambia contra Field Reports: aquí el trabajo ya es el proyecto (cliente, dirección y fecha ya están), y los
 // niveles y cuartos son los del proyecto (los mismos de Photos y Dry Logs).
-import { $, authFetch, esAparato, preguntar, PERFIL } from './app.js?v=2026-10-15-7';
+import { $, authFetch, esAparato, preguntar, PERFIL } from './app.js?v=2026-10-15-8';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -256,7 +256,7 @@ function pintarAqui(){
       <div class="med-cuarto-cab"><h3>${esc(C.titulo)}</h3><small>${esc(C.nivel)}</small></div>
       <div class="med-filas">${C.materiales.map(M => M.filas.map(filaHtml).join('')).join('')}</div>
       ${C.materiales.some(M => M.filas.length > 1) ? `<div class="med-tot"><span>By material</span>${C.materiales.map(M => `<span class="med-tot-i"><b>${esc(M.material)}</b> <small>${esc(M.superficie)}</small> ${esc(totalTexto(M.sqft, M.linear, M.piezas))}</span>`).join('')}</div>` : ''}
-      <div class="med-agregar"><span>Add to this room</span><div class="chips envolver">${SECCIONES.map(([k, t]) => `<button type="button" class="chip" data-med-agregar='${esc(JSON.stringify({ ...donde, seccion: k }))}'>+ ${t}</button>`).join('')}</div></div>
+      <div class="med-agregar"><span>Add to this room</span><div class="med-rejilla med-partes">${SECCIONES.map(([k, t]) => `<button type="button" class="chip" data-med-agregar='${esc(JSON.stringify({ ...donde, seccion: k }))}'>+ ${t}</button>`).join('')}</div></div>
     </section>`;
   };
   const niveles = g.niveles.map(N => `<h3 class="med-nivel">${esc(N.titulo)}</h3>${N.cuartos.map(cuartoHtml).join('')}`).join('');
@@ -297,12 +297,14 @@ function pintarEditor(){
   const nivel = nombreNivel(ED.nivel_id, ED.nivel), cuarto = nombreCuarto(ED.cuarto_id, ED.cuarto);
   const r = calcular(mat, ED.largo, pieza ? '' : ED.ancho), res = totalTexto(r.sqft, r.linear, r.piezas);
   const etqAncho = ED.seccion === 'wall' ? 'Height (ft)' : 'Width (ft)';
+  // En la compu, 4 columnas solo si la última fila queda igual o más llena que con 3 (Wall: 9 = 3 × 3, sin huecos).
+  const nMat = lista.length + 1, hueco = (c) => (c - nMat % c) % c, cuatro = hueco(4) <= hueco(3);
   f.innerHTML = `
     <div class="med-donde">${IC('casa')}<span><b>${esc(cuarto || 'Room not specified')}</b>${nivel ? ' · ' + esc(nivel) : ''}</span><button type="button" class="pdet-link" data-med-cambiar>Change</button></div>
     <p class="med-et">Part</p>
-    <div class="chips envolver">${SECCIONES.map(([k, t]) => `<button type="button" class="chip${ED.seccion === k ? ' on' : ''}" data-med-sec="${k}">${t}</button>`).join('')}</div>
+    <div class="med-rejilla med-partes">${SECCIONES.map(([k, t]) => `<button type="button" class="chip${ED.seccion === k ? ' on' : ''}" data-med-sec="${k}">${t}</button>`).join('')}</div>
     <p class="med-et">${ED.seccion === 'kitchen' || ED.seccion === 'bathroom' ? 'Item' : 'Material'}</p>
-    <div class="chips envolver">${lista.concat(['Other']).map(m => `<button type="button" class="chip${ED.material === m ? ' on' : ''}" data-med-mat="${esc(m)}">${esc(m)}</button>`).join('')}</div>
+    <div class="med-rejilla med-mats${cuatro ? ' c4' : ''}">${lista.concat(['Other']).map(m => `<button type="button" class="chip${ED.material === m ? ' on' : ''}" data-med-mat="${esc(m)}">${esc(m)}</button>`).join('')}</div>
     ${ED.material === 'Other' ? `<div class="field med-otro"><label for="medOtro">Material / item name</label><input id="medOtro" type="text" maxlength="80" value="${esc(ED.otro)}" placeholder="e.g. Wainscoting"></div>` : ''}
     ${mat ? (pieza ? `<div class="field med-dims1"><label for="medLargo">How many? <span class="hint">each</span></label><input id="medLargo" type="number" inputmode="numeric" min="1" step="1" value="${esc(ED.largo)}"></div>`
       : `<div class="med-dims"><div class="field"><label for="medLargo">Length (ft)</label><input id="medLargo" type="number" inputmode="decimal" min="0" step="0.01" value="${esc(ED.largo)}" placeholder="L"></div>

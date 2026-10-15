@@ -1,7 +1,7 @@
 // Scanova · los proyectos más cercanos a donde está parado (para "Taking photos for…").
 // La posición sale del GPS del teléfono (en la app, el de Apple; en el navegador, el del navegador).
 // Los proyectos sin punto guardado se ubican una vez con Apple (solo en la app) y se recuerdan en el teléfono.
-import { authFetch } from './app.js?v=2026-10-15-7';
+import { authFetch } from './app.js?v=2026-10-15-8';
 
 // ---------- lo puro ----------
 export function distanciaMillas(a, b){

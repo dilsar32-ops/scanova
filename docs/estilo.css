@@ -2521,6 +2521,12 @@ body.dl-barra .pie [data-nav="proyectos"], body.dl-barra .pie [data-nav="clients
 .med-agregar .chip.chip, .med-forma .chip.chip{ min-height:44px; }
 /* Su corrección (15-oct): Scanova no usa botones de pastilla; esquinas como sus botones (8-10px). Solo en Measurements. */
 .med-agregar .chip.chip, .med-forma .chip.chip{ border-radius:8px; }
+/* Y en cuadrícula pareja, sin huecos entre botones (su corrección del 15-oct): las 6 partes en 3 columnas = 2 filas
+   exactas en el teléfono (6 en una fila en la compu); los materiales en 3 columnas (4 en la compu). Un nombre largo
+   se parte en dos renglones dentro de su botón en vez de empujar a los demás. */
+.med-rejilla{ display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:8px; }
+.med-rejilla .chip.chip{ width:100%; min-width:0; white-space:normal; line-height:1.2; text-align:center; padding:6px 8px; display:flex; align-items:center; justify-content:center; }
+@media (min-width:600px){ .med-rejilla.med-mats.c4{ grid-template-columns:repeat(4, minmax(0, 1fr)); } .med-rejilla.med-partes{ grid-template-columns:repeat(6, minmax(0, 1fr)); } }
 .card.med-pend p{ margin:0 0 10px; font-size:14.5px; line-height:1.45; }
 .card.med-pend .aviso{ margin:0 0 10px; }
 .doc-sub.doc-nota{ white-space:pre-wrap; }
