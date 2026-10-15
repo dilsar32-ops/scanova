@@ -1,15 +1,16 @@
 // Scanova · la ficha de un proyecto (diseño de Amilcar, 12 oct 2026): portada, nombre, dirección, etapa, cliente,
 // encargado y fecha; pestañas Rooms · Photos · Dry Logs · Floor Plan · Measurements · Notes · Documents · Activity.
 // Rooms = niveles (Basement, First Floor…) y sus cuartos (Kitchen…). Photos = las fotos por nivel y por cuarto.
-import { $, $$, authFetch, irA, atras, esManager, PERFIL, marcarLimpio, preguntar } from './app.js?v=2026-10-15-6';
-import * as trabajos from './trabajos.js?v=2026-10-15-6';
-import * as fotos from './fotos.js?v=2026-10-15-6';
-import * as panel from './panel.js?v=2026-10-15-6';
-import * as planos from './planos.js?v=2026-10-15-6';
-import * as camara from './camara.js?v=2026-10-15-6';
-import * as detalles from './detalles.js?v=2026-10-15-6';
-import * as drylog from './drylog.js?v=2026-10-15-6';
-import * as documentos from './documentos.js?v=2026-10-15-6';
+import { $, $$, authFetch, irA, atras, esManager, PERFIL, marcarLimpio, preguntar } from './app.js?v=2026-10-15-7';
+import * as trabajos from './trabajos.js?v=2026-10-15-7';
+import * as fotos from './fotos.js?v=2026-10-15-7';
+import * as panel from './panel.js?v=2026-10-15-7';
+import * as planos from './planos.js?v=2026-10-15-7';
+import * as camara from './camara.js?v=2026-10-15-7';
+import * as detalles from './detalles.js?v=2026-10-15-7';
+import * as drylog from './drylog.js?v=2026-10-15-7';
+import * as documentos from './documentos.js?v=2026-10-15-7';
+import * as medidas from './medidas.js?v=2026-10-15-7';
 
 const esc = (v) => trabajos.esc(v);
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -207,6 +208,7 @@ function irTab(k){
   TAB = k; MODO_SEL = false; SEL.clear();
   if(k === 'secado') drylog.entrar();
   if(k === 'documentos') documentos.entrar();
+  if(k === 'medidas') medidas.entrar();
   $$('#fichaTabs .ptab').forEach(b => b.classList.toggle('on', b.dataset.ptab === k));
   $$('#trabajoFicha .tab-panel').forEach(p => { p.hidden = p.dataset.panel !== k; });
   const b = $('#fichaTabs .ptab.on'); if(b && b.scrollIntoView) b.scrollIntoView({ block:'nearest', inline:'center' });
@@ -214,9 +216,11 @@ function irTab(k){
   if(k === 'plano') planos.enfocar(); else document.body.classList.remove('pl-fijo');
   if(k !== 'secado') drylog.salir();
 }
-function pintarTodo(){ pintarCuartos(); pintarFotos(); pintarNotas(); pintarActividad(); pintarPronto(); pintarPlano(); pintarDryLog(); pintarDocumentos(); camara.pintarCuarto(); }
+function pintarTodo(){ pintarCuartos(); pintarFotos(); pintarNotas(); pintarActividad(); pintarPronto(); pintarPlano(); pintarDryLog(); pintarMedidas(); pintarDocumentos(); camara.pintarCuarto(); }
 // Dry Logs (su diseño del 14-oct): se dibuja con la pestaña abierta, con los niveles y cuartos del proyecto.
 function pintarDryLog(){ if(TAB === 'secado' && T) drylog.pintar(T, NIVELES, CUARTOS); }
+// Measurements (15-oct): lo que se demolió, cuarto por cuarto (copiado de Medidas de Field Reports).
+function pintarMedidas(){ if(TAB === 'medidas' && T) medidas.pintar(T, NIVELES, CUARTOS); }
 // Documents (14-oct): los reportes del secado (Dry Log y Equipment) con su PDF.
 function pintarDocumentos(){ if(TAB === 'documentos' && T) documentos.pintar(T, NIVELES, CUARTOS); }
 // Floor Plan (su diseño): solo se dibuja cuando la pestaña está abierta (el plano pesa).
@@ -334,7 +338,8 @@ function pintarActividad(){
   caja.innerHTML = items.length ? '<div class="pact">' + items.map(x => `<div class="pact-fila"><span class="pact-punto"></span><div><b>${esc(x.texto)}</b><small>${esc(fechaHora(new Date(x.cuando).toISOString()))}</small></div></div>`).join('') + '</div>' : '<p class="vacio">No activity yet.</p>';
 }
 function pintarPronto(){
-  [['medidas', 'Measurements', 'Room measurements will live here. This tab is built next, from your design.']].forEach(([k, t, x]) => {
+  // Measurements ya tiene su pestaña (medidas.js, 15-oct); aquí quedan las que todavía no tienen diseño (ninguna hoy).
+  [].forEach(([k, t, x]) => {
     const caja = $('#panel-' + k); if(caja && !caja.innerHTML) caja.innerHTML = `<div class="pronto pronto-tab"><span class="pronto-ic">${IC(k === 'medidas' ? 'cubo' : 'doc')}</span><h2 class="titulo chico">${t}</h2><p>${x}</p></div>`;
   });
 }
@@ -367,6 +372,26 @@ async function crearNivel(nombre){
   if(!r.ok) throw new Error(r.status === 404 ? 'falta correr sql/fotos-04-niveles.sql' : 'HTTP ' + r.status);
   const fila = (await r.json())[0]; if(!fila) throw new Error('the database did not return the level');
   NIVELES = ordenarNiveles(NIVELES.concat(fila)); pintarTodo(); return fila;
+}
+// La cámara de Measurements nombra niveles y cuartos de viva voz: si ya existen se usan, si no se crean (como a mano).
+// Con el proyecto de la medición (tid): si mientras tanto se abrió otro, nada se crea en el equivocado.
+const mismoNombre = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+const mismoProyecto = (tid) => { if(tid && (!T || T.id !== tid)) throw new Error('another project was opened'); };
+async function asegurarNivel(nombre, tid){ mismoProyecto(tid); return NIVELES.find(n => mismoNombre(n.nombre, nombre)) || await crearNivel(String(nombre).trim()); }
+async function asegurarCuarto(nivel_id, nombre, tid){ mismoProyecto(tid); return CUARTOS.find(c => c.nivel_id === nivel_id && mismoNombre(c.nombre, nombre)) || await crearCuarto(nivel_id, String(nombre).trim(), null); }
+// Releer niveles y cuartos antes de crear alguno (otro del equipo pudo agregar "Kitchen" hace un minuto). Si no se
+// pueden leer, NO se sigue: con una lista vacía se crearían repetidos.
+async function refrescarCuartos(tid){
+  mismoProyecto(tid);
+  const [rn, rc] = await Promise.all([
+    authFetch('/rest/v1/fotos_niveles?trabajo_id=eq.' + encodeURIComponent(tid) + '&select=*&order=orden.asc,created_at.asc'),
+    authFetch('/rest/v1/fotos_cuartos?trabajo_id=eq.' + encodeURIComponent(tid) + '&select=*&order=orden.asc,created_at.asc'),
+  ]);
+  if(!rn.ok || !rc.ok) throw new Error('could not read the levels and rooms (HTTP ' + (rn.ok ? rc.status : rn.status) + ')');
+  const niveles = await rn.json(), cuartos = await rc.json();
+  mismoProyecto(tid);
+  NIVELES = ordenarNiveles(niveles); CUARTOS = cuartos; pintarTodo();
+  return { niveles: NIVELES, cuartos: CUARTOS };
 }
 async function crearCuarto(nivel_id, nombre, tipo){
   const r = await authFetch('/rest/v1/fotos_cuartos', { method:'POST', headers:{ Prefer:'return=representation' }, body: JSON.stringify({ trabajo_id: T.id, nivel_id, nombre, tipo: tipo || null, orden: cuartosDe(nivel_id).length }) });
@@ -533,6 +558,8 @@ export function conectar(){
   detalles.conectar();
   drylog.conectar();
   documentos.conectar();
+  medidas.conectar();
+  medidas.usar({ escogerCuarto, asegurarNivel, asegurarCuarto, refrescar: refrescarCuartos, pdf: () => documentos.pdfDeMedidas(T, NIVELES, CUARTOS, medidas.filas(), medidas.nota()) });
   camara.usarCuartos({ hay: (id) => !!(T && T.id === id), destino: destinoActual, nombre: nombreDestino, escoger: escogerCuarto });
   fotos.alPintar((urls) => { pintarFotos(urls); if(TAB === 'secado' && T) drylog.alCambiarFotos(); });
   fotos.usarDestino(destinoActual);

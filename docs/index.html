@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
-<link rel="stylesheet" href="estilo.css?v=2026-10-15-6">
+<link rel="stylesheet" href="estilo.css?v=2026-10-15-7">
 <meta name="description" content="Scanova360: the smarter way to capture, organize, and manage restoration projects. Private workspace, by invitation only.">
 <style>
 /* ===== BIENVENIDA (la imagen aprobada hecha pagina; se ve solo sin sesion) ===== */
@@ -712,6 +712,14 @@ body.en-inicio{ overflow:hidden; }
     </div>
   </div>
   <!-- ESCOGER CUARTO: para mover fotos o para decirle a la cámara a qué cuarto van. Va encima de la cámara. -->
+  <!-- Measurements (15-oct): agregar o corregir una medida. Va ANTES de la hoja de escoger cuarto, así "Change" abre
+       esa hoja encima de esta sin perder lo escrito. -->
+  <div class="hoja hoja-medida" id="hojaMedida" hidden>
+    <div class="hoja-caja" role="dialog" aria-labelledby="medTitulo">
+      <div class="hoja-cab"><h2 id="medTitulo">Add measurement</h2><button type="button" class="cerrar-hoja" data-med-cerrar aria-label="Close">✕</button></div>
+      <div class="hoja-lista med-forma" id="medForma"></div>
+    </div>
+  </div>
   <div class="hoja hoja-cuarto" id="hojaCuarto" hidden>
     <div class="hoja-caja" role="dialog" aria-labelledby="cuartoTitulo">
       <div class="hoja-cab"><h2 id="cuartoTitulo">Move to…</h2><button type="button" class="cerrar-hoja" data-cerrar-cuarto aria-label="Close">✕</button></div>
@@ -735,6 +743,6 @@ body.en-inicio{ overflow:hidden; }
     <div class="visor-pie"><span id="visorPie"></span><button type="button" class="btn btn-outline btn-rojo" id="visorBorrar" hidden><svg class="ic"><use href="#i-archivo"/></svg>Papelera</button></div>
   </div>
 </div>
-<script type="module" src="app.js?v=2026-10-15-6"></script>
+<script type="module" src="app.js?v=2026-10-15-7"></script>
 </body>
 </html>

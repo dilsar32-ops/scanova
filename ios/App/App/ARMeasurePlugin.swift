@@ -50,6 +50,9 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
                 call.resolve(["cancelled": true, "error": "No se pudo abrir la cámara."])
                 return
             }
+            // Los colores de la app que la abre (Scanova manda los suyos; sin tema, los de siempre). Antes de crear la
+            // pantalla: sus botones toman el color al armarse.
+            ARMeasureViewController.tema = TemaCamara(call.getObject("tema"))
             let arVC = ARMeasureViewController()
             arVC.modalPresentationStyle = .fullScreen
             arVC.materials = materials

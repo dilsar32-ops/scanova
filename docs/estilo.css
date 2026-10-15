@@ -1983,6 +1983,30 @@ body.pie-atras .tab-inicio svg.tab-atras{ display:block; }
 .doc-acc .btn .ic{ width:16px; height:16px; }
 @media (max-width:899px){ .doc-fila{ flex-wrap:wrap; } .doc-acc{ width:100%; } .doc-acc .btn{ flex:1; } }
 .doc-vista{ display:flex; flex-direction:column; gap:12px; }
+/* Documents (15 oct): Photo Report, Floor Plan y "Send documents" (todo en un PDF o uno por documento). */
+.doc-enviar{ margin-top:6px; padding:14px; border:1px solid var(--line); border-radius:12px; background:var(--bg2); display:flex; flex-direction:column; gap:10px; }
+.doc-enviar h3{ margin:0; font-size:16px; font-weight:700; }
+.doc-enviar .doc-nota{ margin:0; }
+.doc-checks{ display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:8px; }
+.doc-check{ display:flex; align-items:center; gap:10px; min-height:52px; padding:8px 12px; border:1px solid var(--line2); border-radius:10px; background:var(--card); cursor:pointer; }
+.doc-check input{ width:20px; height:20px; flex:none; accent-color:var(--accent); }
+.doc-check span{ display:flex; flex-direction:column; min-width:0; }
+.doc-check b{ font-size:14.5px; }
+.doc-check small{ font-size:12.5px; color:var(--ink-soft); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.doc-check.off{ opacity:.5; cursor:default; }
+.doc-enviar-acc{ display:flex; gap:10px; flex-wrap:wrap; }
+.doc-enviar-acc .btn{ flex:1 1 180px; }
+.doc-enviar-acc .btn .ic{ width:16px; height:16px; }
+.doc-listos{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px; border-radius:10px; background:var(--accent-soft); font-weight:600; }
+.doc-listos .btn .ic{ width:16px; height:16px; }
+.doc-fotos{ display:grid; grid-template-columns:repeat(auto-fill, minmax(128px, 1fr)); gap:12px; }
+.doc-fotos figure{ margin:0; display:flex; flex-direction:column; gap:5px; }
+.doc-fotos img{ width:100%; aspect-ratio:4/3; object-fit:cover; border-radius:8px; background:var(--bg2); display:block; }
+.doc-fotos figcaption{ font-size:12px; color:var(--ink-soft); line-height:1.35; }
+.doc-fotos figcaption b{ color:var(--ink); }
+.doc-fotos figcaption small{ display:block; font-size:11.5px; color:var(--ink); }
+.doc-plano{ border:1px solid var(--line); border-radius:10px; overflow:hidden; background:#fff; }
+.doc-plano svg{ display:block; width:100%; height:auto; }
 .doc-vista-cab{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
 .doc-vista-cab .volver{ padding:4px 0; }
 .doc-vista-cab .btn .ic{ width:16px; height:16px; }
@@ -2430,3 +2454,73 @@ body.dl-barra .pie [data-nav="proyectos"], body.dl-barra .pie [data-nav="clients
   .dl-lista-web .dl-li-foto{ width:64px; height:64px; }
   .dl-lista-web .dl-lista-mas{ max-width:420px; align-self:center; }
 }
+
+/* ---------- MEASUREMENTS (15 oct 2026): lo que se demolió, cuarto por cuarto (copiado de Medidas de Field Reports) ---------- */
+/* Debajo de la pregunta (#dlgPregunta, 80) y de escoger cuarto (90); encima del detalle (62) y de #detHoja (70). */
+.hoja.hoja-medida{ z-index:78; }
+.med-cab{ display:flex; align-items:flex-start; justify-content:space-between; gap:14px; flex-wrap:wrap; margin:0 0 14px; }
+.med-cab-t{ min-width:0; flex:1 1 280px; }
+.med-cab-t p{ margin:4px 0 0; color:var(--ink-soft); font-size:14px; line-height:1.45; }
+.med-acc{ display:flex; gap:10px; flex-wrap:wrap; }
+.med .vacio-tarj{ margin-bottom:14px; }
+.card.med-alcance h3{ margin:0 0 4px; font-size:17px; font-weight:700; }
+.med-alcance-ops{ display:grid; gap:10px; grid-template-columns:repeat(3, minmax(0,1fr)); margin:12px 0 10px; }
+.med-nota-chica{ margin:6px 0 0; color:var(--ink-soft); font-size:13px; line-height:1.45; }
+.med-nivel{ margin:22px 0 10px; font-size:13px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:var(--accent); }
+.card.med-cuarto{ padding:14px 16px; }
+.med-cuarto-cab{ display:flex; align-items:baseline; gap:8px; margin-bottom:8px; }
+.med-cuarto-cab h3{ margin:0; font-size:17px; font-weight:700; }
+.med-cuarto-cab small{ color:var(--ink-soft); font-size:13px; }
+.med-filas{ border-top:1px solid var(--line); }
+.med-fila{ display:flex; align-items:center; gap:10px; width:100%; min-height:52px; font:inherit; color:var(--ink); background:none; border:0; border-bottom:1px solid var(--line); padding:9px 4px; text-align:left; cursor:pointer; }
+.med-fila:hover{ background:var(--bg2); }
+.med-fila-txt{ flex:1; min-width:0; display:flex; flex-direction:column; gap:1px; }
+.med-fila-txt b{ font-size:15px; }
+.med-fila-txt small{ color:var(--ink-soft); font-size:13px; }
+.med-fila-res{ font-size:14.5px; font-weight:700; white-space:nowrap; }
+.med-fila .med-chev{ width:16px; height:16px; color:var(--ink-mute); }
+.med-tot{ display:flex; flex-wrap:wrap; gap:4px 16px; margin-top:10px; font-size:13.5px; color:var(--ink-soft); }
+.med-tot > span:first-child{ width:100%; font-size:12.5px; font-weight:700; }
+.med-tot-i b{ color:var(--ink); }
+.med-tot-i small{ color:var(--ink-mute); }
+.med-agregar{ margin-top:12px; padding-top:10px; border-top:1px dashed var(--line2); }
+.med-agregar > span{ display:block; font-size:12.5px; font-weight:700; color:var(--ink-soft); margin-bottom:6px; }
+.med-agregar .chip{ padding:6px 12px; font-size:13.5px; }
+.card.med-partidas h3{ margin:0 0 8px; font-size:17px; font-weight:700; }
+.med-tabla-caja{ overflow-x:auto; }
+.med-tabla{ width:100%; border-collapse:collapse; font-size:14px; }
+.med-tabla th{ text-align:left; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-soft); padding:6px 8px; border-bottom:1px solid var(--line); white-space:nowrap; }
+.med-tabla td{ padding:8px; border-bottom:1px solid var(--line); }
+.med-tabla .der{ text-align:right; }
+.card.med-notas label{ display:block; margin-bottom:6px; }
+.card.med-notas textarea{ width:100%; min-height:90px; font:inherit; font-size:16px; color:var(--ink); background:var(--card); border:1px solid var(--line2); border-radius:10px; padding:10px 12px; resize:vertical; }
+.card.med-notas textarea:focus{ outline:none; border-color:var(--accent); box-shadow:0 0 0 3px rgba(37,99,235,.18); }
+.hoja-lista.med-forma{ padding:2px 18px 18px; }
+.med-donde{ display:flex; align-items:center; gap:8px; padding:10px 12px; background:var(--bg2); border-radius:10px; font-size:14.5px; }
+.med-donde span{ flex:1; min-width:0; }
+.med-donde .ic{ width:18px; height:18px; color:var(--ink-soft); }
+.med-et{ margin:14px 0 6px; font-size:13px; font-weight:700; color:var(--ink-soft); }
+.med-dims{ display:flex; align-items:flex-end; gap:8px; margin-top:12px; }
+.med-dims .field{ flex:1; margin:0; }
+.med-x{ padding-bottom:12px; color:var(--ink-mute); font-weight:700; }
+.field.med-dims1{ margin:12px 0 0; max-width:220px; }
+.field.med-otro{ margin:10px 0 0; }
+.med-res{ margin:10px 0 0; font-size:16px; font-weight:700; color:var(--accent); min-height:1.2em; }
+.med-acomp{ display:flex; align-items:center; gap:10px; margin-top:12px; padding:10px 12px; border:1px solid var(--line2); border-radius:10px; font-size:14.5px; cursor:pointer; }
+.med-acomp input{ width:20px; height:20px; flex:0 0 auto; accent-color:var(--accent); }
+.med-forma .fila-botones{ margin-top:14px; }
+.btn.med-otra, .btn.med-cancelar{ margin-top:10px; }
+@media (max-width:899px){
+  .med-alcance-ops{ grid-template-columns:1fr; }
+  .med-acc{ width:100%; }
+  .med-acc .btn{ flex:1 1 auto; }
+}
+.hoja.hoja-medida .hoja-caja{ max-height:92%; }
+/* Lo que se toca con el dedo, al menos 44px (la regla de iOS). */
+.med-donde .pdet-link{ min-height:44px; padding:0 4px; }
+.med-agregar .chip.chip, .med-forma .chip.chip{ min-height:44px; }
+/* Su corrección (15-oct): Scanova no usa botones de pastilla; esquinas como sus botones (8-10px). Solo en Measurements. */
+.med-agregar .chip.chip, .med-forma .chip.chip{ border-radius:8px; }
+.card.med-pend p{ margin:0 0 10px; font-size:14.5px; line-height:1.45; }
+.card.med-pend .aviso{ margin:0 0 10px; }
+.doc-sub.doc-nota{ white-space:pre-wrap; }

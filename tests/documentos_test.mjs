@@ -24,7 +24,23 @@ ok('Equipment: columna "Today" cuando hoy no hubo visita (la cuenta se ve comple
 ok('Equipment: días de equipo 3 + 2 + 2 = 7 y el total', me.salas.find(s => s.nombre === 'Kitchen').tipos[0].dias === 7 && me.total === 7);
 ok('Equipment: lo de un día sin visita se marca como "sigue"', me.salas.find(s => s.nombre === 'Kitchen').tipos[0].celdas[2].visto === false);
 ok('Equipment: la regla de los días se dice en el reporte', /removal day is not counted/.test(D.REGLA_DIAS));
+// Photo Report y Floor Plan (15-oct): sus secciones en Documents.
+{ const fs_ = [{ id: 'a', cuarto_id: 'k', nivel_id: 'n1', tomada_at: '2026-10-12T15:00:00Z' }, { id: 'b', cuarto_id: 'mb', nivel_id: 'n2', tomada_at: '2026-10-13T09:00:00Z' },
+    { id: 'c', cuarto_id: 'k', nivel_id: 'n1', tomada_at: '2026-10-12T09:00:00Z', nota: 'Wet drywall' }, { id: 'd', cuarto_id: null, nivel_id: 'n1', subida_at: '2026-10-14T09:00:00Z' },
+    { id: 'e', cuarto_id: null, nivel_id: null, subida_at: '2026-10-11T09:00:00Z' }, { id: 'f1', cuarto_id: 'k', nivel_id: 'n1', tomada_at: '2026-10-12T16:00:00Z' }];
+  const mf = D.modeloFotos(niv, cua, fs_, lect);
+  ok('Photo Report: cuarto por cuarto en el orden del proyecto (piso de arriba primero), después "Whole level" y al final sin cuarto',
+    mf.grupos.map(g => D.tituloGrupo(g)).join() === 'Master Bedroom,Kitchen,Whole First Floor,No room');
+  ok('Photo Report: dentro de un cuarto, en el orden en que se tomaron', mf.grupos[1].fotos.map(f => f.id).join() === 'c,a,f1');
+  ok('Photo Report: cada foto con su número, seguido de principio a fin', mf.grupos.flatMap(g => g.fotos.map(f => f.num)).join() === '1,2,3,4,5,6' && mf.total === 6);
+  ok('Photo Report: la foto que prueba una lectura dice cuál lectura es', mf.grupos[1].fotos[2].lectura && mf.grupos[1].fotos[2].lectura.valor === 48);
+  const mp = D.modeloPlanos(niv, [{ id: 'p1', nivel_id: 'n1', created_at: '2026-10-12' }, { id: 'p2', nivel_id: 'n1', created_at: '2026-10-14' }, { id: 'p3', nivel_id: 'n2', created_at: '2026-10-13' }]);
+  ok('Floor Plan: la hoja más nueva de cada nivel, en el orden de los niveles', mp.map(x => x.nivel + ':' + x.plano.id).join() === 'Second Floor:p3,First Floor:p2'); }
 const src = fs.readFileSync(new URL('../docs/documentos.js', import.meta.url), 'utf8');
+ok('Send documents: todo en un PDF (portada + índice) o uno por documento', /export async function pdfTodo/.test(src) && /function portadaPdf/.test(src) && /data-doc-todo="uno"/.test(src) && /data-doc-todo="varios"/.test(src));
+ok('cada reporte puede ir solo o dentro del de todo junto (las hojas nuevas con SU orientación)', (src.match(/await abrirDoc\(opc, '(portrait|landscape)'\)/g) || []).length >= 4 && !/doc\.addPage\(\);/.test(src));
+ok('si la hoja de compartir ya no abre sola (el PDF tardó), queda un botón Share', /NotAllowedError/.test(src) && /data-doc-compartir/.test(src));
+ok('la foto se mide ANTES de soltarla (un ImageBitmap cerrado mide 0)', /const iw = im\.width \|\| im\.naturalWidth/.test(src) && !/im\.close\(\);?\s*\n\s*return \{ d, w: Math\.round\(im\.width/.test(src));
 ok('el PDF se hace aquí mismo (jsPDF de la app, sin servicio de afuera)', /vendor\/jspdf\.umd\.min\.js/.test(src) && fs.existsSync(new URL('../docs/vendor/jspdf.umd.min.js', import.meta.url)));
 ok('Documents ya no dice "built next"', !/Estimates, reports and PDFs for this project will live here/.test(fs.readFileSync(new URL('../docs/proyecto.js', import.meta.url), 'utf8')));
 console.log(`\ndocumentos: ${pass} ok, ${fail} fallas`);

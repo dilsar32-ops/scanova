@@ -4,6 +4,39 @@ import ARKit
 import AVFoundation
 import Speech
 
+// Los colores de la cámara por papel (ver "EL TEMA" en ARMeasureViewController). Los de aquí son los de siempre
+// (Field Reports); Scanova manda los suyos en hex ("#2563EB" o con transparencia "#0F1A2EBD").
+struct TemaCamara {
+    var escogido = UIColor(red: 0.09, green: 0.64, blue: 0.64, alpha: 0.95)   // lo que está escogido / "aquí está usted"
+    var pastilla = UIColor.black.withAlphaComponent(0.62)                      // las pastillas sobre la cámara
+    var tarjeta = UIColor(white: 0.12, alpha: 1)                               // las tarjetas (material, ayuda)
+    var neutro = UIColor(white: 0.22, alpha: 1)                                // un botón sin escoger
+    var primario = UIColor.systemBlue.withAlphaComponent(0.9)                  // Medir ancho, Guardar y seguir
+    var listo = UIColor.systemGreen.withAlphaComponent(0.95)                   // Terminar, Listo
+    var fondo = UIColor.black                                                  // detrás de las tarjetas (con su transparencia)
+
+    init() {}
+    init(_ d: [String: Any]?) {
+        guard let d = d else { return }
+        func c(_ k: String) -> UIColor? { (d[k] as? String).flatMap(TemaCamara.color) }
+        if let x = c("escogido") { escogido = x }
+        if let x = c("pastilla") { pastilla = x }
+        if let x = c("tarjeta") { tarjeta = x }
+        if let x = c("neutro") { neutro = x }
+        if let x = c("primario") { primario = x }
+        if let x = c("listo") { listo = x }
+        if let x = c("fondo") { fondo = x }
+    }
+    // "#RRGGBB" o "#RRGGBBAA"; cualquier otra cosa no cambia nada (se queda el de siempre).
+    static func color(_ hex: String) -> UIColor? {
+        var t = hex.trimmingCharacters(in: .whitespaces); if t.hasPrefix("#") { t.removeFirst() }
+        guard t.count == 6 || t.count == 8, let v = UInt64(t, radix: 16) else { return nil }
+        let a: CGFloat = t.count == 8 ? CGFloat(v & 0xFF) / 255 : 1
+        let rgb = t.count == 8 ? v >> 8 : v
+        return UIColor(red: CGFloat((rgb >> 16) & 0xFF) / 255, green: CGFloat((rgb >> 8) & 0xFF) / 255, blue: CGFloat(rgb & 0xFF) / 255, alpha: a)
+    }
+}
+
 struct ARMaterialOption {
     let value: String
     let label: String
@@ -310,8 +343,13 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
     //
     // En UN solo lugar: antes estaba escrito `systemOrange` en seis sitios, y
     // seis copias de un color son seis oportunidades de que uno se quede atras.
-    static let colorEscogido = UIColor(red: 0.09, green: 0.64, blue: 0.64, alpha: 0.95)
-    static let colorPastilla = UIColor.black.withAlphaComponent(0.62)
+    //
+    // EL TEMA (15 oct 2026): Scanova360 usa esta MISMA cámara con SUS colores (su pedido: "colores de Scanova",
+    // la voz sigue en español). Cada app manda su tema al abrirla (ARMeasure.measure({ tema })); Field Reports no
+    // manda nada y se queda con estos de siempre. El código es el mismo en las dos apps.
+    static var tema = TemaCamara()
+    static var colorEscogido: UIColor { tema.escogido }
+    static var colorPastilla: UIColor { tema.pastilla }
 
     private static let yaSaludoIA = "arMedirSaludoIA:v1"
     // El ancho que se le acaba de ofrecer de memoria, esperando su "sí".
@@ -5127,7 +5165,7 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
         for b in vozBotones {
             b.backgroundColor = (b === sender)
                 ? Self.colorEscogido
-                : UIColor(white: 0.22, alpha: 1)
+                : Self.tema.neutro
         }
         speech.stopSpeaking(at: .immediate)
         decirPorPeticion("Con esta voz le voy a ayudar. La pared se mide largo por alto, para sacar los pies cuadrados.")
@@ -5539,7 +5577,7 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
         liveLabel.isHidden = true
         view.addSubview(liveLabel)
 
-        styledOverlayButton(finishButton, title: "Terminar", bg: UIColor.systemGreen.withAlphaComponent(0.95))
+        styledOverlayButton(finishButton, title: "Terminar", bg: Self.tema.listo)
         finishButton.addTarget(self, action: #selector(finishTapped), for: .touchUpInside)
 
         styledOverlayButton(undoButton, title: "Deshacer", bg: Self.colorPastilla)
@@ -5558,13 +5596,13 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
         addButton.addTarget(self, action: #selector(addTapped), for: .touchUpInside)
         view.addSubview(addButton)
 
-        styledOverlayButton(addWidthButton, title: "Medir Ancho", bg: UIColor.systemBlue.withAlphaComponent(0.9), fontSize: 16)
+        styledOverlayButton(addWidthButton, title: "Medir Ancho", bg: Self.tema.primario, fontSize: 16)
         addWidthButton.addTarget(self, action: #selector(addWidthTapped), for: .touchUpInside)
 
         // MAS CHICO Y A LA IZQUIERDA DEL +. Su foto del 13 de septiembre: salia
         // grande a la derecha, encima de "Deshacer" y rozando el +. Dos
         // renglones cortos en vez de uno largo.
-        styledOverlayButton(saveContinueButton, title: "Guardar\ny seguir", bg: UIColor.systemBlue.withAlphaComponent(0.9), fontSize: 15)
+        styledOverlayButton(saveContinueButton, title: "Guardar\ny seguir", bg: Self.tema.primario, fontSize: 15)
         saveContinueButton.titleLabel?.numberOfLines = 2
         saveContinueButton.titleLabel?.textAlignment = .center
         saveContinueButton.contentEdgeInsets = UIEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
@@ -5572,7 +5610,7 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
 
         // En el mismo lugar que "Guardar y seguir": nunca se ven a la vez. A la
         // derecha se encimaba con "Deshacer".
-        styledOverlayButton(finishPathButton, title: "Terminar\nrecorrido", bg: UIColor.systemGreen.withAlphaComponent(0.95), fontSize: 15)
+        styledOverlayButton(finishPathButton, title: "Terminar\nrecorrido", bg: Self.tema.listo, fontSize: 15)
         finishPathButton.titleLabel?.numberOfLines = 2
         finishPathButton.titleLabel?.textAlignment = .center
         finishPathButton.contentEdgeInsets = UIEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
@@ -5583,7 +5621,7 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
         recordatorioLabel.font = .systemFont(ofSize: 17, weight: .bold)
         recordatorioLabel.textAlignment = .center
         recordatorioLabel.numberOfLines = 0
-        recordatorioLabel.backgroundColor = UIColor.black.withAlphaComponent(0.82)
+        recordatorioLabel.backgroundColor = Self.tema.fondo.withAlphaComponent(0.82)
         recordatorioLabel.layer.cornerRadius = 14
         recordatorioLabel.layer.borderWidth = 2
         recordatorioLabel.layer.borderColor = UIColor.systemYellow.withAlphaComponent(0.85).cgColor
@@ -6002,12 +6040,12 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
     // app - so picking "what am I measuring" feels consistent, not bolted on.
     private func setupMaterialPicker() {
         materialOverlay.translatesAutoresizingMaskIntoConstraints = false
-        materialOverlay.backgroundColor = UIColor.black.withAlphaComponent(0.8)
+        materialOverlay.backgroundColor = Self.tema.fondo.withAlphaComponent(0.8)
         materialOverlay.isHidden = true
         view.addSubview(materialOverlay)
 
         materialCard.translatesAutoresizingMaskIntoConstraints = false
-        materialCard.backgroundColor = UIColor(white: 0.12, alpha: 1)
+        materialCard.backgroundColor = Self.tema.tarjeta
         materialCard.layer.cornerRadius = 14
         materialOverlay.addSubview(materialCard)
 
@@ -6028,7 +6066,7 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
         materialConfirmButton.setTitle("Confirmar", for: .normal)
         materialConfirmButton.setTitleColor(.white, for: .normal)
         materialConfirmButton.titleLabel?.font = .systemFont(ofSize: 17, weight: .bold)
-        materialConfirmButton.backgroundColor = UIColor.systemGreen.withAlphaComponent(0.95)
+        materialConfirmButton.backgroundColor = Self.tema.listo
         materialConfirmButton.layer.cornerRadius = 10
         materialConfirmButton.contentEdgeInsets = UIEdgeInsets(top: 13, left: 16, bottom: 13, right: 16)
         materialConfirmButton.addTarget(self, action: #selector(materialConfirmTapped), for: .touchUpInside)
@@ -6065,13 +6103,13 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
     // opt-in from the "?" button; it never shows on its own.
     private func setupHelpOverlay() {
         helpOverlay.translatesAutoresizingMaskIntoConstraints = false
-        helpOverlay.backgroundColor = UIColor.black.withAlphaComponent(0.85)
+        helpOverlay.backgroundColor = Self.tema.fondo.withAlphaComponent(0.85)
         helpOverlay.isHidden = true
         view.addSubview(helpOverlay)
 
         let helpCard = UIView()
         helpCard.translatesAutoresizingMaskIntoConstraints = false
-        helpCard.backgroundColor = UIColor(white: 0.12, alpha: 1)
+        helpCard.backgroundColor = Self.tema.tarjeta
         helpCard.layer.cornerRadius = 14
         helpOverlay.addSubview(helpCard)
 
@@ -6227,7 +6265,7 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
             b.layer.cornerRadius = 9
             b.backgroundColor = VozAsistente.esLaEscogida(voz)
                 ? Self.colorEscogido
-                : UIColor(white: 0.22, alpha: 1)
+                : Self.tema.neutro
             b.accessibilityIdentifier = voz.identifier
             b.addTarget(self, action: #selector(vozTapped(_:)), for: .touchUpInside)
             vozBotones.append(b)
@@ -6255,7 +6293,7 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
         closeButton.setTitle("Entendido", for: .normal)
         closeButton.setTitleColor(.white, for: .normal)
         closeButton.titleLabel?.font = .systemFont(ofSize: 17, weight: .bold)
-        closeButton.backgroundColor = UIColor.systemGreen.withAlphaComponent(0.95)
+        closeButton.backgroundColor = Self.tema.listo
         closeButton.layer.cornerRadius = 10
         closeButton.contentEdgeInsets = UIEdgeInsets(top: 13, left: 16, bottom: 13, right: 16)
         closeButton.addTarget(self, action: #selector(helpCloseTapped), for: .touchUpInside)

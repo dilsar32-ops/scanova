@@ -2,8 +2,8 @@
 // (el mismo escáner de Field Reports, que ya viene dentro de la app: plugin RoomScan) y se dibuja con el
 // mismo código de Field Reports (plano.js, copiado por tools/extraer_plano.py). Un escaneo por piso;
 // un escaneo nuevo no borra el anterior (queda de historial), se ve el más reciente.
-import * as plano from './plano.js?v=2026-10-15-6';
-import { authFetch, esAparato } from './app.js?v=2026-10-15-6';
+import * as plano from './plano.js?v=2026-10-15-7';
+import { authFetch, esAparato } from './app.js?v=2026-10-15-7';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
@@ -404,17 +404,22 @@ async function fuenteMarca(){
   }catch(e){ FUENTE_MARCA = ''; }
   return FUENTE_MARCA;
 }
-async function pngDelPlano(p){
-  let svg = svgDelPlano(p.data, T);
+// La hoja del plano pintada en un lienzo (la misma del botón exportar; Documents la pone en su PDF).
+export async function lienzoDelPlano(data, trabajo, maxLado = 3600){
+  let svg = svgDelPlano(data, trabajo);
   const fuente = await fuenteMarca();
   if(fuente) svg = svg.replace(/(<svg[^>]*>)/, `$1<defs><style>${fuente}</style></defs>`);
   const m = svg.match(/viewBox="([\d.\-]+) ([\d.\-]+) ([\d.]+) ([\d.]+)"/); const w = m ? +m[3] : 2000, h = m ? +m[4] : 1400;
-  const k = Math.min(2, 3600 / Math.max(w, h)); const c = document.createElement('canvas'); c.width = Math.round(w * k); c.height = Math.round(h * k);
+  const k = Math.min(2, maxLado / Math.max(w, h)); const c = document.createElement('canvas'); c.width = Math.round(w * k); c.height = Math.round(h * k);
   const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
   const url = URL.createObjectURL(new Blob([svg.includes('xmlns=') ? svg : svg.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"')], { type:'image/svg+xml' }));
   try{ const im = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => no(new Error('could not draw the plan')); i.src = url; }); ctx.drawImage(im, 0, 0, c.width, c.height); }
   finally{ URL.revokeObjectURL(url); }
-  return new Promise((ok, no) => c.toBlob(b => b ? ok(b) : no(new Error('could not make the image')), 'image/png'));
+  return c;
+}
+async function pngDelPlano(p){
+  const c = await lienzoDelPlano(p.data, T);
+  return new Promise((ok, no) => c.toBlob(b => { c.width = c.height = 0; b ? ok(b) : no(new Error('could not make the image')); }, 'image/png'));
 }
 async function exportar(){
   const niv = nivelElegido(); const p = planoDe(PLANOS, niv.id); if(!p || OCUPADO) return;

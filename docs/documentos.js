@@ -2,11 +2,15 @@
 //  · Dry Log Report: cada cuarto, cada punto de medida (material · dónde) y su lectura de cada día, con cuánto bajó;
 //    al final las fotos del medidor que prueban cada lectura.
 //  · Equipment Report: el equipo de cada cuarto día por día y los DÍAS DE EQUIPO (lo que se cobra), con la regla dicha.
+//  · Measurements & Demo (15-oct): lo que se demolió por nivel y cuarto, sumado por material (Material · Surface · Qty ·
+//    Unit, como Field Reports), el total del trabajo por partida y las notas. Los números salen de docs/medidas.js.
 // Cada uno se ve aquí mismo (su propia pantalla, con Back) y se baja en PDF (en el teléfono, la hoja de compartir).
 // Los números salen de docs/registro.js (lo mismo que ve el técnico en el teléfono): nada se calcula dos veces.
-import { $, authFetch, esAparato } from './app.js?v=2026-10-15-6';
-import * as R from './registro.js?v=2026-10-15-6';
-import * as fotos from './fotos.js?v=2026-10-15-6';
+import { $, authFetch, esAparato } from './app.js?v=2026-10-15-7';
+import * as R from './registro.js?v=2026-10-15-7';
+import * as fotos from './fotos.js?v=2026-10-15-7';
+import * as MD from './medidas.js?v=2026-10-15-7';
+import * as planos from './planos.js?v=2026-10-15-7';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -71,9 +75,39 @@ export function modeloEquipo(niveles, cuartos, equipos, hoy){
   });
   return { dias, salas, resumen: R.resumenDeEquipo(equipos, hoy), hoy, total: R.resumenDeEquipo(equipos, hoy).reduce((a, r) => a + r.dias, 0) };
 }
+// Photo Report (15-oct, su pedido: "en los documentos tenemos que tener secciones de fotos, del floor plan y de los
+// measurements"): las fotos del proyecto cuarto por cuarto, en el orden de los niveles y cuartos del proyecto y, dentro
+// de cada cuarto, en el orden en que se tomaron. Cada una con su número (#1, #2…), la fecha y hora, quién la tomó y su
+// nota; la foto que prueba una lectura del Dry Log dice cuál lectura es.
+export function modeloFotos(niveles, cuartos, lista, lecturas){
+  const lect = new Map(); (lecturas || []).forEach(l => { if(l.foto_id && !lect.has(l.foto_id)) lect.set(l.foto_id, l); });
+  const grupos = new Map();
+  const grupo = (clave, nivel, cuarto) => { let g = grupos.get(clave); if(!g){ g = { clave, nivel, cuarto, fotos: [] }; grupos.set(clave, g); } return g; };
+  (niveles || []).forEach(n => { (cuartos || []).filter(c => c.nivel_id === n.id).forEach(c => grupo('c:' + c.id, n.nombre, c.nombre)); grupo('n:' + n.id, n.nombre, ''); });
+  const cuaPorId = new Map((cuartos || []).map(c => [c.id, c])), nivPorId = new Map((niveles || []).map(n => [n.id, n]));
+  const cuando = (f) => f.tomada_at || f.subida_at || '';
+  (lista || []).slice().sort((a, b) => String(cuando(a)).localeCompare(String(cuando(b)))).forEach(f => {
+    const c = f.cuarto_id && cuaPorId.get(f.cuarto_id), n = (f.nivel_id && nivPorId.get(f.nivel_id)) || (c && nivPorId.get(c.nivel_id));
+    const g = (c && grupos.get('c:' + c.id)) || (n && grupos.get('n:' + n.id)) || grupo('sin', '', '');
+    g.fotos.push({ ...f, cuando: cuando(f), lectura: lect.get(f.id) || null });
+  });
+  const out = [...grupos.values()].filter(g => g.fotos.length); let k = 0;
+  out.forEach(g => g.fotos.forEach(f => { f.num = ++k; }));
+  return { grupos: out, total: k };
+}
+export const tituloGrupo = (g) => g.cuarto || (g.nivel ? 'Whole ' + g.nivel : 'No room');
+// Floor Plan: la hoja más nueva de cada nivel, en el orden de los niveles del proyecto (la misma que se ve en Floor Plan).
+export function modeloPlanos(niveles, lista){
+  const ultimo = (nid) => (lista || []).filter(p => (p.nivel_id || null) === nid).sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))[0];
+  const out = [];
+  (niveles || []).forEach(n => { const p = ultimo(n.id); if(p) out.push({ nivel: n.nombre, plano: p }); });
+  const suelto = ultimo(null); if(suelto) out.push({ nivel: (niveles || []).length ? 'No level' : 'Floor Plan', plano: suelto });
+  return out;
+}
 export const REGLA_DIAS = 'Equipment days count every calendar day a unit was on site: from the day it was logged until the day it was logged as removed (the removal day is not counted). Days between visits keep the last count. Units still on site are counted through the report date.';
 
 // ---------- estado y datos ----------
+let MEDS = [], MNOTA = '', FOTS = [], PLANS = [], ELEGIDOS = null, LISTOS = null;
 let T = null, NIVELES = [], CUARTOS = [], LECT = [], EQUI = [], CARGADO = null, VISTA = 'lista', OCUPADO = false, FRESCO = false, CARGANDO = false;
 async function cargar(){
   if(!T || CARGANDO) return; const id = T.id; CARGANDO = true;
@@ -81,14 +115,18 @@ async function cargar(){
 }
 async function cargarDe(id){
   const q = (t) => authFetch('/rest/v1/' + t + '?trabajo_id=eq.' + encodeURIComponent(id) + '&order=dia.asc,created_at.asc&limit=5000').then(r => r.ok ? r.json() : []).catch(() => []);
-  const [l, e] = await Promise.all([q('fotos_drylog_lecturas'), q('fotos_drylog_equipos'), fotos.cargarNombres().catch(() => null)]);
+  const qm = (t, x) => authFetch('/rest/v1/' + t + '?trabajo_id=eq.' + encodeURIComponent(id) + x).then(r => r.ok ? r.json() : []).catch(() => []);
+  const [l, e, md, mn, fo, pl] = await Promise.all([q('fotos_drylog_lecturas'), q('fotos_drylog_equipos'), qm('fotos_medidas', '&order=orden.asc,created_at.asc&limit=5000'), qm('fotos_medidas_notas', '&select=texto'),
+    qm('fotos_fotos', '&estado=eq.activa&select=id,created_by,subida_at,tomada_at,ancho,alto,nota,nivel_id,cuarto_id&order=subida_at.asc&limit=2000'),
+    qm('fotos_planos', '&borrado_at=is.null&select=id,nivel_id,created_at,data&order=created_at.desc&limit=60'), fotos.cargarNombres().catch(() => null)]);
   if(!T || T.id !== id) return;
-  LECT = Array.isArray(l) ? l : []; EQUI = Array.isArray(e) ? e : []; CARGADO = id; pintarAqui();
+  LECT = Array.isArray(l) ? l : []; EQUI = Array.isArray(e) ? e : []; MEDS = Array.isArray(md) ? md : []; MNOTA = (Array.isArray(mn) && mn[0] && mn[0].texto) || '';
+  FOTS = Array.isArray(fo) ? fo : []; PLANS = Array.isArray(pl) ? pl : []; CARGADO = id; pintarAqui();
 }
 const caja = () => $('#panel-documentos');
 export function pintar(t, niveles, cuartos){
   if(!t) return;
-  if(!T || T.id !== t.id){ VISTA = 'lista'; CARGADO = null; LECT = []; EQUI = []; }
+  if(!T || T.id !== t.id){ VISTA = 'lista'; CARGADO = null; LECT = []; EQUI = []; MEDS = []; MNOTA = ''; FOTS = []; PLANS = []; ELEGIDOS = null; LISTOS = null; }
   T = t; NIVELES = niveles || []; CUARTOS = cuartos || [];
   if(FRESCO || CARGADO !== T.id){ FRESCO = false; cargar(); }
   pintarAqui();
@@ -102,16 +140,33 @@ function pintarAqui(){
   const hoy = R.hoyLocal(), md = modeloDryLog(NIVELES, CUARTOS, LECT, EQUI, hoy), me = modeloEquipo(NIVELES, CUARTOS, EQUI, hoy);
   if(VISTA === 'dry'){ c.innerHTML = vistaHtml('', htmlDryLog(md), 'dry'); ponerFotitos(c); return; }
   if(VISTA === 'equipo'){ c.innerHTML = vistaHtml('Equipment Report', htmlEquipo(me), 'equipo'); return; }
+  const mm = MD.agrupar(MEDS, NIVELES, CUARTOS), mf = modeloFotos(NIVELES, CUARTOS, FOTS, LECT), mp = modeloPlanos(NIVELES, PLANS);
+  if(VISTA === 'medidas'){ c.innerHTML = vistaHtml('Measurements & Demo', htmlMedidas(mm, MNOTA), 'medidas'); return; }
+  if(VISTA === 'fotos'){ c.innerHTML = vistaHtml('Photo Report', htmlFotos(mf), 'fotos'); ponerFotitos(c); return; }
+  if(VISTA === 'plano'){ c.innerHTML = vistaHtml('', htmlPlano(mp), 'plano'); return; }
   const fila = (k, ic, titulo, sub, hay) => `<div class="doc-fila">
       <span class="doc-ic">${IC(ic)}</span>
       <div class="doc-txt"><b>${titulo}</b><small>${sub}</small></div>
       <div class="doc-acc"><button type="button" class="btn btn-outline btn-chico" data-doc-ver="${k}"${hay ? '' : ' disabled'}>View</button><button type="button" class="btn btn-accent btn-chico" data-doc-pdf="${k}"${hay ? '' : ' disabled'}>${IC('bajar')}PDF</button></div></div>`;
+  const ps = partes(md, me, mm, mf, mp);
+  if(!ELEGIDOS) ELEGIDOS = new Set(ps.filter(x => x.hay).map(x => x.k));
+  const elegidas = ps.filter(x => x.hay && ELEGIDOS.has(x.k));
+  const enviar = ps.some(x => x.hay) ? `<div class="doc-enviar">
+      <h3>Send documents</h3>
+      <p class="doc-nota">Pick what goes. <b>One PDF</b> puts them together with a cover page and contents; <b>Separate PDFs</b> makes one file for each.</p>
+      <div class="doc-checks">${ps.map(x => `<label class="doc-check${x.hay ? '' : ' off'}"><input type="checkbox" data-doc-sel="${x.k}"${x.hay && ELEGIDOS.has(x.k) ? ' checked' : ''}${x.hay ? '' : ' disabled'}><span><b>${esc(x.titulo)}</b><small>${esc(x.hay ? x.sub : x.vacio)}</small></span></label>`).join('')}</div>
+      <div class="doc-enviar-acc"><button type="button" class="btn btn-accent" data-doc-todo="uno"${elegidas.length ? '' : ' disabled'}>${IC('bajar')}One PDF</button><button type="button" class="btn btn-outline" data-doc-todo="varios"${elegidas.length ? '' : ' disabled'}>${IC('bajar')}Separate PDFs</button></div>
+    </div>` : '';
   c.innerHTML = `<div class="card docs">
     <h2 class="sec-t">Documents</h2>
-    <p class="doc-nota">Drying paperwork for this project, ready to send. It updates every time the crew saves a reading or equipment.</p>
+    <p class="doc-nota">Paperwork for this project, ready to send. It updates every time the crew adds a photo, a reading, equipment, a floor plan or a measurement.</p>
+    ${fila('fotos', 'camara', 'Photo Report', mf.total ? `${mf.total} photo${mf.total === 1 ? '' : 's'} · ${mf.grupos.length} room${mf.grupos.length === 1 ? '' : 's'}` : 'No photos yet. They come from Photos.', mf.total > 0)}
+    ${fila('plano', 'escanear', 'Floor Plan', mp.length ? mp.map(x => x.nivel).join(' · ') : 'No floor plan yet. It comes from Floor Plan.', mp.length > 0)}
     ${fila('dry', 'dl-hoja', 'Dry Log Report', md.total ? `${md.salas.length} room${md.salas.length === 1 ? '' : 's'} · ${md.total} reading${md.total === 1 ? '' : 's'} · ${md.dias.length} day${md.dias.length === 1 ? '' : 's'} (${esc(periodo(md.dias))})` : 'No readings yet. They come from Dry Logs.', md.total > 0)}
     ${fila('equipo', 'dl-herramientas', 'Equipment Report', me.resumen.length ? `${me.salas.length} room${me.salas.length === 1 ? '' : 's'} · ${me.total} equipment day${me.total === 1 ? '' : 's'} so far` : 'No equipment logged yet. It comes from Dry Logs.', me.resumen.length > 0)}
-    <p class="aviso" id="docAviso"></p>
+    ${fila('medidas', 'regla', 'Measurements &amp; Demo', mm.total ? `${mm.nCuartos} room${mm.nCuartos === 1 ? '' : 's'} · ${mm.total} measurement${mm.total === 1 ? '' : 's'}` : 'No measurements yet. They come from Measurements.', mm.total)}
+    ${enviar}
+    <p class="aviso" id="docAviso"></p>${listosHtml()}
   </div>`;
 }
 function vistaHtml(titulo, cuerpo, k){
@@ -182,6 +237,50 @@ function htmlEquipo(m){
     ${s.tipos.length ? `<div class="doc-tabla"><table>${cab}${s.tipos.map(t => `<tr><td>${esc(t.tipo)}</td>${t.celdas.map(c => c ? `<td class="${c.visto ? '' : 'sigue'}">${c.n}</td>` : '<td class="nada">—</td>').join('')}<td><b>${t.dias}</b></td></tr>`).join('')}</table></div>` : '<p class="doc-sub">No equipment in this room.</p>'}`).join('') +
     `<p class="doc-sub">Gray numbers = no visit that day; the last count is carried.</p>`;
 }
+// Lo que trae cada documento: su nombre, qué cuenta, si hay algo, cómo se llama el archivo y cómo se hace el PDF (solo o
+// dentro del de todo junto). El orden es el de la lista y el del PDF de todo junto.
+function partes(md, me, mm, mf, mp){
+  const s = (n, una, varias) => n + ' ' + (n === 1 ? una : varias);
+  return [
+    { k: 'fotos', titulo: 'Photo Report', sub: s(mf.total, 'photo', 'photos'), vacio: 'No photos yet', hay: mf.total > 0, archivo: 'Photos', hacer: (o) => pdfFotos(mf, o) },
+    { k: 'plano', titulo: 'Floor Plan', sub: mp.map(x => x.nivel).join(' · '), vacio: 'No floor plan yet', hay: mp.length > 0, archivo: 'FloorPlan', hacer: (o) => pdfPlano(mp, o) },
+    { k: 'dry', titulo: 'Dry Log Report', sub: s(md.total, 'reading', 'readings'), vacio: 'No readings yet', hay: md.total > 0, archivo: 'DryLog', hacer: (o) => pdfDryLog(md, o) },
+    { k: 'equipo', titulo: 'Equipment Report', sub: s(me.total, 'equipment day', 'equipment days'), vacio: 'No equipment yet', hay: me.resumen.length > 0, archivo: 'Equipment', hacer: (o) => pdfEquipo(me, o) },
+    { k: 'medidas', titulo: 'Measurements & Demo', sub: s(mm.total, 'measurement', 'measurements'), vacio: 'No measurements yet', hay: mm.total > 0, archivo: 'Measurements', hacer: (o) => pdfMedidas(mm, MNOTA, o) },
+  ];
+}
+function partesAhora(){
+  const hoy = R.hoyLocal();
+  return partes(modeloDryLog(NIVELES, CUARTOS, LECT, EQUI, hoy), modeloEquipo(NIVELES, CUARTOS, EQUI, hoy), MD.agrupar(MEDS, NIVELES, CUARTOS), modeloFotos(NIVELES, CUARTOS, FOTS, LECT), modeloPlanos(NIVELES, PLANS));
+}
+const fechaHoraEn = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) + ' ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }); };
+// Quién la tomó: el nombre de la persona (nunca el "Equipo" o "Usted" de la pantalla en español).
+const quienFoto = (id) => { const n = fotos.nombreDe(id); return n === 'Equipo' || n === 'Usted' ? '' : n; };
+const pieFoto = (f) => [quienFoto(f.created_by), f.lectura ? 'Moisture reading ' + fmt(f.lectura.valor) + '% · ' + puntoTxt(f.lectura) : '', f.nota || ''].filter(Boolean).join(' · ');
+function htmlFotos(m){
+  if(!m.total) return '<p class="vacio">No photos yet.</p>';
+  return m.grupos.map(g => `<h3 class="doc-sala">${esc(tituloGrupo(g))}${g.nivel && g.cuarto ? ` <small>${esc(g.nivel)}</small>` : ''} <small>· ${g.fotos.length} photo${g.fotos.length === 1 ? '' : 's'}</small></h3>
+    <div class="doc-fotos">${g.fotos.map(f => `<figure><img data-foto="${esc(f.id)}" alt=""><figcaption><b>#${f.num}</b> ${esc(fechaHoraEn(f.cuando))}${pieFoto(f) ? `<small>${esc(pieFoto(f))}</small>` : ''}</figcaption></figure>`).join('')}</div>`).join('')
+    + '<p class="doc-sub">Room by room, in the order they were taken. The PDF has them larger.</p>';
+}
+function htmlPlano(lista){
+  if(!lista.length) return '<p class="vacio">No floor plan yet.</p>';
+  return lista.map(x => { let svg = ''; try{ svg = planos.svgDelPlano(x.plano.data, T); }catch(e){ svg = '<p class="aviso">Could not draw this plan. ' + esc(e && e.message || e) + '</p>'; }
+    return `<h3 class="doc-sala">${esc(x.nivel)}</h3><div class="doc-plano">${svg}</div>`; }).join('');
+}
+// Si el teléfono ya no deja abrir la hoja de compartir sola (el PDF tardó y el toque "venció"), un botón para abrirla.
+function listosHtml(){ return LISTOS ? `<div class="doc-listos"><span>${LISTOS.length === 1 ? 'The PDF is ready.' : LISTOS.length + ' PDFs are ready.'}</span><button type="button" class="btn btn-accent" data-doc-compartir>${IC('compartir')}Share</button></div>` : ''; }
+// Measurements & Demo: por nivel y cuarto, una fila por material ya sumado (como el papel de Field Reports).
+function htmlMedidas(g, nota){
+  if(!g.total) return '<p class="vacio">No measurements yet.</p>';
+  // Una línea por unidad: un drywall con SF y LF sale en dos renglones (como dos partidas de un estimado).
+  const tabla = (filas, rooms) => `<div class="doc-tabla"><table><tr><th>Material</th><th>Surface</th><th>Qty</th><th>Unit</th>${rooms ? '<th>Rooms</th>' : ''}</tr>${filas.map(x => MD.lineasUnidad(x).map(l =>
+    `<tr><td><b>${esc(x.material)}</b></td><td>${esc(x.superficie)}</td><td><b>${esc(l.qty)}</b></td><td>${esc(l.unidad)}</td>${rooms ? `<td>${l.cuartos}</td>` : ''}</tr>`).join('')).join('')}</table></div>`;
+  return g.niveles.map(N => `<div class="dlr-nivel">${esc(N.titulo)}</div>${N.cuartos.map(C => `<h3 class="doc-sala">${esc(C.titulo)}</h3>${tabla(C.materiales)}`).join('')}`).join('')
+    + (g.nCuartos > 1 && g.partidas.length ? `<h3 class="doc-sala">Job totals by line item</h3>${tabla(g.partidas, true)}` : '')
+    + (nota ? `<h3 class="doc-sala">Notes</h3><p class="doc-sub doc-nota">${esc(nota)}</p>` : '')
+    + '<p class="doc-sub">SF = square feet, LF = linear feet, EA = each. Different units are never added together.</p>';
+}
 
 // ---------- el PDF (jsPDF, en este mismo teléfono o compu; sin servicio de afuera) ----------
 let JSPDF = null;
@@ -211,19 +310,21 @@ function hojaPdf(doc, titulo, primera){
   return y;
 }
 // Una tabla que salta de hoja cuando no cabe (y repite su fila de títulos).
-function tablaPdf(doc, y, cols, filas, titulo, cabeceraHoja){
+function tablaPdf(doc, y, cols, filas, titulo, cabeceraHoja, opc){
   const H = doc.internal.pageSize.getHeight(), M = 36, rh = 18, fondoMax = H - M - 20;
   const dibCab = () => { doc.setFillColor(...FONDO); doc.rect(M, y, cols.reduce((a, c) => a + c.w, 0), rh + 4, 'F');
     let x = M; doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); doc.setTextColor(...TINTA);
     cols.forEach(c => { const l = String(c.t).split('\n'); doc.text(l[0], c.der ? x + c.w - 5 : x + 5, y + 10, { align: c.der ? 'right' : 'left' });
       if(l[1]){ doc.setFont('helvetica', 'normal'); doc.setTextColor(...SUAVE); doc.text(l[1], c.der ? x + c.w - 5 : x + 5, y + 19, { align: c.der ? 'right' : 'left' }); doc.setFont('helvetica', 'bold'); doc.setTextColor(...TINTA); }
       x += c.w; }); y += rh + 6; };
-  if(y + 28 + rh * Math.min(2, filas.length) > fondoMax){ doc.addPage(); y = cabeceraHoja(); }
+  if(y + 28 + rh * Math.min(2, filas.length) > fondoMax){ hojaNueva(doc); y = cabeceraHoja(); }
   if(titulo){ doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(...TINTA); doc.text(titulo[0], M, y + 4);
     if(titulo[1]){ const w = doc.getTextWidth(titulo[0] + '  '); doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(...SUAVE); doc.text(titulo[1], M + w, y + 4); } y += 12; }
   dibCab();
   filas.forEach((f, i) => {
-    if(y + rh > fondoMax){ doc.addPage(); y = cabeceraHoja(); dibCab(); }
+    if(y + rh > fondoMax){ hojaNueva(doc); y = cabeceraHoja();
+      if(opc && opc.cont && titulo){ doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(...TINTA); doc.text(titulo[0] + ' (cont.)', M, y + 4); y += 12; }
+      dibCab(); }
     let x = M;
     f.forEach((celda, j) => { const c = cols[j], v = celda && typeof celda === 'object' ? celda : { t: celda };
       doc.setFont('helvetica', v.b ? 'bold' : 'normal'); doc.setFontSize(9); doc.setTextColor(...(v.color || TINTA));
@@ -237,9 +338,20 @@ function parrafoPdf(doc, y, texto, cabeceraHoja){
   const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight(), M = 36;
   doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(...SUAVE);
   const l = doc.splitTextToSize(texto, W - 2 * M);
-  if(y + l.length * 11 > H - M - 20){ doc.addPage(); y = cabeceraHoja(); }
+  if(y + l.length * 11 > H - M - 20){ hojaNueva(doc); y = cabeceraHoja(); }
   doc.text(l, M, y); return y + l.length * 11 + 8;
 }
+// Abrir el reporte: su propio PDF, o la parte que le toca dentro del PDF con todo junto (opc.doc).
+async function abrirDoc(opc, orient){
+  if(opc && opc.doc){ const d = opc.doc; d.__orient = orient; d.addPage('letter', orient); return d; }
+  const Pdf = await cargarJsPDF(), d = new Pdf({ unit: 'pt', format: 'letter', orientation: orient }); d.__orient = orient; return d;
+}
+// jsPDF, sin decirle nada, hace la hoja nueva como la PRIMERA del documento: hay que decirle la de este reporte.
+function hojaNueva(doc){ doc.addPage('letter', doc.__orient || 'portrait'); }
+// Cerrar el reporte: si va solo, su pie y el archivo; si va dentro del de todo junto, el pie lo pone el de todo junto.
+const cerrarDoc = (doc, opc, titulo) => { if(opc && opc.doc) return doc; piePdf(doc, titulo); return doc.output('blob'); };
+// La letra del PDF (Helvetica) solo trae las letras del español y el inglés: un emoji o un símbolo raro salía como basura.
+const pdfTxt = (s) => String(s == null ? '' : s).replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').replace(/[\u2013\u2014]/g, '-').replace(/\u2026/g, '...').replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF]/g, '');
 function piePdf(doc, titulo){
   const n = doc.getNumberOfPages(), W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight();
   for(let i = 1; i <= n; i++){ doc.setPage(i); doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(...SUAVE);
@@ -249,19 +361,28 @@ function piePdf(doc, titulo){
 const TROZO = 9;
 const trozos = (dias) => { const out = []; for(let i = 0; i < Math.max(1, dias.length); i += TROZO) out.push([i, Math.min(dias.length, i + TROZO)]); return out; };
 const colorTend = (t) => t ? (t.tipo === 'baja' ? AZUL : t.tipo === 'sube' ? AMBAR : TINTA) : TINTA;
-async function fotoParaPdf(url){
+// Una foto achicada para el PDF (JPEG). Si el navegador no la sabe abrir como ImageBitmap, se abre como imagen normal.
+async function fotoParaPdf(url, lado = 520){
   const b = await (await fetch(url, { cache: 'no-store' })).blob();
-  const im = await createImageBitmap(b); const k = Math.min(1, 520 / Math.max(im.width, im.height));
-  const c = document.createElement('canvas'); c.width = Math.round(im.width * k); c.height = Math.round(im.height * k);
-  c.getContext('2d').drawImage(im, 0, 0, c.width, c.height); const d = c.toDataURL('image/jpeg', 0.78); c.width = c.height = 0;
-  return { d, w: Math.round(im.width * k), h: Math.round(im.height * k) };
+  let im, cerrar = () => {};
+  try{ im = await createImageBitmap(b); cerrar = () => { if(im.close) im.close(); }; }
+  catch{ const u = URL.createObjectURL(b); cerrar = () => URL.revokeObjectURL(u);
+    try{ im = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => no(new Error('could not open the photo')); i.src = u; }); }catch(e){ cerrar(); throw e; } }
+  const iw = im.width || im.naturalWidth, ih = im.height || im.naturalHeight;
+  if(!iw || !ih){ cerrar(); throw new Error('empty photo'); }
+  const k = Math.min(1, lado / Math.max(iw, ih)), w = Math.max(1, Math.round(iw * k)), h = Math.max(1, Math.round(ih * k));
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, w, h); g.drawImage(im, 0, 0, w, h);
+  const d = c.toDataURL('image/jpeg', 0.78); c.width = c.height = 0; cerrar();
+  return { d, w, h };
 }
 const hex = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
 // Su estilo (14-oct, "Daily Drying Log"): hoja parada; Scanova360 arriba, el título grande, los datos del trabajo, la
 // gráfica "Moisture Trend", las tablas por nivel con la foto de cada punto (P-001…), el equipo y las notas abajo; al
 // final las fotos grandes con el mismo número.
-export async function pdfDryLog(m, conFotos = true){
-  const Pdf = await cargarJsPDF(), doc = new Pdf({ unit: 'pt', format: 'letter', orientation: 'portrait' });
+export async function pdfDryLog(m, opc = {}){
+  if(typeof opc === 'boolean') opc = { conFotos: opc };
+  const conFotos = opc.conFotos !== false, doc = await abrirDoc(opc, 'portrait');
   const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight(), M = 40, A = W - 2 * M, ABAJO = H - M - 24;
   // Las fotos (la chiquita de cada punto y las grandes del final) se bajan una vez.
   const ids = [...new Set([...m.salas.flatMap(sa => sa.puntos.map(p => p.foto_id)), ...m.lecturasFoto.map(f => f.foto_id)].filter(Boolean))];
@@ -271,7 +392,7 @@ export async function pdfDryLog(m, conFotos = true){
     doc.setTextColor(...AZUL); doc.text('360', M + doc.getTextWidth('Scanova'), y);
     doc.setFontSize(12); doc.setTextColor(...SUAVE); doc.text(R.fechaLarga(R.hoyLocal()), W - M, y, { align: 'right' });
     doc.setDrawColor(...LINEA); doc.setLineWidth(1); doc.line(M, y + 10, W - M, y + 10); return y + 22; };
-  const hoja = () => { doc.addPage(); return marca(M + 14); };
+  const hoja = () => { hojaNueva(doc); return marca(M + 14); };
   let y = marca(M + 14);
   doc.setFont('helvetica', 'bold'); doc.setFontSize(25); doc.setTextColor(...TINTA); doc.text('DAILY DRYING LOG', M, y + 22); y += 40;
   const info = [['Job:', trabajoTxt(m)], ['Technician:', tecnicosTxt(m)], ['Date range:', periodo(m.dias)], ['Address:', T.direccion || '—']];
@@ -357,11 +478,10 @@ export async function pdfDryLog(m, conFotos = true){
       doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(...SUAVE); doc.text(doc.splitTextToSize(puntoTxt({ material: f.material, ubicacion: f.ubicacion }) + ' · ' + R.fechaCorta(f.dia), cw)[0], x, y + ch + 23);
     });
   }
-  piePdf(doc, 'Daily Drying Log');
-  return doc.output('blob');
+  return cerrarDoc(doc, opc, 'Daily Drying Log');
 }
-export async function pdfEquipo(m){
-  const Pdf = await cargarJsPDF(), doc = new Pdf({ unit: 'pt', format: 'letter', orientation: 'landscape' }), TIT = 'Equipment Report';
+export async function pdfEquipo(m, opc = {}){
+  const doc = await abrirDoc(opc, 'landscape'), TIT = 'Equipment Report';
   const W = doc.internal.pageSize.getWidth(), M = 36, cabH = () => hojaPdf(doc, TIT, false), A = W - 2 * M;
   let y = hojaPdf(doc, TIT, true);
   y = tablaPdf(doc, y, [{ t: 'Equipment', w: A - 4 * 110 }, { t: 'Most units at once', w: 110, der: true }, { t: 'Equipment days', w: 110, der: true }, { t: 'Placed', w: 110, der: true }, { t: 'Removed', w: 110, der: true }],
@@ -379,8 +499,145 @@ export async function pdfEquipo(m){
     }
   }
   parrafoPdf(doc, y, 'Gray numbers = no visit that day; the last count is carried.', cabH);
-  piePdf(doc, TIT);
+  return cerrarDoc(doc, opc, TIT);
+}
+// Measurements & Demo: hoja parada, un bloque por cuarto (Material · Surface · Qty · Unit), el total por partida y las notas.
+export async function pdfMedidas(g, nota, opc = {}){
+  const doc = await abrirDoc(opc, 'portrait'), TIT = 'Measurements & Demo';
+  const W = doc.internal.pageSize.getWidth(), M = 36, A = W - 2 * M, cabH = () => hojaPdf(doc, TIT, false);
+  let y = hojaPdf(doc, TIT, true);
+  const cols = (rooms) => [{ t: 'Material', w: A - 90 - 70 - 70 - (rooms ? 60 : 0) }, { t: 'Surface', w: 90 }, { t: 'Qty', w: 70, der: true }, { t: 'Unit', w: 70 }, ...(rooms ? [{ t: 'Rooms', w: 60, der: true }] : [])];
+  // Una línea por unidad (SF, LF, EA): nunca "35.5 SF +" cortado con el LF perdido.
+  const filas = (lista, rooms) => lista.flatMap(x => MD.lineasUnidad(x).map(l => [{ t: x.material, b: true }, { t: x.superficie, color: SUAVE }, { t: l.qty, b: true }, l.unidad, ...(rooms ? [String(l.cuartos)] : [])]));
+  // Como en Field Reports: un cuarto no se parte entre hojas, y el título de un nivel no se queda solo al pie.
+  // Lo que mide un cuarto en el papel (título, cabecera, renglones y su aire) y lo que cabe en una hoja limpia (debajo
+  // del encabezado de hojaPdf, que en las hojas que siguen termina en y = 70).
+  const H = doc.internal.pageSize.getHeight(), fondo = H - M - 20, alto = (n) => 12 + 24 + 18 * n + 14, libre = fondo - 70;
+  const cabe = (necesita) => { if(y + necesita > fondo && necesita <= libre){ hojaNueva(doc); y = cabH(); } };
+  for(const N of g.niveles){
+    const primero = N.cuartos[0] ? alto(filas(N.cuartos[0].materiales, false).length) : 0;
+    cabe(26 + primero);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(...AZUL); doc.text(String(N.titulo).toUpperCase(), M, y + 6);
+    doc.setDrawColor(...LINEA); doc.setLineWidth(1); doc.line(M, y + 12, W - M, y + 12); y += 26;
+    for(const C of N.cuartos){ const f = filas(C.materiales, false); cabe(alto(f.length)); y = tablaPdf(doc, y, cols(false), f, [C.titulo, ''], cabH, { cont: true }); }
+  }
+  if(g.nCuartos > 1 && g.partidas.length){ const f = filas(g.partidas, true); cabe(6 + alto(Math.min(f.length, 6))); y = tablaPdf(doc, y + 6, cols(true), f, ['Job totals by line item', 'all rooms'], cabH, { cont: true }); }
+  if(nota){
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5);
+    const lineas = doc.splitTextToSize(pdfTxt(nota), A); cabe(18 + 12 * Math.min(lineas.length, 4));
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(...TINTA); doc.text('Notes', M, y + 4); y += 18;
+    // Renglón por renglón: unas notas largas siguen en la hoja siguiente en vez de salirse del papel.
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(...TINTA);
+    for(const l of lineas){ if(y + 12 > fondo){ hojaNueva(doc); y = cabH(); doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(...TINTA); } doc.text(l, M, y); y += 12; }
+    y += 8;
+  }
+  parrafoPdf(doc, y + 4, 'SF = square feet, LF = linear feet, EA = each. Different units are never added together.', cabH);
+  return cerrarDoc(doc, opc, TIT);
+}
+// Photo Report: hoja parada, dos fotos por renglón y tres renglones por hoja, cuarto por cuarto. Debajo de cada foto su
+// número, fecha y hora, quién la tomó y su nota. Las fotos se bajan una por una (en el teléfono no caben todas a la vez).
+export async function pdfFotos(m, opc = {}){
+  const doc = await abrirDoc(opc, 'portrait'), TIT = 'Photo Report';
+  const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight(), M = 36, A = W - 2 * M, fondo = H - M - 20, cabH = () => hojaPdf(doc, TIT, false);
+  const todas = m.grupos.flatMap(g => g.fotos);
+  let urls = {}; if(todas.length){ try{ urls = await fotos.urlsFirmadas(todas.map(f => f.id), 'web'); }catch{} }
+  const GAP = 14, cw = (A - GAP) / 2, ch = Math.round(cw * 0.68), filaH = ch + 40;
+  let y = hojaPdf(doc, TIT, true), hechas = 0, faltan = 0;
+  for(const g of m.grupos){
+    if(y + 24 + filaH > fondo){ hojaNueva(doc); y = cabH(); }
+    const tit = pdfTxt(tituloGrupo(g));
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(...TINTA); doc.text(tit, M, y + 4); const wt = doc.getTextWidth(tit);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(...SUAVE);
+    doc.text((g.nivel && g.cuarto ? pdfTxt(g.nivel) + ' · ' : '') + g.fotos.length + (g.fotos.length === 1 ? ' photo' : ' photos'), M + wt + 10, y + 4);
+    doc.setDrawColor(...LINEA); doc.setLineWidth(0.8); doc.line(M, y + 10, W - M, y + 10); y += 22;
+    for(let i = 0; i < g.fotos.length; i++){
+      const f = g.fotos[i], col = i % 2;
+      if(col === 0 && i) y += filaH;
+      if(col === 0 && y + filaH > fondo){ hojaNueva(doc); y = cabH(); }
+      const x = M + col * (cw + GAP);
+      if(opc.avance) opc.avance(++hechas, todas.length);
+      let im = null; if(urls[f.id]){ try{ im = await fotoParaPdf(urls[f.id], 1100); }catch{} }
+      doc.setFillColor(...FONDO); doc.rect(x, y, cw, ch, 'F');
+      if(im){ const k = Math.min(cw / im.w, ch / im.h); doc.addImage(im.d, 'JPEG', x + (cw - im.w * k) / 2, y + (ch - im.h * k) / 2, im.w * k, im.h * k); }
+      else { faltan++; doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(...SUAVE); doc.text('Photo not available', x + cw / 2, y + ch / 2, { align: 'center' }); }
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(...TINTA); doc.text('#' + f.num, x, y + ch + 12);
+      const wn = doc.getTextWidth('#' + f.num + '  ');
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(...SUAVE); doc.text(fechaHoraEn(f.cuando), x + wn, y + ch + 12);
+      const pie = pdfTxt(pieFoto(f));
+      if(pie){ doc.setFontSize(8.5); doc.setTextColor(...TINTA); doc.text(doc.splitTextToSize(pie, cw).slice(0, 2), x, y + ch + 24); }
+    }
+    y += filaH + 8;
+  }
+  if(faltan) parrafoPdf(doc, y, faltan + (faltan === 1 ? ' photo' : ' photos') + ' could not be downloaded (no internet?). Make the PDF again to include ' + (faltan === 1 ? 'it' : 'them') + '.', cabH);
+  return cerrarDoc(doc, opc, TIT);
+}
+// Floor Plan: una hoja por nivel, la misma hoja que exporta la pestaña Floor Plan (con su encabezado y su tabla de
+// medidas), acostada o parada según el dibujo.
+export async function pdfPlano(lista, opc = {}){
+  if(!lista.length) throw new Error('there is no floor plan yet');
+  let doc = null, i = 0;
+  for(const x of lista){
+    if(opc.avance) opc.avance(++i, lista.length);
+    const c = await planos.lienzoDelPlano(x.plano.data, T, 2600), w = c.width, h = c.height, orient = w >= h ? 'landscape' : 'portrait';
+    if(!doc) doc = await abrirDoc(opc, orient); else { doc.__orient = orient; hojaNueva(doc); }
+    const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight(), M = 28, k = Math.min((W - 2 * M) / w, (H - M - 40) / h);
+    const d = c.toDataURL('image/jpeg', 0.95); c.width = c.height = 0;
+    doc.addImage(d, 'JPEG', (W - w * k) / 2, M, w * k, h * k);
+  }
+  return cerrarDoc(doc, opc, 'Floor Plan');
+}
+// TODO JUNTO (su pedido: "si cualquier compañía quisiera tener todos sus documentos juntos"): una portada con el
+// proyecto y el índice (cada documento con la hoja donde empieza), y después cada documento con su propio encabezado.
+// El pie de cada hoja dice de qué documento es y "Page N of M" del archivo entero.
+export async function pdfTodo(lista, opc = {}){
+  const doc = await abrirDoc({}, 'portrait'), secciones = [];
+  for(const p of lista){
+    const desde = doc.getNumberOfPages() + 1;
+    await p.hacer({ doc, avance: opc.avance ? (i, n) => opc.avance(p.titulo, i, n) : null });
+    secciones.push({ titulo: p.titulo, sub: p.sub, desde, hasta: doc.getNumberOfPages() });
+  }
+  doc.setPage(1); portadaPdf(doc, secciones);
+  const n = doc.getNumberOfPages();
+  for(let i = 1; i <= n; i++){
+    doc.setPage(i); const W = doc.internal.pageSize.getWidth(), H = doc.internal.pageSize.getHeight(), sec = secciones.find(x => i >= x.desde && i <= x.hasta);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(...SUAVE);
+    doc.text(pdfTxt('Scanova360 · ' + (sec ? sec.titulo : 'Project Documents') + ' · ' + (T.cliente || '')), 36, H - 22); doc.text('Page ' + i + ' of ' + n, W - 36, H - 22, { align: 'right' });
+  }
   return doc.output('blob');
+}
+function portadaPdf(doc, secciones){
+  const W = doc.internal.pageSize.getWidth(), M = 48, A = W - 2 * M;
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(30); doc.setTextColor(...TINTA); doc.text('Scanova', M, 92);
+  doc.setTextColor(...AZUL); doc.text('360', M + doc.getTextWidth('Scanova'), 92);
+  doc.setDrawColor(...AZUL); doc.setLineWidth(2.5); doc.line(M, 108, W - M, 108);
+  doc.setFontSize(12); doc.setTextColor(...SUAVE); doc.text('PROJECT DOCUMENTS', M, 150);
+  doc.setFontSize(28); doc.setTextColor(...TINTA); doc.text(doc.splitTextToSize(pdfTxt(T.cliente || 'Project'), A).slice(0, 2), M, 184);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(13); doc.setTextColor(...TINTA); doc.text(doc.splitTextToSize(pdfTxt(T.direccion || ''), A).slice(0, 2), M, 214);
+  const datos = [['Project manager', T.encargado || '—'], ['Report date', R.fechaLarga(R.hoyLocal())], ['Documents', String(secciones.length)]];
+  datos.forEach(([k, v], i) => { const x = M + i * (A / 3);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(...SUAVE); doc.text(k.toUpperCase(), x, 262);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(...TINTA); doc.text(pdfTxt(v), x, 279); });
+  let y = 330;
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(...TINTA); doc.text('Contents', M, y); y += 14;
+  secciones.forEach((sx, i) => {
+    doc.setDrawColor(...LINEA); doc.setLineWidth(0.6); doc.line(M, y, W - M, y); y += 22;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...AZUL); doc.text(String(i + 1), M, y);
+    doc.setTextColor(...TINTA); doc.text(pdfTxt(sx.titulo), M + 22, y);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(...SUAVE); doc.text(pdfTxt(sx.sub || ''), M + 22, y + 13);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...TINTA); doc.text('Page ' + sx.desde, W - M, y, { align: 'right' });
+    y += 24;
+  });
+  doc.setDrawColor(...LINEA); doc.line(M, y, W - M, y);
+}
+// El botón PDF de la pestaña Measurements: lo mismo que Documents, con lo que esa pestaña ya tiene cargado.
+export async function pdfDeMedidas(t, niveles, cuartos, filas, nota){
+  if(OCUPADO) throw new Error('another PDF is being made'); OCUPADO = true;
+  try{
+    T = t; NIVELES = niveles || []; CUARTOS = cuartos || [];
+    const blob = await pdfMedidas(MD.agrupar(filas, NIVELES, CUARTOS), nota);
+    const nombre = ('Measurements ' + (T.cliente || 'Project') + ' ' + R.hoyLocal()).replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') + '.pdf';
+    return { r: await entregar(blob, nombre), nombre };
+  }finally{ OCUPADO = false; }
 }
 // Bajar / compartir el PDF (como el plano: en el teléfono la hoja de compartir; en la compu, a Descargas).
 async function entregar(blob, nombre){
@@ -390,23 +647,61 @@ async function entregar(blob, nombre){
   const u = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = u; a.download = nombre; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 4000);
   return 'downloaded';
 }
+// Varios archivos de una vez: en el teléfono, UNA hoja de compartir con todos; en la compu, a Descargas uno tras otro.
+async function entregarArchivos(lista){
+  const files = lista.map(a => new File([a.blob], a.nombre, { type: 'application/pdf' }));
+  const tel = esAparato() || /iPhone|iPad|Android/i.test(navigator.userAgent);
+  if(tel && navigator.canShare && navigator.canShare({ files })){
+    try{ await navigator.share({ files, title: files.length === 1 ? files[0].name : 'Project documents' }); return 'shared'; }
+    // Si el PDF tardó, el teléfono ya no deja abrir la hoja sola: queda un botón "Share" para tocarlo.
+    catch(e){ if(e && e.name === 'NotAllowedError'){ LISTOS = files; return 'tocar'; } throw e; }
+  }
+  for(const a of lista){ const u = URL.createObjectURL(a.blob); const x = document.createElement('a'); x.href = u; x.download = a.nombre; document.body.appendChild(x); x.click(); x.remove(); setTimeout(() => URL.revokeObjectURL(u), 4000); await new Promise(r => setTimeout(r, 450)); }
+  return 'downloaded';
+}
+const nombreArchivo = (base) => (base + ' ' + (T.cliente || 'Project') + ' ' + R.hoyLocal()).replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') + '.pdf';
 const avisar = (t, bien) => { const a = $('#docAviso'); if(a){ a.className = 'aviso' + (bien ? ' ok' : ''); a.textContent = t; } };
 async function hacerPdf(k){
   if(OCUPADO || !T) return; OCUPADO = true;
   const b = document.querySelector('[data-doc-pdf="' + k + '"]'); const antes = b ? b.innerHTML : ''; if(b){ b.disabled = true; b.textContent = 'Making PDF…'; }
   try{
-    const hoy = R.hoyLocal();
-    const blob = k === 'dry' ? await pdfDryLog(modeloDryLog(NIVELES, CUARTOS, LECT, EQUI, hoy)) : await pdfEquipo(modeloEquipo(NIVELES, CUARTOS, EQUI, hoy));
-    const nombre = ((k === 'dry' ? 'DryLog ' : 'Equipment ') + (T.cliente || 'Project') + ' ' + hoy).replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_') + '.pdf';
-    const r = await entregar(blob, nombre);
-    avisar(r === 'shared' ? '' : 'Downloaded ' + nombre, true);
+    const p = partesAhora().find(x => x.k === k); if(!p) return;
+    const blob = await p.hacer({ avance: (i, n) => { if(n > 1) avisar('Making the ' + p.titulo + '… ' + i + ' of ' + n, true); } });
+    const nombre = nombreArchivo(p.archivo);
+    const r = await entregarArchivos([{ blob, nombre }]);
+    avisar(r === 'downloaded' ? 'Downloaded ' + nombre : '', true); if(r === 'tocar') pintarAqui();
   }catch(e){ if(!(e && e.name === 'AbortError')) avisar('Could not make the PDF. ' + String(e && e.message || e)); }
   finally{ OCUPADO = false; const b2 = document.querySelector('[data-doc-pdf="' + k + '"]'); if(b2){ b2.disabled = false; b2.innerHTML = antes || 'PDF'; } }
 }
+// Mandar lo escogido: todo en un PDF (con portada) o un PDF por documento.
+async function enviarTodo(modo){
+  if(OCUPADO || !T) return;
+  const lista = partesAhora().filter(x => x.hay && ELEGIDOS && ELEGIDOS.has(x.k)); if(!lista.length) return;
+  OCUPADO = true; LISTOS = null; document.querySelectorAll('[data-doc-todo]').forEach(b => { b.disabled = true; });
+  const avance = (tit, i, n) => avisar('Making the ' + tit + '…' + (n > 1 ? ' ' + i + ' of ' + n : ''), true);
+  try{
+    let archivos;
+    if(modo === 'uno' && lista.length > 1){ avisar('Making one PDF with ' + lista.length + ' documents…', true); archivos = [{ blob: await pdfTodo(lista, { avance }), nombre: nombreArchivo('Documents') }]; }
+    else { archivos = []; for(const p of lista){ avance(p.titulo, 0, 0); archivos.push({ blob: await p.hacer({ avance: (i, n) => avance(p.titulo, i, n) }), nombre: nombreArchivo(p.archivo) }); } }
+    const r = await entregarArchivos(archivos);
+    avisar(r === 'downloaded' ? 'Downloaded ' + archivos.map(a => a.nombre).join(', ') : '', true);
+    if(r === 'tocar') pintarAqui();
+  }catch(e){ if(!(e && e.name === 'AbortError')) avisar('Could not make the PDF. ' + String(e && e.message || e)); }
+  finally{ OCUPADO = false; document.querySelectorAll('[data-doc-todo]').forEach(b => { b.disabled = !(ELEGIDOS && ELEGIDOS.size); }); }
+}
 export function conectar(){
+  document.addEventListener('change', (e) => {
+    const el = e.target.closest && e.target.closest('[data-doc-sel]'); if(!el || !ELEGIDOS) return;
+    if(el.checked) ELEGIDOS.add(el.dataset.docSel); else ELEGIDOS.delete(el.dataset.docSel);
+    document.querySelectorAll('[data-doc-todo]').forEach(b => { b.disabled = OCUPADO || !ELEGIDOS.size; });
+  });
   document.addEventListener('click', (e) => {
     const c = caja(); if(!c || !c.contains(e.target)) return;
     const q = (s) => e.target.closest(s); let el;
+    if((el = q('[data-doc-todo]'))){ enviarTodo(el.dataset.docTodo); return; }
+    if(q('[data-doc-compartir]')){ const files = LISTOS; if(!files) return;
+      navigator.share({ files, title: files.length === 1 ? files[0].name : 'Project documents' }).then(() => { LISTOS = null; pintarAqui(); }).catch(err => { if(!(err && err.name === 'AbortError')) avisar('Could not open the share sheet. ' + String(err && err.message || err)); });
+      return; }
     if((el = q('[data-doc-ver]'))){ VISTA = el.dataset.docVer; pintarAqui(); const m = $('#main'); if(m) m.scrollTop = Math.max(0, c.getBoundingClientRect().top - m.getBoundingClientRect().top + m.scrollTop - 8); return; }
     if(q('[data-doc-volver]')){ VISTA = 'lista'; pintarAqui(); return; }
     if((el = q('[data-doc-pdf]'))){ hacerPdf(el.dataset.docPdf); return; }

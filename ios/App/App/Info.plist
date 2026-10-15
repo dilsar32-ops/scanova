@@ -29,7 +29,7 @@
 	<key>NSAlarmKitUsageDescription</key>
 	<string>Para despertarlo el día que tiene mudanza, a la hora que confirmó que va.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Scanova360 uses the camera to take job photos.</string>
+	<string>Scanova360 uses the camera to take job photos, scan floor plans and measure rooms.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Used only when you tap "Use my location" to suggest the job address. The address is a suggestion you confirm - nothing is filled in or sent by itself.</string>
 	<key>NSMicrophoneUsageDescription</key>
