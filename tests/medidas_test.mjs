@@ -22,10 +22,17 @@ else { const fr = fs.readFileSync(RUTA_FR, 'utf8');
   const pares = [...ac.matchAll(/'([^']+)': \{ value:'([^']+)'/g)].map(x => [x[1], x[2]]);
   ok('los acompañantes son los de Field Reports', pares.length === Object.keys(M.ACOMPANANTE).length && pares.every(([a, b]) => M.ACOMPANANTE[a] === b)); }
 
-ok('largo × ancho = pies cuadrados', JSON.stringify(M.calcular('Drywall', 12, 4)) === JSON.stringify({ sqft: 48, linear: 0, piezas: 0 }));
-ok('solo el largo = pies lineales (el corte de 2 ft se cobra por pie lineal)', JSON.stringify(M.calcular('Drywall', 24, '')) === JSON.stringify({ sqft: 0, linear: 24, piezas: 0 }));
-ok('un inodoro es una pieza, no pies', JSON.stringify(M.calcular('Toilet', 2, 9)) === JSON.stringify({ sqft: 0, linear: 0, piezas: 2 }));
-ok('un largo vacío o negativo no suma nada (ni NaN)', JSON.stringify(M.calcular('Carpet', '', 5)) === JSON.stringify({ sqft: 0, linear: 0, piezas: 0 }) && M.calcular('Carpet', -3, 4).sqft === 0);
+ok('largo × alto = pies cuadrados', JSON.stringify(M.calcular('Drywall', 12, 4)) === JSON.stringify({ sqft: 48, linear: 0, piezas: 0, faltaAlto: false }));
+// Su regla del 15-oct-2026: la pared SIEMPRE largo × alto ("pie lineal siempre va a ser un pie de alto, 1 por 1 da 1").
+ok('un corte de 2 ft de alto: 24 × 2 = 48 pies cuadrados, nunca 24 pies lineales', M.calcular('Drywall', 24, 2).sqft === 48 && M.calcular('Drywall', 24, 2).linear === 0);
+ok('una pared sin alto NO es pie lineal: queda "missing height" y no se cobra', JSON.stringify(M.calcular('Drywall', 24, '')) === JSON.stringify({ sqft: 0, linear: 0, piezas: 0, faltaAlto: true }));
+ok('el zócalo es el largo (pie lineal), aunque le escriban un número de más', JSON.stringify(M.calcular('Baseboard', 38, 4)) === JSON.stringify({ sqft: 0, linear: 38, piezas: 0, faltaAlto: false }));
+ok('un inodoro es una pieza, no pies', JSON.stringify(M.calcular('Toilet', 2, 9)) === JSON.stringify({ sqft: 0, linear: 0, piezas: 2, faltaAlto: false }));
+ok('un largo vacío o negativo no suma nada (ni NaN)', JSON.stringify(M.calcular('Carpet', '', 5)) === JSON.stringify({ sqft: 0, linear: 0, piezas: 0, faltaAlto: false }) && M.calcular('Carpet', -3, 4).sqft === 0);
+ok('unidades: gabinetes, vanity, vanity top, zócalo, tackless y curb en pie lineal', ['Cabinets', 'Vanity', 'Vanity Top', 'Baseboard', 'Tackless Strip', 'Shower Curb', 'Toe Kick'].every(m => M.unidad(m) === 'LF'));
+ok('unidades: tile, drywall, countertop, backsplash, espejo en pie cuadrado', ['Shower Tile', 'Floor Tile', 'Drywall', 'Countertop', 'Backsplash', 'Mirror', 'Insulation'].every(m => M.unidad(m) === 'SF'));
+ok('unidades: inodoro, lavaplatos, campana, coladera por pieza', ['Toilet', 'Dishwasher', 'Range Hood / Microwave', 'Shower Drain', 'Sink'].every(m => M.unidad(m) === 'EA'));
+ok('lo escrito a mano no recibe una unidad inventada', M.unidad('Wainscoting') === null && M.calcular('Wainscoting', 10, '').linear === 10);
 ok('redondeo a centésimas', M.calcular('Tile', 3.333, 3).sqft === 10);
 ok('las unidades nunca se suman: lado a lado', M.totalTexto(80, 24, 2) === '80 sq ft + 24 linear ft + 2 EA' && M.totalTexto(0, 0, 0) === '');
 ok('cantidad y unidad separadas (SF / LF / EA)', JSON.stringify(M.qtyUnidad(120, 0, 0)) === JSON.stringify({ qty: '120', unidad: 'SF' }) && JSON.stringify(M.qtyUnidad(0, 0, 3)) === JSON.stringify({ qty: '3', unidad: 'EA' }));
@@ -47,7 +54,7 @@ ok('el texto de la medida: 12 × 4 ft, 38 ft, 2 each', M.medidaTexto({ material:
   ok('el mismo material del cuarto se suma (80 + 40 = 120 sq ft) y no se mezcla con otro cuarto', sala.materiales.find(m => m.material === 'Drywall').sqft === 120);
   ok('el drywall de pared y el de techo son partidas distintas', g.partidas.filter(p => p.material === 'Drywall').map(p => p.superficie).join() === 'Wall,Ceiling');
   const pared = g.partidas.find(p => p.material === 'Drywall' && p.seccion === 'wall');
-  ok('total del trabajo: drywall de pared en 2 cuartos, 120 sq ft + 24 linear ft (sin sumarlos)', pared.cuartos === 2 && pared.sqft === 120 && pared.linear === 24);
+  ok('total del trabajo: drywall de pared en 2 cuartos, 120 sq ft + 1 sin alto (que no se cobra como pie lineal)', pared.cuartos === 2 && pared.sqft === 120 && pared.linear === 0 && pared.faltaAlto === 1);
   ok('las partidas van por parte: Floor, Wall, Ceiling, Kitchen', g.partidas.map(p => p.seccion).join() === 'floor,floor,wall,ceiling,kitchen');
   ok('una medida de un cuarto que ya no existe sale con su nombre guardado', g.niveles[2].cuartos[0].titulo === 'Storage');
   ok('cuenta cuartos y medidas', g.nCuartos === 4 && g.total === 7); }

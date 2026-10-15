@@ -34,7 +34,9 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
                 companionEs: companion?["labelEs"] as? String,
                 // Se cuenta en vez de medirse (27 sep 2026). Lo decide el lado
                 // JS con su tabla MEASURE_POR_PIEZA; aqui solo se desempaca.
-                porPieza: (dict["porPieza"] as? Bool) ?? false
+                porPieza: (dict["porPieza"] as? Bool) ?? false,
+                // La unidad de ese material ("SF" | "LF" | "EA"), decidida por la web (15 oct 2026).
+                unidad: dict["unidad"] as? String
             )
         }
     }
@@ -89,7 +91,8 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
                                                 companionValue: companion?["value"] as? String,
                                                 companionEn: companion?["labelEn"] as? String,
                                                 companionEs: companion?["labelEs"] as? String,
-                                                porPieza: (dict["porPieza"] as? Bool) ?? false)
+                                                porPieza: (dict["porPieza"] as? Bool) ?? false,
+                                                unidad: dict["unidad"] as? String)
                     }
                 }
                 arVC.seccionesDisponibles = mapa

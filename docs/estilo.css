@@ -2478,6 +2478,7 @@ body.dl-barra .pie [data-nav="proyectos"], body.dl-barra .pie [data-nav="clients
 .med-fila-txt b{ font-size:15px; }
 .med-fila-txt small{ color:var(--ink-soft); font-size:13px; }
 .med-fila-res{ font-size:14.5px; font-weight:700; white-space:nowrap; }
+.med-fila-res.falta{ color:var(--danger); }
 .med-fila .med-chev{ width:16px; height:16px; color:var(--ink-mute); }
 .med-tot{ display:flex; flex-wrap:wrap; gap:4px 16px; margin-top:10px; font-size:13.5px; color:var(--ink-soft); }
 .med-tot > span:first-child{ width:100%; font-size:12.5px; font-weight:700; }

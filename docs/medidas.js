@@ -11,7 +11,7 @@
 //    del trabajo por partida; las notas; y el PDF "Measurements & Demo" (lo arma Documents).
 // Lo que cambia contra Field Reports: aquí el trabajo ya es el proyecto (cliente, dirección y fecha ya están), y los
 // niveles y cuartos son los del proyecto (los mismos de Photos y Dry Logs).
-import { $, authFetch, esAparato, preguntar, PERFIL } from './app.js?v=2026-10-15-8';
+import { $, authFetch, esAparato, preguntar, PERFIL } from './app.js?v=2026-10-15-9';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -20,20 +20,34 @@ const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href=
 export const SECCIONES = [['floor', 'Floor'], ['wall', 'Wall'], ['ceiling', 'Ceiling'], ['kitchen', 'Kitchen'], ['bathroom', 'Bathroom'], ['materiales', 'Materials']];
 export const SUPERFICIE = Object.fromEntries(SECCIONES);
 export const MATERIALES = {
-  floor: ['Laminate', 'Tile', 'Hardwood', 'Vinyl (LVP)', 'Carpet', 'Carpet Pad', 'Underlayment', 'Plywood', 'Subfloor', 'Concrete'],
+  floor: ['Laminate', 'Tile', 'Hardwood', 'Vinyl (LVP)', 'Carpet', 'Carpet Pad', 'Underlayment', 'Plywood', 'Subfloor', 'Concrete', 'Tackless Strip'],
   wall: ['Drywall', 'Plaster', 'Stud / Framing', 'Insulation', 'Baseboard', 'Shoe Molding', 'Trim', 'Crown Molding'],
   ceiling: ['Drywall', 'Plaster', 'Insulation', 'Popcorn / Texture'],
-  kitchen: ['Countertop', 'Cabinets', 'Stove / Range', 'Refrigerator', 'Sink', 'Backsplash', 'Toe Kick'],
+  kitchen: ['Countertop', 'Cabinets', 'Stove / Range', 'Refrigerator', 'Sink', 'Backsplash', 'Toe Kick', 'Dishwasher', 'Range Hood / Microwave'],
   // El baño en el orden en que se demuele la pared de la regadera, de adentro hacia afuera (su corrección del 27-sep).
   bathroom: ['Shower Tile', 'Floor Tile', 'Thinset / Mortar Bed', 'Cement Board', 'Greenboard', 'Vapor Barrier', 'Shower Pan', 'Shower Surround', 'Shower Door',
-    'Plywood / Underlayment', 'Subfloor', 'Bathtub', 'Vanity', 'Vanity Top', 'Toilet', 'Medicine Cabinet', 'Exhaust Fan', 'Mirror', 'Towel Bar'],
+    'Plywood / Underlayment', 'Subfloor', 'Bathtub', 'Vanity', 'Vanity Top', 'Toilet', 'Medicine Cabinet', 'Exhaust Fan', 'Mirror', 'Towel Bar', 'Shower Curb', 'Shower Drain'],
   // Solo el plástico y la protección de piso: los tubos, buckets y zip poles ya van en el equipo (cobrarlos dos veces no).
   materiales: ['Plastic sheeting (cover)', '6 mil containment plastic', 'Floor protection'],
 };
 // Lo que se CUENTA en vez de medirse (EA). El número viaja en el largo, como en Field Reports.
-export const POR_PIEZA = new Set(['Toilet', 'Bathtub', 'Shower Pan', 'Shower Surround', 'Shower Door', 'Medicine Cabinet', 'Exhaust Fan', 'Mirror', 'Towel Bar',
-  'Stove / Range', 'Refrigerator', 'Sink']);
+// (El espejo se mide desde el 15-oct-2026: Xactimate lo cobra por pie cuadrado del vidrio.)
+export const POR_PIEZA = new Set(['Toilet', 'Bathtub', 'Shower Pan', 'Shower Surround', 'Shower Door', 'Medicine Cabinet', 'Exhaust Fan', 'Towel Bar', 'Shower Drain',
+  'Stove / Range', 'Refrigerator', 'Sink', 'Dishwasher', 'Range Hood / Microwave']);
 export const esPorPieza = (m) => POR_PIEZA.has(String(m || '').trim());
+// CADA MATERIAL CON SU UNIDAD (15 oct 2026, igual que Field Reports). Su regla: la pared SIEMPRE largo × alto en pies
+// cuadrados ("pie lineal siempre va a ser un pie de alto, 1 por 1 da 1": se acabó "2 ft o menos = pie lineal"); pie lineal
+// solo lo que no tiene alto que medir y los gabinetes; tile y drywall pie cuadrado; countertop pie cuadrado; vanity top
+// pie lineal. Una pared sin alto NO se vuelve pie lineal: queda "missing height" y no se cobra.
+export const LINEAL = new Set(['Baseboard', 'Trim / Baseboard', 'Shoe Molding', 'Trim', 'Crown Molding', 'Tackless Strip', 'Toe Kick', 'Cabinets', 'Vanity', 'Vanity Top', 'Shower Curb']);
+// 'EA' | 'LF' | 'SF', o null para un material escrito a mano (no se le inventa unidad: con ancho área, sin ancho tramo).
+export function unidad(m){
+  m = String(m || '').trim(); if(!m) return null;
+  if(POR_PIEZA.has(m)) return 'EA';
+  if(LINEAL.has(m)) return 'LF';
+  if(Object.values(MATERIALES).some(l => l.includes(m))) return 'SF';
+  return null;
+}
 // Lo que va pegado detrás o debajo, en el mismo lugar: se PREGUNTA y copia el mismo tamaño.
 export const ACOMPANANTE = { 'Baseboard': 'Shoe Molding', 'Trim / Baseboard': 'Shoe Molding', 'Drywall': 'Insulation', 'Plaster': 'Insulation', 'Popcorn / Texture': 'Insulation',
   'Carpet': 'Carpet Pad', 'Vinyl (LVP)': 'Underlayment', 'Laminate': 'Underlayment', 'Shower Tile': 'Cement Board', 'Floor Tile': 'Thinset / Mortar Bed',
@@ -52,7 +66,9 @@ export const ETIQUETA_CAMARA = { 'Laminate': 'Laminate / Laminado', 'Tile': 'Til
   'Plywood / Underlayment': 'Plywood / Underlayment / Triplay', 'Bathtub': 'Bathtub / Tina', 'Vanity': 'Vanity / Tocador', 'Vanity Top': 'Vanity Top / Cubierta del tocador',
   'Toilet': 'Toilet / Inodoro', 'Medicine Cabinet': 'Medicine Cabinet / Botiquín', 'Exhaust Fan': 'Exhaust Fan / Extractor', 'Mirror': 'Mirror / Espejo', 'Towel Bar': 'Towel Bar / Toallero',
   'Plastic sheeting (cover)': 'Nailo, plástico para cubrir / Plastic sheeting (cover)', '6 mil containment plastic': 'Plástico 6 mil de contención / 6 mil containment plastic',
-  'Floor protection': 'Protección de piso / Floor protection' };
+  'Floor protection': 'Protección de piso / Floor protection',
+  'Tackless Strip': 'Tackless Strip / Tira de clavos', 'Dishwasher': 'Dishwasher / Lavaplatos', 'Range Hood / Microwave': 'Range Hood / Microwave / Campana o microondas',
+  'Shower Curb': 'Shower Curb / Bordillo de la regadera', 'Shower Drain': 'Shower Drain / Coladera de la regadera' };
 export const ACOMPANANTE_ES = { 'Shoe Molding': 'shoe molding', 'Insulation': 'Insulación', 'Carpet Pad': 'Almohadilla de Alfombra', 'Underlayment': 'Base/Underlayment',
   'Cement Board': 'tabla de cemento (Durock)', 'Thinset / Mortar Bed': 'mortero', 'Vapor Barrier': 'barrera de vapor' };
 // Los cuartos que ofrece la cámara después de los del proyecto (la lista de Field Reports, en inglés: van al seguro).
@@ -62,12 +78,14 @@ export const NIVELES_COMUNES = ['Basement', 'First Floor', 'Second Floor', 'Thir
 const r2 = (v) => Math.round(v * 100) / 100;
 const norm = (s) => String(s || '').trim().toLowerCase();
 const num = (v) => { const n = parseFloat(v); return isFinite(n) && n > 0 ? n : 0; };
-// Lo que vale un corte: dos medidas = área; solo el largo = tramo; un material por pieza = piezas.
+// Lo que vale un corte, según la UNIDAD de su material (15-oct-2026). faltaAlto: es de superficie y solo trae el largo.
 export function calcular(material, largo, ancho){
-  const a = num(largo), b = num(ancho);
-  if(esPorPieza(material)) return { sqft: 0, linear: 0, piezas: a ? Math.round(a) : 0 };
-  if(a && b) return { sqft: r2(a * b), linear: 0, piezas: 0 };
-  return { sqft: 0, linear: a ? r2(a) : 0, piezas: 0 };
+  const a = num(largo), b = num(ancho), u = unidad(material);
+  if(u === 'EA') return { sqft: 0, linear: 0, piezas: a ? Math.round(a) : 0, faltaAlto: false };
+  if(u === 'LF') return { sqft: 0, linear: a ? r2(a) : 0, piezas: 0, faltaAlto: false };
+  if(u === 'SF') return { sqft: a && b ? r2(a * b) : 0, linear: 0, piezas: 0, faltaAlto: !!a && !b };
+  if(a && b) return { sqft: r2(a * b), linear: 0, piezas: 0, faltaAlto: false };
+  return { sqft: 0, linear: a ? r2(a) : 0, piezas: 0, faltaAlto: false };
 }
 // "120 sq ft + 40 linear ft": nunca sumados entre sí.
 export function totalTexto(sqft, linear, piezas){
@@ -93,13 +111,17 @@ export function lineasUnidad(x){
   if(x.sqft > 0) out.push({ qty: String(r2(x.sqft)), unidad: 'SF', cuartos: cu ? cu.sf : x.cuartos });
   if(x.linear > 0) out.push({ qty: String(r2(x.linear)), unidad: 'LF', cuartos: cu ? cu.lf : x.cuartos });
   if(x.piezas > 0) out.push({ qty: String(Math.round(x.piezas)), unidad: 'EA', cuartos: cu ? cu.ea : x.cuartos });
+  // Lo que le falta su segunda medida no se cobra, pero se DICE (15-oct-2026).
+  if(x.faltaAlto > 0) out.push({ qty: '—', unidad: 'missing height', cuartos: cu ? cu.fa : x.cuartos });
   return out;
 }
 // "12 × 2 ft", "38 ft", "2 each".
 export function medidaTexto(f){
-  if(esPorPieza(f.material)) return Math.round(num(f.largo)) + ' each';
+  const u = unidad(f.material);
+  if(u === 'EA') return Math.round(num(f.largo)) + ' each';
   const a = num(f.largo), b = num(f.ancho);
-  return a && b ? r2(a) + ' × ' + r2(b) + ' ft' : r2(a) + ' ft';
+  if(u === 'LF') return r2(a) + ' ft';
+  return a && b ? r2(a) + ' × ' + r2(b) + ' ft' : r2(a) + ' ft' + (u === 'SF' ? ' · missing height' : '');
 }
 const RANGO_SECCION = { floor: 0, wall: 1, ceiling: 2, kitchen: 3, bathroom: 4, materiales: 5 };
 // Las medidas -> niveles -> cuartos -> materiales, ya sumadas. Los niveles en el orden del proyecto; los cuartos y los
@@ -125,8 +147,8 @@ export function agrupar(filas, niveles, cuartos){
     const r = calcular(f.material, f.largo, f.ancho);
     const claveM = f.material + '|' + f.seccion;
     let M = C.materiales.get(claveM);
-    if(!M){ M = { material: f.material, seccion: f.seccion, superficie: SUPERFICIE[f.seccion] || f.seccion, orden: C.materiales.size, sqft: 0, linear: 0, piezas: 0, filas: [] }; C.materiales.set(claveM, M); }
-    M.filas.push(f); M.sqft += r.sqft; M.linear += r.linear; M.piezas += r.piezas;
+    if(!M){ M = { material: f.material, seccion: f.seccion, superficie: SUPERFICIE[f.seccion] || f.seccion, orden: C.materiales.size, sqft: 0, linear: 0, piezas: 0, faltaAlto: 0, filas: [] }; C.materiales.set(claveM, M); }
+    M.filas.push(f); M.sqft += r.sqft; M.linear += r.linear; M.piezas += r.piezas; if(r.faltaAlto) M.faltaAlto++;
   });
   const porOrden = (x, y) => x.orden - y.orden;
   const nivelesOut = [...L.values()].sort((x, y) => (x.rango - y.rango) || (x.orden - y.orden)).map(N => ({
@@ -142,9 +164,9 @@ export function agrupar(filas, niveles, cuartos){
     if(C.materiales.length) nCuartos++;
     C.materiales.forEach(M => {
       const k = M.material + '|' + M.seccion; let p = P.get(k);
-      if(!p){ p = { material: M.material, seccion: M.seccion, superficie: M.superficie, orden: P.size, cuartos: 0, cuartosU: { sf: 0, lf: 0, ea: 0 }, sqft: 0, linear: 0, piezas: 0 }; P.set(k, p); }
-      p.cuartos++; p.sqft += M.sqft; p.linear += M.linear; p.piezas += M.piezas;
-      if(M.sqft > 0) p.cuartosU.sf++; if(M.linear > 0) p.cuartosU.lf++; if(M.piezas > 0) p.cuartosU.ea++;
+      if(!p){ p = { material: M.material, seccion: M.seccion, superficie: M.superficie, orden: P.size, cuartos: 0, cuartosU: { sf: 0, lf: 0, ea: 0, fa: 0 }, sqft: 0, linear: 0, piezas: 0, faltaAlto: 0 }; P.set(k, p); }
+      p.cuartos++; p.sqft += M.sqft; p.linear += M.linear; p.piezas += M.piezas; p.faltaAlto += M.faltaAlto;
+      if(M.sqft > 0) p.cuartosU.sf++; if(M.linear > 0) p.cuartosU.lf++; if(M.piezas > 0) p.cuartosU.ea++; if(M.faltaAlto > 0) p.cuartosU.fa++;
     });
   }));
   const partidas = [...P.values()].sort((x, y) => ((RANGO_SECCION[x.seccion] ?? 9) - (RANGO_SECCION[y.seccion] ?? 9)) || (x.orden - y.orden))
@@ -248,14 +270,14 @@ function pintarAqui(){
   const vacio = !g.total && !FALLO && !pend ? `<div class="vacio-tarj">${IC('regla')}<div><b>No measurements yet.</b> ${cam ? 'Measure with the camera, or add them by hand' : 'Add what was removed, room by room'}: floor, walls, ceiling, kitchen, bathroom and the plastic used.</div></div>` : '';
   const filaHtml = (f) => `<button type="button" class="med-fila" data-med-editar="${esc(f.id)}">
       <span class="med-fila-txt"><b>${esc(f.material)}</b><small>${esc(SUPERFICIE[f.seccion] || f.seccion)} · ${esc(medidaTexto(f))}${f.origen === 'camara' ? ' · camera' : ''}</small></span>
-      <span class="med-fila-res">${esc(totalTexto(...Object.values(calcular(f.material, f.largo, f.ancho))))}</span>${IC('chev-der', 'med-chev')}</button>`;
+      <span class="med-fila-res${calcular(f.material, f.largo, f.ancho).faltaAlto ? ' falta' : ''}">${esc(totalTexto(...Object.values(calcular(f.material, f.largo, f.ancho))) || (calcular(f.material, f.largo, f.ancho).faltaAlto ? 'missing height' : ''))}</span>${IC('chev-der', 'med-chev')}</button>`;
   const cuartoHtml = (C) => {
     // Lo GUARDADO, no lo que se ve: "Level not specified" es un rótulo, nunca un nombre de nivel.
     const donde = { nivel_id: C.nivel_id, cuarto_id: C.cuarto_id, nivel: C.nivel_nombre || '', cuarto: C.cuarto_nombre || '' };
     return `<section class="card med-cuarto">
       <div class="med-cuarto-cab"><h3>${esc(C.titulo)}</h3><small>${esc(C.nivel)}</small></div>
       <div class="med-filas">${C.materiales.map(M => M.filas.map(filaHtml).join('')).join('')}</div>
-      ${C.materiales.some(M => M.filas.length > 1) ? `<div class="med-tot"><span>By material</span>${C.materiales.map(M => `<span class="med-tot-i"><b>${esc(M.material)}</b> <small>${esc(M.superficie)}</small> ${esc(totalTexto(M.sqft, M.linear, M.piezas))}</span>`).join('')}</div>` : ''}
+      ${C.materiales.some(M => M.filas.length > 1) ? `<div class="med-tot"><span>By material</span>${C.materiales.map(M => `<span class="med-tot-i"><b>${esc(M.material)}</b> <small>${esc(M.superficie)}</small> ${esc([totalTexto(M.sqft, M.linear, M.piezas), M.faltaAlto ? M.faltaAlto + ' missing height' : ''].filter(Boolean).join(' + '))}</span>`).join('')}</div>` : ''}
       <div class="med-agregar"><span>Add to this room</span><div class="med-rejilla med-partes">${SECCIONES.map(([k, t]) => `<button type="button" class="chip" data-med-agregar='${esc(JSON.stringify({ ...donde, seccion: k }))}'>+ ${t}</button>`).join('')}</div></div>
     </section>`;
   };
@@ -295,8 +317,8 @@ function pintarEditor(){
   if(esOtro && ED.material !== 'Other'){ ED.otro = ED.material; ED.material = 'Other'; }
   const mat = materialDe(ED), pieza = esPorPieza(mat), comp = !ED.id && ACOMPANANTE[mat];
   const nivel = nombreNivel(ED.nivel_id, ED.nivel), cuarto = nombreCuarto(ED.cuarto_id, ED.cuarto);
-  const r = calcular(mat, ED.largo, pieza ? '' : ED.ancho), res = totalTexto(r.sqft, r.linear, r.piezas);
-  const etqAncho = ED.seccion === 'wall' ? 'Height (ft)' : 'Width (ft)';
+  const r = calcular(mat, ED.largo, pieza ? '' : ED.ancho), res = totalTexto(r.sqft, r.linear, r.piezas) || (r.faltaAlto ? (ED.seccion === 'wall' ? 'missing height' : 'missing width') : '');
+  const etqAncho = ED.seccion === 'wall' ? 'Height (ft)' : 'Width (ft)', lineal = unidad(mat) === 'LF', sup = unidad(mat) === 'SF';
   // En la compu, 4 columnas solo si la última fila queda igual o más llena que con 3 (Wall: 9 = 3 × 3, sin huecos).
   const nMat = lista.length + 1, hueco = (c) => (c - nMat % c) % c, cuatro = hueco(4) <= hueco(3);
   f.innerHTML = `
@@ -307,10 +329,11 @@ function pintarEditor(){
     <div class="med-rejilla med-mats${cuatro ? ' c4' : ''}">${lista.concat(['Other']).map(m => `<button type="button" class="chip${ED.material === m ? ' on' : ''}" data-med-mat="${esc(m)}">${esc(m)}</button>`).join('')}</div>
     ${ED.material === 'Other' ? `<div class="field med-otro"><label for="medOtro">Material / item name</label><input id="medOtro" type="text" maxlength="80" value="${esc(ED.otro)}" placeholder="e.g. Wainscoting"></div>` : ''}
     ${mat ? (pieza ? `<div class="field med-dims1"><label for="medLargo">How many? <span class="hint">each</span></label><input id="medLargo" type="number" inputmode="numeric" min="1" step="1" value="${esc(ED.largo)}"></div>`
+      : lineal ? `<div class="field med-dims1"><label for="medLargo">Length (ft) <span class="hint">linear</span></label><input id="medLargo" type="number" inputmode="decimal" min="0" step="0.01" value="${esc(ED.largo)}" placeholder="L"></div>`
       : `<div class="med-dims"><div class="field"><label for="medLargo">Length (ft)</label><input id="medLargo" type="number" inputmode="decimal" min="0" step="0.01" value="${esc(ED.largo)}" placeholder="L"></div>
           <span class="med-x">×</span>
-          <div class="field"><label for="medAncho">${etqAncho} <span class="hint">optional</span></label><input id="medAncho" type="number" inputmode="decimal" min="0" step="0.01" value="${esc(ED.ancho)}" placeholder="W"></div></div>
-         ${ED.seccion === 'wall' ? '<p class="med-nota-chica">Cuts 2 ft high or less are billed by the linear foot: enter only the length. Taller cuts: length × height.</p>' : ''}`)
+          <div class="field"><label for="medAncho">${etqAncho}${sup ? '' : ' <span class="hint">optional</span>'}</label><input id="medAncho" type="number" inputmode="decimal" min="0" step="0.01" value="${esc(ED.ancho)}" placeholder="${ED.seccion === 'wall' ? 'H' : 'W'}"></div></div>
+         ${ED.seccion === 'wall' && sup ? '<p class="med-nota-chica">Walls are always length × height, in square feet, however tall the cut is.</p>' : ''}`)
       + `<p class="med-res" id="medRes">${res ? '= ' + esc(res) : ''}</p>` : ''}
     ${comp ? `<label class="med-acomp"><input type="checkbox" id="medAcomp"${ED.acomp ? ' checked' : ''}><span>Also add <b>${esc(comp)}</b> with the same size</span></label>` : ''}
     <p class="aviso" id="medEdAviso"></p>
@@ -330,6 +353,8 @@ async function guardarEditor(otra){
   const mat = materialDe(ed), pieza = esPorPieza(mat), largo = num(ed.largo), ancho = pieza ? 0 : num(ed.ancho);
   if(!mat){ avisoEditor(ed, ed.material === 'Other' ? 'Write the material or item name.' : 'Pick the material.'); return; }
   if(!largo){ avisoEditor(ed, pieza ? 'Write how many.' : 'Write the length in feet.'); return; }
+  // Lo de superficie siempre lleva su segunda medida (15-oct-2026): una pared sin alto ya no es pie lineal.
+  if(unidad(mat) === 'SF' && !ancho){ avisoEditor(ed, ed.seccion === 'wall' ? 'Write the height: walls are length × height.' : 'Write the width: this is length × width.'); return; }
   const fila = { nivel_id: ed.nivel_id || null, cuarto_id: ed.cuarto_id || null, nivel_nombre: nombreNivel(ed.nivel_id, ed.nivel) || null, cuarto_nombre: nombreCuarto(ed.cuarto_id, ed.cuarto) || null,
     seccion: ed.seccion, material: mat, largo: pieza ? Math.max(1, Math.round(largo)) : r2(largo), ancho: ancho ? r2(ancho) : null };
   // Todo lo que hace falta DESPUÉS se toma ahora: si cierran el editor mientras guarda, ya no existe.
@@ -395,11 +420,12 @@ async function guardarNota(){
 // ---------- la cámara que mide (la de Field Reports) ----------
 // Con los colores de Scanova (su decisión del 15-oct: "colores de Scanova", la voz sigue en español). La cámara es la
 // misma de Field Reports; Field Reports no manda tema y se queda con los suyos. Hex con transparencia al final.
-export const TEMA_CAMARA = { escogido: '#2563EBF2', pastilla: '#0F1A2EBD', tarjeta: '#151E2E', neutro: '#243046', primario: '#2563EBF2', listo: '#16A34AF2', fondo: '#0D1420' };
+// Sin verde (su corrección del 15-oct: "el color verde no va, no se distingue"): Terminar/Listo van en el azul oscuro de Scanova.
+export const TEMA_CAMARA = { escogido: '#2563EBF2', pastilla: '#0F1A2EBD', tarjeta: '#151E2E', neutro: '#243046', primario: '#2563EBF2', listo: '#1D4ED8F2', fondo: '#0D1420' };
 function catalogos(){
   const secciones = {};
   SECCIONES.forEach(([k]) => { secciones[k] = MATERIALES[k].map(v => { const a = ACOMPANANTE[v];
-    return { value: v, label: ETIQUETA_CAMARA[v] || v, companion: a ? { value: a, labelEn: a, labelEs: ACOMPANANTE_ES[a] || a } : null, porPieza: esPorPieza(v) }; }); });
+    return { value: v, label: ETIQUETA_CAMARA[v] || v, companion: a ? { value: a, labelEn: a, labelEs: ACOMPANANTE_ES[a] || a } : null, porPieza: esPorPieza(v), unidad: unidad(v) }; }); });
   return secciones;
 }
 async function lanzarCamara(alcance, d){

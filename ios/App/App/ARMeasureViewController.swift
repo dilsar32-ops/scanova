@@ -50,6 +50,12 @@ struct ARMaterialOption {
     // no tienen largo ni ancho, son UNO. Lo decide el lado JS con su tabla
     // MEASURE_POR_PIEZA y viaja con cada opcion, igual que el companero.
     var porPieza: Bool = false
+    // LA UNIDAD LA DICE EL MATERIAL (15 oct 2026). Su regla: la pared SIEMPRE es
+    // largo x alto (pies cuadrados) - se acabo "dos pies o menos = pie lineal";
+    // pie lineal solo lo que no tiene alto (zocalo, molduras, gabinetes...). La
+    // web manda "SF", "LF" o "EA" con cada opcion; sin eso (una web vieja) se
+    // usa la regla de siempre por nombre.
+    var unidad: String? = nil
 }
 
 // LA CASILLA DE LAS INSTRUCCIONES (13 de septiembre).
@@ -3127,11 +3133,7 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
 
     private func totalHablado() -> String {
         guard !items.isEmpty else { return "Todavía no ha guardado ninguna medida." }
-        let sqft = items.compactMap { i -> Double? in i.width.map { $0 * i.length } }.reduce(0, +)
-        let lineal = items.filter { $0.width == nil }.map { $0.length }.reduce(0, +)
-        var t: [String] = []
-        if sqft > 0 { t.append(String(format: "%.0f pies cuadrados", sqft)) }
-        if lineal > 0 { t.append(String(format: "%.0f pies lineales", lineal)) }
+        let t = totalesTexto(items.map { (material: $0.material, largo: $0.length, ancho: $0.width) })
         return "Lleva \(items.count) medida\(items.count == 1 ? "" : "s")" +
                (t.isEmpty ? "." : ": " + t.joined(separator: " y ") + ".")
     }
@@ -3666,7 +3668,36 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
     // factura de ellos, no una opinion.
     private enum Unidad { case lineal, cuadrado, depende }
     private func unidad(for material: String) -> Unidad {
+        // Primero lo que dijo la web para ESE material (15 oct 2026).
+        let todas = materials + seccionesDisponibles.values.flatMap { $0 }
+        if let u = todas.first(where: { $0.value == material && $0.unidad != nil })?.unidad {
+            switch u { case "SF": return .cuadrado; case "LF", "EA": return .lineal; default: break }
+        }
         return Self.unidad(material: material, section: seccionDelMaterial(material))
+    }
+    private func esPiezaMaterial(_ material: String) -> Bool {
+        let todas = materials + seccionesDisponibles.values.flatMap { $0 }
+        return todas.contains(where: { $0.value == material && ($0.porPieza || $0.unidad == "EA") })
+    }
+    // Lo que suma una medida guardada, segun la unidad de SU material (15 oct
+    // 2026). Antes "sin ancho" era pie lineal: una pared sin alto se decia en
+    // pies lineales y un inodoro contado se decia "2 pies lineales".
+    private func cuentaDe(material: String, largo: Double, ancho: Double?) -> (sq: Double, li: Double, piezas: Int, sinAlto: Int) {
+        if esPiezaMaterial(material) { return (0, 0, Int(largo.rounded()), 0) }
+        let u = unidad(for: material)
+        if u == .lineal { return (0, largo, 0, 0) }
+        if let w = ancho { return (w * largo, 0, 0, 0) }
+        return u == .cuadrado ? (0, 0, 0, 1) : (0, largo, 0, 0)
+    }
+    private func totalesTexto(_ lista: [(material: String, largo: Double, ancho: Double?)], cuadrado: String = "pies cuadrados", union: String = " y ") -> [String] {
+        var sq = 0.0, li = 0.0, pz = 0, sinAlto = 0
+        for x in lista { let c = cuentaDe(material: x.material, largo: x.largo, ancho: x.ancho); sq += c.sq; li += c.li; pz += c.piezas; sinAlto += c.sinAlto }
+        var t: [String] = []
+        if sq > 0 { t.append(String(format: "%.0f %@", sq, cuadrado)) }
+        if li > 0 { t.append(String(format: "%.0f pies lineales", li)) }
+        if pz > 0 { t.append("\(pz) pieza" + (pz == 1 ? "" : "s")) }
+        if sinAlto > 0 { t.append("\(sinAlto) sin alto") }
+        return t
     }
     // Aparte y sin estado para poder probarla: esto decide si una linea se
     // factura por pie lineal o por pie cuadrado. Equivocarse aqui es dinero
@@ -3692,9 +3723,9 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
     private func explicacionUnidad(for material: String) -> String {
         switch unidad(for: material) {
         case .lineal:
-            return "El zócalo se cobra por pie lineal. Con el largo basta, no necesita ancho."
+            return "Esto se cobra por pie lineal. Con el largo basta, no necesita ancho."
         case .cuadrado where section == "wall":
-            return "La pared se mide largo por alto, para sacar los pies cuadrados. Ojo: si el corte es de dos pies de alto o menos, con el largo basta, porque eso se cobra por pie lineal."
+            return "La pared se mide largo por alto, siempre en pies cuadrados, del alto que sea el corte."
         case .cuadrado where section == "ceiling":
             return "El techo se cobra por pie cuadrado. Necesita el largo y el ancho."
         case .cuadrado where section == "materiales":
@@ -3951,13 +3982,14 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
         // Lo que ya lleva, de LO QUE SE ESTA MIDIENDO: mismo material Y misma
         // seccion (el Drywall de la pared no es el del techo).
         let deLaSeccion = deAqui.filter { $0.seccion == section }
-        let guardadas: [(largo: Double, ancho: Double?)]
+        let lasGuardadas: [(material: String, largo: Double, ancho: Double?)]
         if let m = selectedMaterial {
             let sec = seccionDelMaterial(m.value)
-            guardadas = deAqui.filter { $0.material == m.value && $0.seccion == sec }.map { (largo: $0.length, ancho: $0.width) }
+            lasGuardadas = deAqui.filter { $0.material == m.value && $0.seccion == sec }.map { (material: $0.material, largo: $0.length, ancho: $0.width) }
         } else {
-            guardadas = (section.isEmpty ? deAqui : deLaSeccion).map { (largo: $0.length, ancho: $0.width) }
+            lasGuardadas = (section.isEmpty ? deAqui : deLaSeccion).map { (material: $0.material, largo: $0.length, ancho: $0.width) }
         }
+        let guardadas = lasGuardadas.map { (largo: $0.largo, ancho: $0.ancho) }
         let texto = Self.textoDeAvance(cuarto: roomName,
                                        seccion: Self.sectionSpokenName(section).capitalized,
                                        material: selectedMaterial.map { Self.nombreDeBoton($0) },
@@ -3966,7 +3998,8 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
                                        guardadas: guardadas,
                                        medidasEnElNivel: items.filter { $0.nivel == nivelActual }.count,
                                        hayAlgoGuardado: !items.isEmpty,
-                                       piezasEnCurso: esPorPieza ? piezasContadas : nil)
+                                       piezasEnCurso: esPorPieza ? piezasContadas : nil,
+                                       totalesPorUnidad: totalesTexto(lasGuardadas, cuadrado: "pies²"))
         guard let texto = texto else { avanceLabel.isHidden = true; return }
         if avanceLabel.text != texto { avanceLabel.text = texto }
         avanceLabel.isHidden = false
@@ -3983,7 +4016,10 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
                               // Lo que se CUENTA en vez de medirse (27 sep 2026).
                               // Con valor por omision para no tocar a quien ya
                               // la llama, incluidas las pruebas.
-                              piezasEnCurso: Int? = nil) -> String? {
+                              piezasEnCurso: Int? = nil,
+                              // Los totales ya contados por la UNIDAD de cada material (15 oct
+                              // 2026). Sin ellos (las pruebas viejas) se cuenta como antes.
+                              totalesPorUnidad: [String]? = nil) -> String? {
         // Sin cuarto ni material: con algo ya guardado la barrita se queda
         // (para que nada se mueva); en una pantalla nueva, no estorba.
         if cuarto.isEmpty && material == nil {
@@ -4007,11 +4043,13 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
         }
         var total = "Llevo 0"
         if !guardadas.isEmpty {
-            let area = guardadas.compactMap { g in g.ancho.map { $0 * g.largo } }.reduce(0, +)
-            let lineal = guardadas.filter { $0.ancho == nil }.map { $0.largo }.reduce(0, +)
             var partes: [String] = []
-            if area > 0 { partes.append(String(format: "%.0f pies²", area)) }
-            if lineal > 0 { partes.append(String(format: "%.0f pies lineales", lineal)) }
+            if let t = totalesPorUnidad { partes = t } else {
+                let area = guardadas.compactMap { g in g.ancho.map { $0 * g.largo } }.reduce(0, +)
+                let lineal = guardadas.filter { $0.ancho == nil }.map { $0.largo }.reduce(0, +)
+                if area > 0 { partes.append(String(format: "%.0f pies²", area)) }
+                if lineal > 0 { partes.append(String(format: "%.0f pies lineales", lineal)) }
+            }
             let n = guardadas.count
             let cuantas = "\(n) medida" + (n == 1 ? "" : "s")
             total = "Llevo " + (partes.isEmpty ? cuantas : partes.joined(separator: " + ") + " · " + cuantas)
@@ -5273,22 +5311,15 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
     }
 
     private func resumenHablado() -> String {
-        var porMaterial: [(String, Double, Double)] = []   // material, sqft, lineal
+        var porMaterial: [(String, [(material: String, largo: Double, ancho: Double?)])] = []
         for it in items {
-            let sq = it.width.map { $0 * it.length } ?? 0
-            let li = it.width == nil ? it.length : 0
-            if let i = porMaterial.firstIndex(where: { $0.0 == it.material }) {
-                porMaterial[i].1 += sq
-                porMaterial[i].2 += li
-            } else {
-                porMaterial.append((it.material, sq, li))
-            }
+            let x = (material: it.material, largo: it.length, ancho: it.width)
+            if let i = porMaterial.firstIndex(where: { $0.0 == it.material }) { porMaterial[i].1.append(x) }
+            else { porMaterial.append((it.material, [x])) }
         }
         let partes = porMaterial.map { m -> String in
             let nombre = materials.first(where: { $0.value == m.0 }).map { Self.nombreDeBoton($0) } ?? m.0
-            var t: [String] = []
-            if m.1 > 0 { t.append(String(format: "%.0f pies cuadrados", m.1)) }
-            if m.2 > 0 { t.append(String(format: "%.0f pies lineales", m.2)) }
+            let t = totalesTexto(m.1)
             return "\(t.joined(separator: " y ")) de \(nombre.lowercased())"
         }
         let conCompanero = items.compactMap { $0.companion }
@@ -5372,7 +5403,7 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
                     // de los dos pies que la app misma explica al escoger el
                     // material.
                     frase += section == "wall"
-                        ? "Le falta el alto del corte: toque Medir Ancho. Si el corte es de dos pies o menos va por pie lineal, y con el largo basta."
+                        ? "Le falta el alto del corte: toque Medir Ancho. La pared siempre va largo por alto."
                         : "Le falta el ancho: toque Medir Ancho, porque esto se cobra por pie cuadrado."
                 } else {
                     frase += "Ya tiene las dos medidas: toque Guardar y Seguir."
@@ -7349,8 +7380,8 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
         if unidad(for: material.value) == .cuadrado, currentWidthFeet == nil, !yaAvisoFaltaAncho {
             yaAvisoFaltaAncho = true
             let que = section == "wall" ? "la pared" : (section == "ceiling" ? "el techo" : "el piso")
-            avisoEnPantalla = "⚠︎ Falta el ancho — sin él esto va como pie lineal"
-            say("Ojo: \(que) se cobra por pie cuadrado y solo tiene el largo. Toque Medir Ancho, o Guardar otra vez si va por pie lineal.", .aviso)
+            avisoEnPantalla = section == "wall" ? "⚠︎ Falta el alto — la pared va largo × alto" : "⚠︎ Falta el ancho — va largo × ancho"
+            say("Ojo: \(que) se cobra por pie cuadrado y solo tiene el largo. Toque Medir Ancho. Si la guarda así, sale sin alto y no se cobra hasta que se lo pongan.", .aviso)
             instructionLabel.text = avisoEnPantalla
             return
         }
@@ -7364,11 +7395,7 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
         // limpia y esto no es algo que deba repetirse por medida, es la
         // confirmacion de un toque que el acaba de dar.
         let cuantas = items.count
-        let sqft = items.compactMap { i -> Double? in i.width.map { $0 * i.length } }.reduce(0, +)
-        let lineal = items.filter { $0.width == nil }.map { $0.length }.reduce(0, +)
-        var totales: [String] = []
-        if sqft > 0 { totales.append(String(format: "%.0f pies cuadrados", sqft)) }
-        if lineal > 0 { totales.append(String(format: "%.0f pies lineales", lineal)) }
+        let totales = totalesTexto(items.map { (material: $0.material, largo: $0.length, ancho: $0.width) })
         let cola = totales.isEmpty ? "" : ": " + totales.joined(separator: " y ")
         // Y SE SIGUE LA CONVERSACION. Este era el hueco que el reporto: al
         // guardar, la app se quedaba MUDA y el se quedaba parado sin saber que
@@ -7412,8 +7439,8 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
             let comoSeguir = (stage == .lengthDone || stage == .widthDone)
                 ? "Toque Medir Ancho"
                 : "Toque Terminar Recorrido y luego Medir Ancho"
-            avisoEnPantalla = "⚠︎ Falta el ancho — sin él esto va como pie lineal"
-            say("Ojo: \(que) se cobra por pie cuadrado y solo tiene el largo. \(comoSeguir), o Terminar otra vez si va por pie lineal.", .aviso)
+            avisoEnPantalla = section == "wall" ? "⚠︎ Falta el alto — la pared va largo × alto" : "⚠︎ Falta el ancho — va largo × ancho"
+            say("Ojo: \(que) se cobra por pie cuadrado y solo tiene el largo. \(comoSeguir). Si termina así, sale sin alto y no se cobra hasta que se lo pongan.", .aviso)
             instructionLabel.text = avisoEnPantalla
             return
         }

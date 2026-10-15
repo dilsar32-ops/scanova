@@ -1,6 +1,6 @@
 // Scanova · trabajos: la lista, crear, abrir, editar, archivar. De las fotos solo el conteo por ahora (paso 2).
-import { $, $$, authFetch, irA, atras, esManager, marcarLimpio } from './app.js?v=2026-10-15-8';
-import * as fotos from './fotos.js?v=2026-10-15-8';
+import { $, $$, authFetch, irA, atras, esManager, marcarLimpio } from './app.js?v=2026-10-15-9';
+import * as fotos from './fotos.js?v=2026-10-15-9';
 
 export const TIPOS = { agua:'Agua', moho:'Moho', fuego:'Fuego', contenidos:'Contenidos', mudanza:'Mudanza', otro:'Otro' };
 export const tipoTxt = (t) => TIPOS[t] || 'Otro';
