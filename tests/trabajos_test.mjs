@@ -3,9 +3,9 @@ import * as T from '../docs/trabajos.js';
 let pass = 0, fail = 0;
 const ok = (l, c) => { if(c){ pass++; console.log('  ok  ' + l); } else { fail++; console.log('  FAIL ' + l); } };
 const L = [
-  { id:'1', cliente:'Lauren Harris', direccion:'9 Oak Ln, Vienna VA', tipo:'agua', estado:'activo' },
-  { id:'2', cliente:'José Pérez', direccion:'1068 Bellview Rd, McLean', tipo:'mudanza', estado:'activo' },
-  { id:'3', cliente:'Ava Malani', direccion:'Fairfax', tipo:'moho', estado:'archivado' },
+  { id:'1', cliente:'Ana Prueba', direccion:'9 Fake Ln, Vienna VA', tipo:'agua', estado:'activo' },
+  { id:'2', cliente:'José Pérez', direccion:'100 Test Rd, McLean', tipo:'mudanza', estado:'activo' },
+  { id:'3', cliente:'Eva Ejemplo', direccion:'Fairfax', tipo:'moho', estado:'archivado' },
 ];
 ok('filtrar: solo activos sin texto', T.filtrar(L, 'activo', '').map(t=>t.id).join() === '1,2');
 ok('filtrar: archivados', T.filtrar(L, 'archivado', '').map(t=>t.id).join() === '3');

@@ -9,13 +9,13 @@ import { $ } from './app.js?v=2026-10-15-13';
 const ESTADOS = { Alabama:'AL', Alaska:'AK', Arizona:'AZ', Arkansas:'AR', California:'CA', Colorado:'CO', Connecticut:'CT', Delaware:'DE', 'District of Columbia':'DC', Florida:'FL', Georgia:'GA', Hawaii:'HI', Idaho:'ID', Illinois:'IL', Indiana:'IN', Iowa:'IA', Kansas:'KS', Kentucky:'KY', Louisiana:'LA', Maine:'ME', Maryland:'MD', Massachusetts:'MA', Michigan:'MI', Minnesota:'MN', Mississippi:'MS', Missouri:'MO', Montana:'MT', Nebraska:'NE', Nevada:'NV', 'New Hampshire':'NH', 'New Jersey':'NJ', 'New Mexico':'NM', 'New York':'NY', 'North Carolina':'NC', 'North Dakota':'ND', Ohio:'OH', Oklahoma:'OK', Oregon:'OR', Pennsylvania:'PA', 'Rhode Island':'RI', 'South Carolina':'SC', 'South Dakota':'SD', Tennessee:'TN', Texas:'TX', Utah:'UT', Vermont:'VT', Virginia:'VA', Washington:'WA', 'West Virginia':'WV', Wisconsin:'WI', Wyoming:'WY' };
 export const estadoCorto = (s) => ESTADOS[String(s || '').trim()] || String(s || '').trim();
 export const sinPais = (s) => String(s || '').replace(/,?\s*(United States|USA|Estados Unidos)\s*$/i, '').replace(/\s{2,}/g, ' ').trim();
-// Una sugerencia de Apple ({title, subtitle}) -> "1315 Beverly Rd, McLean, VA 22101".
+// Una sugerencia de Apple ({title, subtitle}) -> "200 Sample Rd, McLean, VA 22101".
 export function unirSugerencia(s){
   const t = String(s && s.title || '').trim(), sub = sinPais(s && s.subtitle);
   if(!sub || t.toLowerCase().includes(sub.toLowerCase())) return sinPais(t);
   return sinPais(t + ', ' + sub);
 }
-// La dirección que devuelve el servicio abierto de mapas (web) -> "1241 Providence Terrace, McLean, VA 22101".
+// La dirección que devuelve el servicio abierto de mapas (web) -> "300 Example Terrace, McLean, VA 22101".
 export function direccionDeMapa(a){
   if(!a) return '';
   const calle = [a.house_number, a.road].filter(Boolean).join(' ');

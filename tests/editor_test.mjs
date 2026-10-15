@@ -11,7 +11,7 @@ ok('exposición +100 dobla la luz (y no pasa de 255)', E.ajustarPixel(60, E.fact
 ok('contraste: aleja del gris medio; el gris medio se queda', E.ajustarPixel(200, E.factores({ con:50 })) > 200 && E.ajustarPixel(50, E.factores({ con:50 })) < 50);
 ok('filtroCss coincide con la cuenta de la copia (brightness y contrast)', /^brightness\(2\.000\) contrast\(1\.000\) saturate\(1\.000\)$/.test(E.filtroCss({ exp:100 })));
 ok('tintaSobre: texto negro sobre amarillo/blanco, blanco sobre rojo/azul', E.tintaSobre('#ffd60a') === '#111' && E.tintaSobre('#ffffff') === '#111' && E.tintaSobre('#ff3b30') === '#fff' && E.tintaSobre('#0a84ff') === '#fff');
-ok('nombreArchivo: proyecto, cuarto y fecha, sin acentos ni símbolos', FO.nombreArchivo('José Pérez', 'Living Room', '2026-10-12T14:00:00') === 'Jose-Perez_Living-Room_2026-10-12.jpg' && FO.nombreArchivo('Lauren Harris', '', '2026-10-10T10:00:00') === 'Lauren-Harris_2026-10-10.jpg');
+ok('nombreArchivo: proyecto, cuarto y fecha, sin acentos ni símbolos', FO.nombreArchivo('José Pérez', 'Living Room', '2026-10-12T14:00:00') === 'Jose-Perez_Living-Room_2026-10-12.jpg' && FO.nombreArchivo('Ana Prueba', '', '2026-10-10T10:00:00') === 'Ana-Prueba_2026-10-10.jpg');
 ok('etiquetasDeFoto: las de la foto en el orden del catálogo', FO.etiquetasDeFoto([{ id:'a' }, { id:'b' }, { id:'c' }], ['c', 'a']).map(e => e.id).join() === 'a,c');
 ok('el diseño: arriba Text, Arrow, Shape, Marker', E.PRINCIPALES.map(h => h[1]).join() === 'Text,Arrow,Shape,Marker');
 ok('Markup Tools guarda las herramientas de agua: Moisture, Wet area, Measure, Blur', E.MARKUP.map(h => h[1]).join() === 'Moisture,Wet area,Measure,Blur');

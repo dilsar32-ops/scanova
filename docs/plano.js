@@ -952,7 +952,7 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
               if(Math.abs(partes[0].area + partes[1].area - h.area) > h.area * 0.3) continue;
               if(partes.some(v => !puertasDe(v).length)) continue;
               // Partir solo si las dos partes se abren a cuartos DISTINTOS: dos
-              // entradas del mismo pasillo son UN espacio, no dos (Hamilton:
+              // entradas del mismo pasillo son UN espacio, no dos (casa de prueba:
               // una pared inventada de 3'8" y dos "Laundry Room").
               // (Solo cuentan las puertas que caen EN el borde de la parte, no
               // las de un cuarto vecino que quedan cerca de una esquina.)
@@ -1642,7 +1642,7 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
         if(mejor && suma + resto[k] >= mejor.nota) return;
         if(k === g.length){
           const r = evaluar(idx);
-          // Las rejas se aplican DENTRO de la búsqueda (14-oct, Hamilton): el
+          // Las rejas se aplican DENTRO de la búsqueda (14-oct, casa de prueba): el
           // mejor por nota a veces deja una puerta fuera de su cuarto, y antes
           // se rendía aunque otra combinación cumpliera todo y quitara el encime.
           if(r && (!inicial || (r.fuera <= inicial.fuera && r.cruces <= inicial.cruces)) && (!mejor || r.nota < mejor.nota)) mejor = r;

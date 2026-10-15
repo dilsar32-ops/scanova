@@ -12,13 +12,13 @@ ok('Plan Details del plano real: 674 sq ft, 5 cuartos (lo mismo que dice Field R
 // el pasillo, 11.6 ft; el tramo de 2.35 ft repetido; la de y=-2.0) se contaban dos veces.
 ok('paredes exteriores (sin contar dos veces las copias) y altura del techo salen del escaneo (141 lf, 8.25 ft)', r.murosExt === 141 && r.techo === 8.25);
 ok('plano vacío no inventa medidas', JSON.stringify(PL.resumenPlano({ rooms: [] })) === JSON.stringify({ area: 0, cuartos: 0, murosExt: 0, techo: 0 }));
-const svg = PL.svgDelPlano(data, { cliente: 'Lauren <Harris>', direccion: '9 Oak Ln' });
+const svg = PL.svgDelPlano(data, { cliente: 'Ana <Prueba>', direccion: '9 Fake Ln' });
 ok('dibuja el plano (SVG con paredes y cotas)', /^<svg[\s>]/.test(svg) && svg.length > 30000 && /LIVING ROOM/.test(svg));
 ok('el sello dice Scanova360, nunca el nombre de la otra empresa', !/restoration doctor/i.test(svg) && !/restoration doctor/i.test(fs.readFileSync(new URL('../docs/plano.js', import.meta.url), 'utf8')));
-ok('el nombre del cliente va escapado en el sello', !/Lauren <Harris>/.test(svg));
+ok('el nombre del cliente va escapado en el sello', !/Ana <Prueba>/.test(svg));
 // Vista de la pantalla (su pedido 13-oct): solo el plano. La hoja del PDF/exportar no cambia.
-const limpia = PL.svgDelPlano(data, { cliente: 'Lauren Harris', direccion: '9 Oak Ln' }, true);
-const hoja = PL.svgDelPlano(data, { cliente: 'Lauren Harris', direccion: '9 Oak Ln' });
+const limpia = PL.svgDelPlano(data, { cliente: 'Ana Prueba', direccion: '9 Fake Ln' }, true);
+const hoja = PL.svgDelPlano(data, { cliente: 'Ana Prueba', direccion: '9 Fake Ln' });
 ok('14-oct: la imagen que se exporta es la MISMA hoja que la pantalla (sin el sello viejo FLOOR PLAN)', !/>FLOOR PLAN</.test(limpia) && !/>FLOOR PLAN</.test(hoja) && /Scanova<tspan fill="#2563eb">360<\/tspan>/.test(hoja) && !/DRAFT/.test(hoja));
 // Su diseño del 14-oct: la vista es una hoja limpia — cadenas de medidas por fuera, nombre + sq ft, marco.
 ok('vista y exportar: medidas por fuera en cadenas, y el total en el encabezado', /class="fp-cadenas"/.test(limpia) && /class="fp-cadenas"/.test(hoja) && /8' 7"/.test(limpia) && /Total Area: [\d.]+\u2021? sq ft/.test(hoja));

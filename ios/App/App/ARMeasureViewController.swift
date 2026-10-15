@@ -3790,7 +3790,7 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
     // no se factura.
     //
     // DE DONDE SALEN ESTAS REGLAS: no de mi cabeza, sino de las lineas que
-    // Flood Doctor YA acepto y pago en la factura Malik reconstruida:
+    // Flood Doctor YA acepto y pago en la factura reconstruida de un cliente:
     //   "Tear out baseboard and bag for disposal" ................. LF
     //   "Tear out tackless strip" ................................. LF
     //   "Tear out wet drywall, cleanup, bag, per LF - up to 2' tall" LF
@@ -6598,7 +6598,7 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
         //
         // Y tenia razon. La rueda muestra cinco renglones, y el bloque de abajo
         // mete TRES nombres inventados ("Family Room 2, 3, 4") justo detras de
-        // cada cuarto repetible. Con el plano de Kate - Family Room, Kitchen,
+        // cada cuarto repetible. Con el plano de una clienta - Family Room, Kitchen,
         // Living Room, Hallway - los cinco renglones visibles se los comian
         // "Family Room" y sus tres copias, y Living Room y Hallway quedaban
         // enterrados. Los nombres del plano son los UNICOS seguros: van arriba,
@@ -6613,7 +6613,7 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
             //
             // Antes, detras de estos venia todo lo demas: la lista generica del
             // nivel, tres copias numeradas de cada cuarto repetible, y los
-            // cuatro nombres sueltos. Con el plano de Kate eran cuatro nombres
+            // cuatro nombres sueltos. Con el plano de una clienta eran cuatro nombres
             // ciertos enterrados entre veinte inventados, en una rueda que
             // muestra cinco renglones.
             //

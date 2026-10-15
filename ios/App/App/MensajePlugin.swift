@@ -5,7 +5,7 @@ import UIKit
 
 // MANDAR EL INVOICE POR MENSAJE, YA DIRIGIDO AL CLIENTE  (7 de octubre de 2026)
 //
-// Su pedido, con la foto de la conversacion con Susan: "a la hora que se envia
+// Su pedido, con la foto de la conversacion con una clienta: "a la hora que se envia
 // el invoice deberia enviarse directamente desde la aplicacion, ya que esta el
 // numero del cliente en la aplicacion".
 //
