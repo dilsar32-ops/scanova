@@ -3,12 +3,12 @@
 // Arriba: Download, Share, •••, Edit Photo y Save a Copy. El panel se esconde y se vuelve a sacar con la flechita.
 // Datos: la nota de la foto (fotos_fotos.nota), sus etiquetas (fotos_etiquetas + fotos_foto_etiquetas) y sus comentarios
 // (fotos_comentarios) ya existían desde fotos-01; las tareas de la foto usan fotos_tareas (sql/fotos-06-foto.sql).
-import { $, $$, authFetch, irA, atras, esManager, PERFIL, esAparato } from './app.js?v=2026-10-15-5';
-import * as trabajos from './trabajos.js?v=2026-10-15-5';
-import * as fotos from './fotos.js?v=2026-10-15-5';
-import * as proyecto from './proyecto.js?v=2026-10-15-5';
-import * as panel from './panel.js?v=2026-10-15-5';
-import * as editor from './editor.js?v=2026-10-15-5';
+import { $, $$, authFetch, irA, atras, esManager, PERFIL, esAparato } from './app.js?v=2026-10-15-6';
+import * as trabajos from './trabajos.js?v=2026-10-15-6';
+import * as fotos from './fotos.js?v=2026-10-15-6';
+import * as proyecto from './proyecto.js?v=2026-10-15-6';
+import * as panel from './panel.js?v=2026-10-15-6';
+import * as editor from './editor.js?v=2026-10-15-6';
 
 const esc = (v) => trabajos.esc(v);
 const IC = (n) => '<svg class="ic"><use href="#i-' + n + '"/></svg>';
@@ -300,7 +300,9 @@ function volverAGaleria(){
     const card = b.closest('.pfoto') || b; card.classList.add('fv-ultima'); b.scrollIntoView({ block:'center' });
   });
 }
-async function borrar(){ const err = await fotos.borrarFotoActual(); if(err === null) return; if(err) aviso(err); else { F = null; detalles(false); abrir(false); } }
+// Borrar mientras se edita: primero se sale del editor (si no, se quedaba abierto encima de la siguiente foto y Apply
+// guardaba una copia de la que se acababa de mandar a la papelera).
+async function borrar(){ if(editor.activo()){ editor.salir(() => borrar()); return; } const err = await fotos.borrarFotoActual(); if(err === null) return; if(err) aviso(err); else { F = null; detalles(false); abrir(false); } }
 async function favorita(){
   const f = F; if(!f) return;
   try{ const r = await authFetch('/rest/v1/fotos_fotos?id=eq.' + encodeURIComponent(f.id), { method:'PATCH', headers:{ Prefer:'return=representation' }, body: JSON.stringify({ favorita: !f.favorita }) });

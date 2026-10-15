@@ -1010,6 +1010,9 @@ body.fv-editando .fv-asa{ visibility:hidden; }
 body.fv-editando .fv-velo{ background:transparent; }
 /* Con una herramienta escogida, las flechas de otra foto no tapan la orilla de la foto (se dibuja hasta el borde) */
 body.fv-editando.ed-activo .fv-flecha{ opacity:.18; pointer-events:none; }
+/* Mientras guarda la foto editada no se cambia nada (la X de cerrar sí responde y avisa que espere) */
+body.ed-guardando #fvPanel > :not(.ed-cab):not(.aviso), body.ed-guardando #edTel > :not(.aviso), body.ed-guardando #edHoja{ pointer-events:none; }
+body.ed-guardando #fvPanel .ed-accs, body.ed-guardando #fvPanel .ed-tiles, body.ed-guardando #fvPanel .ed-info, body.ed-guardando #edTel .ed-tel-bandeja, body.ed-guardando #edTel .ed-tel-opc{ opacity:.55; }
 
 /* ---------- VENTANA DE LA FOTO: más espacio para la foto (su pedido, 12 oct 2026) ---------- */
 @media (min-width:900px){
@@ -1117,7 +1120,9 @@ body.fv-editando.ed-activo .fv-flecha{ opacity:.18; pointer-events:none; }
   .ed-hoja-listo{ width:100%; margin-top:10px; }
   .ed-hoja .ed-mat, .ed-hoja .ed-lect{ margin:10px 0; }
 }
-@media (max-width:899px){ body.fv-editando .fv-flecha{ z-index:4; } }
+@media (max-width:899px){ body.fv-editando .fv-flecha{ z-index:4; }
+  /* Cancel y Save de arriba quedan encima del velo de Adjustments: responden al primer toque */
+  body.fv-editando .fv-cab{ z-index:30; } }
 
 /* ---------- HOME (su diseño, 12 oct 2026): 4 tarjetas con "Last update", New Project, tabla con miniatura y Last Update ---------- */
 .tarj-ult{ display:flex; align-items:flex-start; gap:8px; margin-top:10px; padding-top:10px; border-top:1px solid var(--line); color:var(--ink-soft); font-size:13px; line-height:1.35; }

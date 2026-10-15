@@ -66,12 +66,26 @@ function calidezYNitidez(ctx, w, h, aj, paso){
   ctx.putImageData(d, 0, 0);
 }
 // Difuminar (pixelar) un rectángulo de un lienzo tomando los pixeles de "fuente" (del mismo tamaño que el lienzo).
+// Se achica por mitades: cada cuadrito sale del PROMEDIO de su zona (de un solo golpe el navegador toma unos cuantos
+// pixeles sueltos y un número de casa grande se seguía leyendo en la foto guardada).
 function pixelar(ctx, fuente, x, y, ww, hh, tam){
-  x = Math.round(x); y = Math.round(y); ww = Math.round(ww); hh = Math.round(hh); if(ww <= 2 || hh <= 2) return;
-  const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(ww / tam)); c.height = Math.max(1, Math.round(hh / tam));
-  c.getContext('2d').drawImage(fuente, x, y, ww, hh, 0, 0, c.width, c.height);
-  ctx.save(); ctx.imageSmoothingEnabled = false; ctx.drawImage(c, 0, 0, c.width, c.height, x, y, ww, hh); ctx.restore(); c.width = c.height = 0;
+  // El cuadro no se sale de la fuente: la parte de afuera quedaba sin tapar (una franja de la foto original en la orilla).
+  const W = fuente.width, H = fuente.height;
+  const x0 = Math.max(0, Math.round(x)), y0 = Math.max(0, Math.round(y)), x1 = Math.min(W, Math.round(x + ww)), y1 = Math.min(H, Math.round(y + hh));
+  x = x0; y = y0; ww = x1 - x0; hh = y1 - y0; if(ww <= 2 || hh <= 2) return;
+  const tw = Math.max(1, Math.round(ww / tam)), th = Math.max(1, Math.round(hh / tam)); const tiradas = [];
+  const lienzo = (w, h) => { const t = document.createElement('canvas'); t.width = w; t.height = h; const tx = t.getContext('2d'); tx.imageSmoothingQuality = 'high'; tiradas.push(t); return [t, tx]; };
+  let src = fuente, sx = x, sy = y, sw = ww, sh = hh;
+  while(sw > tw * 2 || sh > th * 2){ const nw = sw > tw * 2 ? Math.ceil(sw / 2) : sw, nh = sh > th * 2 ? Math.ceil(sh / 2) : sh;
+    const [t, tx] = lienzo(nw, nh); tx.drawImage(src, sx, sy, sw, sh, 0, 0, nw, nh); src = t; sx = 0; sy = 0; sw = nw; sh = nh; }
+  const [c, cx] = lienzo(tw, th); cx.drawImage(src, sx, sy, sw, sh, 0, 0, tw, th);
+  ctx.save(); ctx.imageSmoothingEnabled = false; ctx.drawImage(c, 0, 0, tw, th, x, y, ww, hh); ctx.restore();
+  tiradas.forEach(t => { t.width = t.height = 0; });
 }
+// El tamaño del cuadrito del Blur (pixeles del marco w x h): el lado largo de la foto entre 90, o la cuarta parte del lado
+// corto del cuadro tapado si es más (así un número grande queda en 4 cuadritos de alto y ya no se lee). La misma cuenta
+// en pantalla y en la foto guardada.
+export const tamBlur = (w, h, rw, rh) => Math.max(Math.max(w, h) / 90, Math.min(Math.abs(rw), Math.abs(rh)) / 4);
 // La medida base de las marcas: el lado LARGO de la foto entre 1000 (con el ancho, al girar una foto a lo alto las marcas
 // se achicaban un 25 %).
 const UNIDAD = (w, h) => Math.max(w, h) / 1000;
@@ -85,8 +99,14 @@ export function cajaMarca(m, w, h){
   if(m.tipo === 'texto' && pts.length){ const k = u * e * TXT; const ancho = (anchoTexto(String(m.texto || '')) + 22) * k, alto = 30 * k; return { x: pts[0][0] - ancho / 2, y: pts[0][1] - alto / 2, w: ancho, h: alto }; }
   if(m.tipo === 'humedad' && pts.length){ const r = 28 * u * e; return { x: pts[0][0] - r, y: pts[0][1] - r, w: 2 * r, h: 2 * r + (m.material ? 26 * u * e : 0) }; }
   if(!pts.length) return { x:0, y:0, w:0, h:0 };
-  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]); const g = (m.ancho || 4) * u * (m.tipo === 'resalta' ? 4 : m.tipo === 'pincel' ? 3.2 : 1) / 2 + 4 * u;
-  const x0 = Math.min(...xs) - g, y0 = Math.min(...ys) - g; return { x: x0, y: y0, w: Math.max(...xs) + g - x0, h: Math.max(...ys) + g - y0 };
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]); let g = (m.ancho || 4) * u * (m.tipo === 'resalta' ? 4 : m.tipo === 'pincel' ? 3.2 : 1) / 2 + 4 * u;
+  // La punta de la flecha y las rayitas de Measure salen de la raya: la caja (la de tocar y la punteada) las encierra.
+  const gl = Math.max(1, (m.ancho || 4) * u);
+  if(m.tipo === 'flecha' || m.tipo === 'doble') g += Math.max(gl * 6, 16 * u) * Math.sin(0.45); else if(m.tipo === 'medida') g += gl * 3;
+  let x0 = Math.min(...xs) - g, y0 = Math.min(...ys) - g, x1 = Math.max(...xs) + g, y1 = Math.max(...ys) + g;
+  if(m.tipo === 'medida' && m.texto && pts.length > 1){ const s = u * 1.4, a = pts[0], b = pts[pts.length - 1]; const cx = (a[0] + b[0]) / 2, cy = (a[1] + b[1]) / 2;
+    const pw = (anchoTexto(String(m.texto)) + 22) * s / 2, ph = 30 * s / 2; x0 = Math.min(x0, cx - pw); x1 = Math.max(x1, cx + pw); y0 = Math.min(y0, cy - ph); y1 = Math.max(y1, cy + ph); }
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 // Ancho del texto en la letra de la pastilla (a 16 px): medido de verdad si hay página, y si no (las pruebas) aproximado.
 let MEDIDOR = null;
@@ -113,14 +133,19 @@ function contornoFigura(m, w, h){
   const co = Math.round(Math.cos(q * Math.PI / 2)), si = Math.round(Math.sin(q * Math.PI / 2));
   const L = (lista) => lista.map(([x, y]) => [cx + x * co - y * si, cy + x * si + y * co]); const x = -ww / 2, y = -hh / 2;
   if(m.tipo === 'circulo') return [[Array.from({ length: 48 }, (_, i) => [cx + Math.cos(i / 48 * Math.PI * 2) * ww / 2, cy + Math.sin(i / 48 * Math.PI * 2) * hh / 2]), true]];
-  if(m.tipo === 'cuadro' || m.tipo === 'redondo') return [[L([[x, y], [x + ww, y], [x + ww, y + hh], [x, y + hh]]), true]];
+  if(m.tipo === 'cuadro') return [[L([[x, y], [x + ww, y], [x + ww, y + hh], [x, y + hh]]), true]];
+  if(m.tipo === 'redondo'){ const r = Math.min(ww, hh) * 0.18;   // el mismo radio con que se dibuja
+    const arco = (ax, ay, a0) => Array.from({ length: 7 }, (_, i) => { const an = a0 + i / 6 * Math.PI / 2; return [ax + Math.cos(an) * r, ay + Math.sin(an) * r]; });
+    return [[L([...arco(x + ww - r, y + r, -Math.PI / 2), ...arco(x + ww - r, y + hh - r, 0), ...arco(x + r, y + hh - r, Math.PI / 2), ...arco(x + r, y + r, Math.PI)]), true]]; }
   if(m.tipo === 'triangulo') return [[L([[0, y], [x + ww, y + hh], [x, y + hh]]), true]];
   if(m.tipo === 'estrella') return [[L(Array.from({ length: 10 }, (_, i) => { const an = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? 0.42 : 1; return [Math.cos(an) * rr * ww / 2, Math.sin(an) * rr * hh / 2]; })), true]];
   if(m.tipo === 'cruz') return [[L([[x, y], [x + ww, y + hh]]), false], [L([[x + ww, y], [x, y + hh]]), false]];
   if(m.tipo === 'palomita') return [[L([[x, y + hh * 0.55], [x + ww * 0.38, y + hh], [x + ww, y]]), false]];
   return null;
 }
-export function tocaMarca(m, x, y, tol, w, h){
+// estricto = hay una herramienta escogida: sin el margen extra de las flechas y medidas (un trazo que empieza cerca de otra
+// marca la arrastraba en vez de dibujar).
+export function tocaMarca(m, x, y, tol, w, h, estricto){
   if(!dentro(cajaMarca(m, w, h), x, y, tol)) return false;
   const t = m.tipo; if(t === 'texto' || t === 'humedad' || t === 'borroso') return true;
   const pts = (m.puntos || []).map(p => [p[0] * w, p[1] * h]); const U = UNIDAD(w, h); const g = Math.max(1, (m.ancho || 4) * U);
@@ -131,7 +156,7 @@ export function tocaMarca(m, x, y, tol, w, h){
     return distLinea(x, y, pts, true) <= lim || enPastilla(cx, cy, m.texto || 'Wet area', U * 1.4); }
   if(t === 'lapiz' || t === 'resalta' || t === 'pincel') return distLinea(x, y, pts) <= lim;
   if(t === 'medida' && m.texto && pts.length > 1 && enPastilla((pts[0][0] + pts[pts.length - 1][0]) / 2, (pts[0][1] + pts[pts.length - 1][1]) / 2, m.texto, U * 1.4)) return true;
-  if(t === 'flecha' || t === 'linea' || t === 'doble' || t === 'medida') return distLinea(x, y, [pts[0], pts[pts.length - 1]]) <= lim + g * 3;
+  if(t === 'flecha' || t === 'linea' || t === 'doble' || t === 'medida') return distLinea(x, y, [pts[0], pts[pts.length - 1]]) <= lim + (estricto ? 0 : g * 3);
   const c = contornoFigura(m, w, h); return c ? c.some(([l, cerrada]) => distLinea(x, y, l, cerrada) <= lim) : true;
 }
 
@@ -202,8 +227,8 @@ export function dibujar(ctx, w, h, marcas, fuente){
     } else if(m.tipo === 'borroso' && pts.length > 1 && fuente){
       // fuente = la foto YA ajustada y sin marcas, del mismo tamaño que el marco (en la vista previa se difumina en el
       // lienzo de abajo, con su filtro; ver render): así el bloque sale igual en pantalla y en la foto guardada.
-      const [a, b] = [pts[0], pts[pts.length - 1]];
-      pixelar(ctx, fuente, Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1]), Math.max(4, Math.round(U * 1000 / 90)));
+      const [a, b] = [pts[0], pts[pts.length - 1]]; const rw = Math.abs(b[0] - a[0]), rh = Math.abs(b[1] - a[1]);
+      pixelar(ctx, fuente, Math.min(a[0], b[0]), Math.min(a[1], b[1]), rw, rh, Math.max(4, Math.round(tamBlur(w, h, rw, rh))));
     }
     ctx.restore();
   }
@@ -268,13 +293,14 @@ export function cerrar(forzar){
   if(!E) return true;
   if(!forzar && hayCambios()){ salir(() => {}); return false; }
   const x = E; E = null; quitarEscritura(x);
-  if(x.tel){ x.bandeja.hidden = true; x.bandeja.innerHTML = ''; x.cajaHoja.hidden = true; x.cajaHoja.innerHTML = ''; if(x.velo) x.velo.hidden = true; }
-  if(x.base) x.base.remove(); if(x.lienzo) x.lienzo.remove(); x.img.style.visibility = '';
+  // Siempre, no solo si se abrió en el teléfono: si se cambió a la computadora, la bandeja escondida se quedaba con su aviso.
+  if(x.bandeja){ x.bandeja.hidden = true; x.bandeja.innerHTML = ''; } if(x.cajaHoja){ x.cajaHoja.hidden = true; x.cajaHoja.innerHTML = ''; } if(x.velo) x.velo.hidden = true;
+  if(x.base) x.base.remove(); if(x.lienzo) x.lienzo.remove(); if(x.ajustada) x.ajustada.width = x.ajustada.height = 0; x.img.style.visibility = '';
   if(x.urlFuente) setTimeout(() => URL.revokeObjectURL(x.urlFuente), 2000);
-  window.removeEventListener('resize', colocar); document.removeEventListener('keydown', teclas); if(x.obs) x.obs.disconnect();
-  if(x.raf) cancelAnimationFrame(x.raf); if(x.rafMov) cancelAnimationFrame(x.rafMov);
+  window.removeEventListener('resize', colocarLuego); document.removeEventListener('keydown', teclas); if(x.obs) x.obs.disconnect();
+  if(x.raf) cancelAnimationFrame(x.raf); if(x.rafMov) cancelAnimationFrame(x.rafMov); if(x.rafCol) cancelAnimationFrame(x.rafCol);
   document.querySelectorAll('#fvTelGuardar').forEach(b => { b.disabled = false; });
-  document.body.classList.remove('fv-editando', 'ed-activo');
+  document.body.classList.remove('fv-editando', 'ed-activo', 'ed-guardando');
   if(x.alSalir) x.alSalir();
   return true;
 }
@@ -286,18 +312,20 @@ const vista = () => enRecorte() ? RECORTE_TODO() : E.crop;
 function montar(){
   if(E.lienzo) return;   // nunca dos pares de lienzos encima de la foto
   const caja = E.img.parentNode;
-  E.base = document.createElement('canvas'); E.base.className = 'ed-base'; E.base.getContext('2d', { willReadFrequently: true });
+  E.base = document.createElement('canvas'); E.base.className = 'ed-base';   // la foto de abajo ya no se lee pixel por pixel (eso es E.ajustada)
   E.lienzo = document.createElement('canvas'); E.lienzo.className = 'ed-lienzo';
   caja.appendChild(E.base); caja.appendChild(E.lienzo); E.img.style.visibility = 'hidden';
-  colocar(); window.addEventListener('resize', colocar); document.addEventListener('keydown', teclas);
+  colocar(); window.addEventListener('resize', colocarLuego); document.addEventListener('keydown', teclas);
   // En el teléfono la bandeja cambia de alto (y la foto con ella) sin que cambie la ventana: los lienzos la siguen.
-  if(typeof ResizeObserver !== 'undefined'){ let ultimo = ''; E.obs = new ResizeObserver(() => { const t = caja.clientWidth + 'x' + caja.clientHeight; if(t !== ultimo){ ultimo = t; colocar(); } }); E.obs.observe(caja); }
+  // La ventana y la caja cambian juntas al girar o agrandar: las dos avisan, pero se acomoda una sola vez por cuadro.
+  if(typeof ResizeObserver !== 'undefined'){ let ultimo = caja.clientWidth + 'x' + caja.clientHeight; E.obs = new ResizeObserver(() => { const t = caja.clientWidth + 'x' + caja.clientHeight; if(t !== ultimo){ ultimo = t; colocarLuego(); } }); E.obs.observe(caja); }
   const c = E.lienzo; let acc = null;
   const aMarco = (ev) => { const r = c.getBoundingClientRect(); const v = vista(); const px = (ev.clientX - r.left) / r.width, py = (ev.clientY - r.top) / r.height; return [v.x + px * v.w, v.y + py * v.h]; };
   const pedirRender = (extra) => { E.extraPend = extra || null; if(!E.rafMov) E.rafMov = requestAnimationFrame(() => { if(!E) return; E.rafMov = 0; render(E.extraPend); }); };   // un pintado por cuadro
   const sinPendiente = () => { if(E && E.rafMov){ cancelAnimationFrame(E.rafMov); E.rafMov = 0; } };
   c.addEventListener('pointerdown', (ev) => {
-    if(!E || E.cargando) return;
+    // Mientras guarda la foto ya está armada: lo que se dibujara en ese rato se perdía sin aviso.
+    if(!E || E.cargando || E.guardando) return;
     if(acc && ev.isPrimary !== false && !c.hasPointerCapture(acc.id)) acc = null;   // un toque anterior que se quedó sin terminar
     // Un dedo a la vez: el segundo dedo de un pellizco (o el botón derecho) no hace nada; antes dibujaba un zigzag
     // entre los dos dedos o soltaba lo que se estaba arrastrando.
@@ -309,20 +337,31 @@ function montar(){
     // sobre el texto recién puesto, ese mismo toque ya lo arrastra.
     let recienEscrito = false;
     if(E.escritura){ const f = E.escrituraListo; if(f) f(true); else quitarEscritura(); recienEscrito = true; }
+    if(E.aviso){ E.aviso = ''; pintarAviso(); }
+    // Teléfono: con la hoja de Markup abierta (Wet area, Measure, Blur, Moisture) el toque en la foto la cierra y la
+    // herramienta trabaja en ese MISMO toque (antes el toque se perdía y no se dibujaba nada).
+    if(E.hoja){ E.hoja = ''; pintarPanel(); }
     const p = aMarco(ev); const fx = p[0] * FW(), fy = p[1] * FH(); const k = c.getBoundingClientRect().width / (vista().w * FW());
     const tactil = ev.pointerType !== 'mouse'; const pad = (tactil ? 16 : 10) / k;
+    // Con una herramienta escogida, una marca se agarra solo si el dedo cae JUSTO encima (si no, el trazo que empieza
+    // cerca de un texto o de otra flecha la arrastraba y no se dibujaba nada).
+    const t0 = herrActual(); const padM = t0 ? (tactil ? 6 : 4) / k : pad;
     const nuevo = (a) => { if(a){ a.id = ev.pointerId; a.cx = ev.clientX; a.cy = ev.clientY; } acc = a; };
     if(enRecorte()){ nuevo(empezarRecorte(p, pad)); return; }
     // ¿Tocó el asa redonda de la marca escogida (tamaño)? El asa está afuera de la esquina, así que no tapa el texto.
+    // Si la marca llega a la esquina de la foto el asa queda metida en la caja: igual se agarra (se pinta encima).
     if(E.sel >= 0 && E.marcas[E.sel]){ const m = E.marcas[E.sel]; const cj = cajaMarca(m, FW(), FH()); const a = asaDe(cj, k);
-      if(!dentro(cj, fx, fy, 0) && Math.hypot(fx - a.x, fy - a.y) < (tactil ? 24 : 14) / k){ nuevo({ modo:'escala', ini: p, caja: cj, antes: JSON.parse(JSON.stringify(m)), movio: false, guardado: false }); return; } }
-    // ¿Tocó una marca (mover)? La escogida se agarra por toda su caja (la que se ve punteada); las demás, por su línea.
+      if(enAsa(cj, a, fx, fy, (tactil ? 24 : 14) / k)){ nuevo({ modo:'escala', ini: p, caja: cj, antes: JSON.parse(JSON.stringify(m)), movio: false, guardado: false }); return; } }
+    // ¿Tocó una marca (mover)? Sin herramienta, la escogida se agarra por toda su caja (la que se ve punteada); las demás,
+    // por su línea. Con Moisture escogido un Wet area no se agarra: adentro van las lecturas.
     for(let i = E.marcas.length - 1; i >= 0; i--){ const mk = E.marcas[i];
-      if(i === E.sel ? dentro(cajaMarca(mk, FW(), FH()), fx, fy, pad) : tocaMarca(mk, fx, fy, pad, FW(), FH())){ const ya = E.sel === i; E.sel = i;
+      if(t0 === 'humedad' && mk.tipo === 'area') continue;
+      const porCaja = i === E.sel && (!t0 || ['texto', 'humedad', 'borroso'].includes(mk.tipo));
+      if(porCaja ? dentro(cajaMarca(mk, FW(), FH()), fx, fy, padM) : tocaMarca(mk, fx, fy, padM, FW(), FH(), !!t0)){ const ya = E.sel === i; E.sel = i;
         nuevo({ modo:'mover', ini: p, pts0: mk.puntos.map(q => q.slice()), ya, movio: false, guardado: false }); render(); pintarPanel(); return; } }
     // Tocar afuera de la marca escogida solo la suelta (no pone otra marca en el mismo toque).
     if(E.sel >= 0){ E.sel = -1; render(); pintarPanel(); return; }
-    const t = herrActual(); if(!t) return;   // sin herramienta escogida, tocar la foto no hace nada
+    const t = t0; if(!t) return;   // sin herramienta escogida, tocar la foto no hace nada
     if(t === 'texto'){ if(recienEscrito) return; nuevo({ modo:'texto', p }); return; }   // el cuadrito para escribir sale al soltar el dedo (iOS solo abre el teclado así)
     if(t === 'humedad'){ const v = String(E.valor).trim(); const lectura = { tipo:'humedad', puntos:[p], valor:v, material:E.mat === 'Other' ? '' : E.mat, estado:E.estado || estadoHumedad(v), escala:1 };
       E.estado = ''; E.estadoFijo = false;   // un WET/DRY escogido a mano vale para ESTA lectura, no para las siguientes
@@ -345,7 +384,7 @@ function montar(){
     // Margen para el temblor del dedo: hasta 6 px no se mueve nada (así "tocarla otra vez para editar" sí funciona en
     // el iPhone, y no se llena el Undo de pasos que no cambian nada).
     if(!acc.movio){ if(Math.hypot(ev.clientX - acc.cx, ev.clientY - acc.cy) < 6) return; acc.movio = true; }
-    if(!acc.guardado){ E.deshacer.push(estado()); E.rehacer = []; acc.guardado = true; }
+    if(!acc.guardado){ E.deshacer.push(estado()); acc.rehacerAntes = E.rehacer; E.rehacer = []; acc.guardado = true; }
     if(acc.modo === 'mover'){
       // Se mueve desde donde estaba al agarrarla, y su centro no puede salir de lo que se ve (se perdía fuera de la foto).
       const v = vista(); const xs = acc.pts0.map(q => q[0]), ys = acc.pts0.map(q => q[1]);
@@ -367,6 +406,7 @@ function montar(){
       // Un toque sin arrastrar (menos de 6 px en la pantalla) no deja marca.
       const m = a.m; let L = 0; for(let i = 1; i < m.puntos.length; i++) L += Math.hypot((m.puntos[i][0] - m.puntos[i - 1][0]) * FW(), (m.puntos[i][1] - m.puntos[i - 1][1]) * FH());
       if(L * a.k < 6){ render(); return; }
+      if(m.tipo === 'borroso') m.puntos = m.puntos.map(q => [Math.max(0, Math.min(1, q[0])), Math.max(0, Math.min(1, q[1]))]);
       if(m.tipo === 'medida') m.texto = (prompt('Measurement (e.g. 4\' 6")') || '').trim();
       if(m.tipo === 'area') m.texto = (prompt('Label for this area', 'Wet area') || '').trim() || 'Wet area';
       agregar(m); return;
@@ -380,7 +420,7 @@ function montar(){
   const cancelar = (ev) => {
     if(!acc || ev.pointerId !== acc.id) return; const a = acc; acc = null; sinPendiente();
     if(a.modo === 'recorte') E.crop = a.antes;
-    else if((a.modo === 'mover' || a.modo === 'escala') && a.guardado){ volver(E.deshacer.pop()); return; }
+    else if((a.modo === 'mover' || a.modo === 'escala') && a.guardado){ const s0 = E.deshacer.pop(); E.rehacer = a.rehacerAntes || []; volver(s0); return; }
     render(); pintarPanel();
   };
   c.addEventListener('pointerup', fin); c.addEventListener('pointercancel', cancelar); c.addEventListener('lostpointercapture', cancelar);
@@ -394,12 +434,19 @@ function montar(){
 // de lo que se ve. ui = pixeles de pantalla por pixel del marco.
 function asaDe(cj, ui){ const v = vista(); const r = 9 / ui, off = 7 / ui;
   return { x: Math.min(cj.x + cj.w + off, (v.x + v.w) * FW() - r - 2 / ui), y: Math.min(cj.y + cj.h + off, (v.y + v.h) * FH() - r - 2 / ui), r }; }
+// ¿El dedo está sobre el asa? Afuera de la caja, o donde sea si el asa quedó metida en la caja (marca en la esquina).
+function enAsa(cj, a, fx, fy, radio){ return (dentro(cj, a.x, a.y, 0) || !dentro(cj, fx, fy, 0)) && Math.hypot(fx - a.x, fy - a.y) < radio; }
+// El cursor dice lo mismo que va a pasar al hacer clic: el mismo orden y las mismas reglas que el pointerdown.
 function ponerCursor(p){
-  const c = E.lienzo; if(!c) return; const fx = p[0] * FW(), fy = p[1] * FH(); const k = c.getBoundingClientRect().width / (vista().w * FW()); const pad = 10 / k;
+  const c = E.lienzo; if(!c) return; const fx = p[0] * FW(), fy = p[1] * FH(); const k = c.getBoundingClientRect().width / (vista().w * FW());
+  const t0 = herrActual(); const pad = (t0 ? 4 : 10) / k;
   let cur = enRecorte() ? 'move' : E.herr ? 'crosshair' : 'default';
   if(!enRecorte()){
-    if(E.sel >= 0 && E.marcas[E.sel]){ const cj = cajaMarca(E.marcas[E.sel], FW(), FH()); const a = asaDe(cj, k); if(dentro(cj, fx, fy, pad)) cur = 'move'; else if(Math.hypot(fx - a.x, fy - a.y) < 14 / k) cur = 'nwse-resize'; }
-    if(cur !== 'nwse-resize' && cur !== 'move' && E.marcas.some(m => tocaMarca(m, fx, fy, pad, FW(), FH()))) cur = 'move';
+    const sel = E.sel >= 0 ? E.marcas[E.sel] : null; let listo = false;
+    if(sel){ const cj = cajaMarca(sel, FW(), FH()); const a = asaDe(cj, k);
+      if(enAsa(cj, a, fx, fy, 14 / k)){ cur = 'nwse-resize'; listo = true; }
+      else if((!t0 || ['texto', 'humedad', 'borroso'].includes(sel.tipo)) && dentro(cj, fx, fy, pad)){ cur = 'move'; listo = true; } }
+    if(!listo && E.marcas.some(m => !(t0 === 'humedad' && m.tipo === 'area') && tocaMarca(m, fx, fy, pad, FW(), FH(), !!t0))) cur = 'move';
   }
   if(c.style.cursor !== cur) c.style.cursor = cur;
 }
@@ -439,13 +486,14 @@ function herrActual(){ return E.herr === 'forma' ? E.forma : E.herr === 'marcado
 function editarSel(){
   const m = E.marcas[E.sel]; if(!m) return;
   if(m.tipo === 'texto'){ escribir(m.puntos[0], E.sel); return; }
-  if(m.tipo === 'medida' || m.tipo === 'area'){ const t = prompt(m.tipo === 'medida' ? 'Measurement' : m.tipo === 'area' ? 'Label for this area' : 'Text', m.texto || ''); if(t != null && t.trim()){ E.deshacer.push(estado()); E.rehacer = []; m.texto = t.trim(); } }
-  else if(m.tipo === 'humedad'){ const t = prompt('Moisture reading (%)', m.valor || ''); if(t != null){ E.deshacer.push(estado()); E.rehacer = []; m.valor = t.trim(); m.estado = estadoHumedad(m.valor); } }
+  // Darle OK dejando lo mismo no gasta un paso de Undo.
+  if(m.tipo === 'medida' || m.tipo === 'area'){ const t = prompt(m.tipo === 'medida' ? 'Measurement' : m.tipo === 'area' ? 'Label for this area' : 'Text', m.texto || ''); if(t != null && t.trim() && t.trim() !== (m.texto || '')){ E.deshacer.push(estado()); E.rehacer = []; m.texto = t.trim(); } }
+  else if(m.tipo === 'humedad'){ const t = prompt('Moisture reading (%)', m.valor || ''); if(t != null && t.trim() !== String(m.valor == null ? '' : m.valor)){ E.deshacer.push(estado()); E.rehacer = []; m.valor = t.trim(); m.estado = estadoHumedad(m.valor); } }
   render(); pintarPanel();
 }
 function borrarSel(){ if(E.sel < 0) return; E.deshacer.push(estado()); E.rehacer = []; E.marcas.splice(E.sel, 1); E.sel = -1; render(); pintarPanel(); }
 function teclas(e){
-  if(!E) return; const a = document.activeElement;
+  if(!E || E.guardando) return; const a = document.activeElement;
   if(a && (a.isContentEditable || a.tagName === 'TEXTAREA' || a.tagName === 'SELECT' || (a.tagName === 'INPUT' && !['range', 'button', 'checkbox', 'radio'].includes(a.type)))) return;
   if((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z'){ e.preventDefault(); e.shiftKey ? rehacer() : deshacer(); }
   else if((e.key === 'Delete' || e.key === 'Backspace') && E.sel >= 0){ e.preventDefault(); borrarSel(); }
@@ -455,7 +503,9 @@ function teclas(e){
 function empezarRecorte(p, pad){
   const c = E.crop; const esq = [[c.x, c.y], [c.x + c.w, c.y], [c.x, c.y + c.h], [c.x + c.w, c.y + c.h]];
   const tolX = pad * 2 / FW(), tolY = pad * 2 / FH();
-  const i = esq.findIndex(q => Math.abs(q[0] - p[0]) < tolX && Math.abs(q[1] - p[1]) < tolY);
+  // La esquina MÁS CERCANA de las que caen cerca (con un recorte angosto, tocar la derecha agarraba la izquierda).
+  let i = -1, mejor = Infinity;
+  esq.forEach((q, j) => { const dx = Math.abs(q[0] - p[0]), dy = Math.abs(q[1] - p[1]); if(dx < tolX && dy < tolY){ const d = Math.hypot(dx * FW(), dy * FH()); if(d < mejor){ mejor = d; i = j; } } });
   if(i >= 0) return { modo:'recorte', esquina:i, ini:p, antes:{ ...c }, estadoAntes: estado() };
   if(p[0] > c.x && p[0] < c.x + c.w && p[1] > c.y && p[1] < c.y + c.h) return { modo:'recorte', esquina:-1, ini:p, antes:{ ...c }, estadoAntes: estado() };
   return null;
@@ -485,10 +535,12 @@ function moverRecorte(a, p){
   E.crop = c; render();
 }
 function ponerProporcion(id){
-  if(!E.marco) return; E.prop = id; const r = proporcion(); if(r <= 0){ pintarPanel(); return; }
-  E.deshacer.push(estado()); E.rehacer = [];
+  if(!E.marco) return; const antes = estado(); E.prop = id; const r = proporcion(); if(r <= 0){ pintarPanel(); return; }
   let w = 1, h = (FW() / r) / FH(); if(h > 1){ h = 1; w = (FH() * r) / FW(); }
-  E.crop = { x: (1 - w) / 2, y: (1 - h) / 2, w, h }; colocar(); pintarPanel();
+  const nuevo = { x: (1 - w) / 2, y: (1 - h) / 2, w, h }; const c0 = E.crop;
+  // La misma proporción tocada otra vez no deja un paso de Undo que no hace nada.
+  if(Math.abs(nuevo.x - c0.x) < 1e-9 && Math.abs(nuevo.y - c0.y) < 1e-9 && Math.abs(nuevo.w - c0.w) < 1e-9 && Math.abs(nuevo.h - c0.h) < 1e-9){ pintarPanel(); return; }
+  E.deshacer.push(antes); E.rehacer = []; E.crop = nuevo; colocar(); pintarPanel();
 }
 const GIRAN = ['triangulo', 'estrella', 'palomita'];
 function girar(sentido){
@@ -506,28 +558,44 @@ function colocar(){
   // ¿Pasó de teléfono a computadora o al revés (un iPad que se gira, una ventana que se angosta)? Las herramientas se
   // cambian de lugar en vez de desaparecer.
   const tel = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia('(max-width: 899px)').matches : !!E.tel;
-  if(tel !== !!E.tel && E.bandeja){ E.tel = tel; E.bandeja.hidden = !tel; if(!tel){ E.hoja = ''; if(E.cajaHoja){ E.cajaHoja.hidden = true; E.cajaHoja.innerHTML = ''; } if(E.velo) E.velo.hidden = true; } pintarPanel(); }
+  if(tel !== !!E.tel && E.bandeja){ E.tel = tel; E.bandeja.hidden = !tel;
+    if(!tel){ E.hoja = ''; E.bandeja.innerHTML = ''; if(E.cajaHoja){ E.cajaHoja.hidden = true; E.cajaHoja.innerHTML = ''; } if(E.velo) E.velo.hidden = true; }
+    pintarPanel(); }
   if(!E.lienzo) return; const img = E.img; const v = vista();
   const cw = img.clientWidth, ch = img.clientHeight; const aw = v.w * FW(), ah = v.h * FH();
   const k = Math.min(cw / aw, ch / ah); const w = aw * k, h = ah * k; const dpr = Math.min(2, window.devicePixelRatio || 1);
-  E.baseLlave = '';
-  [E.base, E.lienzo].forEach(c => { c.style.left = (img.offsetLeft + (cw - w) / 2) + 'px'; c.style.top = (img.offsetTop + (ch - h) / 2) + 'px'; c.style.width = w + 'px'; c.style.height = h + 'px'; c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); });
+  // Reasignar el tamaño de un lienzo lo borra: solo si de verdad cambió (si no, la foto de abajo se repintaba entera).
+  let cambio = false;
+  [E.base, E.lienzo].forEach(c => { c.style.left = (img.offsetLeft + (cw - w) / 2) + 'px'; c.style.top = (img.offsetTop + (ch - h) / 2) + 'px'; c.style.width = w + 'px'; c.style.height = h + 'px';
+    const W = Math.round(w * dpr), H = Math.round(h * dpr); if(c.width !== W || c.height !== H){ c.width = W; c.height = H; cambio = true; } });
+  if(cambio) E.baseLlave = '';
   render();
 }
+function colocarLuego(){ if(E && !E.rafCol) E.rafCol = requestAnimationFrame(() => { if(E){ E.rafCol = 0; colocar(); } }); }
 function render(extra){
   if(!E || !E.lienzo) return; const v = vista(); const b = E.base, c = E.lienzo;
   // La foto de abajo se vuelve a pintar solo cuando cambia (recorte, giro, calidez, nitidez, tamaño). Antes se pintaba
   // (y se recorría pixel por pixel con calidez/nitidez) con CADA movimiento del dedo al dibujar o mover una marca.
   // Lo difuminado (Blur) se pinta en la foto de abajo, desde la foto ya ajustada y con su filtro: igual que en la guardada.
+  // La foto ajustada (recorte + calidez + nitidez) se guarda aparte: mover o dibujar un Blur solo copia esa foto y vuelve a
+  // pixelar, sin recorrer otra vez la foto entera pixel por pixel en cada cuadro.
   const todas = extra ? E.marcas.concat([extra]) : E.marcas; const blurs = todas.filter(m => m.tipo === 'borroso');
-  const llave = [v.x, v.y, v.w, v.h, b.width, b.height, E.aj.cal || 0, E.aj.nit || 0, JSON.stringify(blurs.map(m => m.puntos))].join('|');
-  if(llave !== E.baseLlave || E.baseMarco !== E.marco){ E.baseLlave = llave; E.baseMarco = E.marco;
-    const bx = b.getContext('2d'); bx.clearRect(0, 0, b.width, b.height);
-    bx.drawImage(E.marco, v.x * FW(), v.y * FH(), v.w * FW(), v.h * FH(), 0, 0, b.width, b.height);
-    calidezYNitidez(bx, b.width, b.height, E.aj, 1);
-    if(blurs.length){ const kb = b.width / (v.w * FW()); const tam = Math.max(3, Math.round(Math.max(FW(), FH()) / 90 * kb));
+  const llaveAj = [v.x, v.y, v.w, v.h, b.width, b.height, E.aj.cal || 0, E.aj.nit || 0].join('|');
+  const llave = llaveAj + '|' + JSON.stringify(blurs.map(m => m.puntos));
+  if(llave !== E.baseLlave || E.baseMarco !== E.marco){
+    if(llaveAj !== E.ajLlave || E.baseMarco !== E.marco || !E.ajustada){
+      const A = E.ajustada || (E.ajustada = document.createElement('canvas')); if(A.width !== b.width || A.height !== b.height){ A.width = b.width; A.height = b.height; }
+      const ax = A.getContext('2d', { willReadFrequently: true }); ax.clearRect(0, 0, A.width, A.height);
+      ax.drawImage(E.marco, v.x * FW(), v.y * FH(), v.w * FW(), v.h * FH(), 0, 0, A.width, A.height);
+      calidezYNitidez(ax, A.width, A.height, E.aj, 1); E.ajLlave = llaveAj; }
+    E.baseLlave = llave; E.baseMarco = E.marco;
+    const bx = b.getContext('2d'); bx.clearRect(0, 0, b.width, b.height); bx.drawImage(E.ajustada, 0, 0);
+    if(blurs.length){ const kb = b.width / (v.w * FW());
       blurs.forEach(m => { const [p0, p1] = [m.puntos[0], m.puntos[m.puntos.length - 1]]; if(!p0 || !p1) return;
-        pixelar(bx, b, (Math.min(p0[0], p1[0]) - v.x) * FW() * kb, (Math.min(p0[1], p1[1]) - v.y) * FH() * kb, Math.abs(p1[0] - p0[0]) * FW() * kb, Math.abs(p1[1] - p0[1]) * FH() * kb, tam); }); } }
+        // Dentro de la foto, y el cuadrito con la misma cuenta que la foto guardada (en pixeles del marco, por kb).
+        const c0 = (q) => [Math.max(0, Math.min(1, q[0])), Math.max(0, Math.min(1, q[1]))]; const a = c0(p0), z = c0(p1);
+        const rw = Math.abs(z[0] - a[0]) * FW(), rh = Math.abs(z[1] - a[1]) * FH();
+        pixelar(bx, E.ajustada, (Math.min(a[0], z[0]) - v.x) * FW() * kb, (Math.min(a[1], z[1]) - v.y) * FH() * kb, rw * kb, rh * kb, Math.max(3, Math.round(tamBlur(FW(), FH(), rw, rh) * kb))); }); } }
   const fc = filtroCss(E.aj, E.filtro); if(b.style.filter !== fc) b.style.filter = fc;
   const ctx = c.getContext('2d'); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, c.width, c.height);
   const k = c.width / (v.w * FW()); ctx.setTransform(k, 0, 0, k, -v.x * FW() * k, -v.y * FH() * k);
@@ -546,8 +614,14 @@ function render(extra){
     [[X, Y, 1, 1], [X + W, Y, -1, 1], [X, Y + H, 1, -1], [X + W, Y + H, -1, -1]].forEach(([x, y, sx, sy]) => { ctx.beginPath(); ctx.moveTo(x + L * sx, y); ctx.lineTo(x, y); ctx.lineTo(x, y + L * sy); ctx.stroke(); });
     ctx.restore(); }
 }
-function estado(){ return { marcas: JSON.parse(JSON.stringify(E.marcas)), aj: { ...E.aj }, filtro: E.filtro, rot: E.rot, crop: { ...E.crop } }; }
-function volver(s){ const girado = s.rot !== E.rot; E.marcas = s.marcas; E.aj = s.aj; E.filtro = s.filtro; E.rot = s.rot; E.crop = s.crop; E.sel = -1; if(girado) E.marco = hacerMarco(E.fuente, E.rot); colocar(); pintarPanel(); }
+function estado(){ return { marcas: JSON.parse(JSON.stringify(E.marcas)), aj: { ...E.aj }, filtro: E.filtro, rot: E.rot, crop: { ...E.crop }, prop: E.prop }; }
+// Undo/Redo de solo marcas o ajustes no reacomoda los lienzos (antes los borraba y repintaba la foto entera).
+function volver(s){
+  const girado = s.rot !== E.rot, recorte = JSON.stringify(s.crop) !== JSON.stringify(E.crop);
+  E.marcas = s.marcas; E.aj = s.aj; E.filtro = s.filtro; E.rot = s.rot; E.crop = s.crop; E.prop = s.prop || 'libre'; E.sel = -1;
+  if(girado) E.marco = hacerMarco(E.fuente, E.rot);
+  if(girado || recorte) colocar(); else render(); pintarPanel();
+}
 function agregar(m){ E.deshacer.push(estado()); E.rehacer = []; E.marcas.push(m); render(); pintarPanel(); }
 function deshacer(){ if(!E.deshacer.length) return; E.rehacer.push(estado()); volver(E.deshacer.pop()); }
 function rehacer(){ if(!E.rehacer.length) return; E.deshacer.push(estado()); volver(E.rehacer.pop()); }
@@ -607,8 +681,8 @@ function pintarPanel(){
       ${seccion('markup', 'markup', 'Markup Tools', `<div class="ed-tiles chico">${MARKUP.map(tile).join('')}</div>`)}
       ${seccion('historial', 'deshacer', 'Undo &amp; Redo', `<div class="ed-sub"><button type="button" class="ed-chip" data-ed="deshacer"${E.deshacer.length ? '' : ' disabled'}>${IC('deshacer')}Undo</button><button type="button" class="ed-chip" data-ed="rehacer"${E.rehacer.length ? '' : ' disabled'}>${IC('rehacer')}Redo</button></div><p class="fv-gris">${E.marcas.length} ${E.marcas.length === 1 ? 'mark' : 'marks'} on the photo.</p>`)}
     </div>
-    <p class="aviso" id="edAviso"></p>
-    <div class="ed-pie"><button type="button" class="btn btn-outline" data-ed="reset">Reset</button><button type="button" class="btn btn-accent" data-ed="aplicar">Apply Changes</button></div>`;
+    ${avisoHtml()}
+    <div class="ed-pie"><button type="button" class="btn btn-outline" data-ed="reset"${E.guardando ? ' disabled' : ''}>Reset</button><button type="button" class="btn btn-accent" data-ed="aplicar"${E.guardando ? ' disabled' : ''}>Apply Changes</button></div>`;
   if(E.urlFuente) E.panel.querySelectorAll('.ed-fmini').forEach(x => { x.style.backgroundImage = 'url(' + E.urlFuente + ')'; });
 }
 
@@ -648,22 +722,33 @@ export async function copiaFinal(z = E){
 // Apply Changes = guardar la foto editada como foto nueva y abrirla. Save a Copy (arriba) = guardarla y quedarse en la original.
 const zonas = () => (E.tel ? [E.bandeja, E.cajaHoja] : [E.panel]).filter(Boolean);
 const botonesGuardar = () => [...zonas().flatMap(z => [...z.querySelectorAll('[data-ed="aplicar"]')]), ...document.querySelectorAll('#fvTelGuardar')];
+// El aviso del editor vive en E.aviso y se pinta con cada repintado (antes un repintado borraba el "Saving…"), y se busca
+// solo en la parte que se ve (si se cambió de teléfono a computadora, iba a la bandeja escondida).
+const textoAviso = () => E.aviso || (E.guardando ? 'Saving…' : '');
+const avisoHtml = () => `<p class="aviso${E.avisoOk ? ' ok' : ''}" id="edAviso">${esc(textoAviso())}</p>`;
+function pintarAviso(){ if(!E) return; const t = textoAviso();
+  zonas().forEach(z => z.querySelectorAll('#edAviso').forEach(a => { a.textContent = t; a.classList.toggle('ok', !!E.avisoOk); })); }
+function avisar(t, ok){ if(!E) return; E.aviso = t || ''; E.avisoOk = !!ok; pintarAviso(); }
 async function guardar(abrirNueva, despues){
   if(!E) return false; terminarEscritura();   // lo que estaba escribiendo se guarda (antes se borraba)
-  const yo = E; const av = $('#edAviso');
-  if(!hayCambios()){ if(av) av.textContent = 'Nothing to save yet: add a mark, an adjustment, a filter or a crop first.'; return false; }
-  if(yo.guardando || !yo.marco) return false; yo.guardando = true;
+  const yo = E;
+  if(!hayCambios()){ avisar('Nothing to save yet: add a mark, an adjustment, a filter or a crop first.'); return false; }
+  if(yo.guardando || !yo.marco) return false; yo.guardando = true; yo.aviso = ''; yo.avisoOk = false;
   if(yo.abierto === 'recorte'){ yo.abierto = ''; colocar(); }   // con Crop abierto, la vista se quedaba estirada si fallaba
-  yo.sel = -1; pintarPanel(); render();
-  botonesGuardar().forEach(b => { b.disabled = true; }); const av2 = $('#edAviso'); if(av2){ av2.classList.remove('ok'); av2.textContent = 'Saving…'; }
+  yo.sel = -1; yo.hoja = ''; document.body.classList.add('ed-guardando'); pintarPanel(); render();
+  botonesGuardar().forEach(b => { b.disabled = true; });
+  // Lo que se guarda es lo que había AL TOCAR Save (mientras sube, el editor no acepta cambios).
+  const s = estado(); const foto = { ...yo, marcas: s.marcas, aj: s.aj, filtro: s.filtro, rot: s.rot, crop: s.crop };
   try{
     // Todo con "yo", no con el editor de ese momento: si cambiara a mitad, no se sube la foto equivocada.
-    const archivo = await copiaFinal(yo); const r = await yo.guardar(archivo);
-    const av3 = E === yo ? $('#edAviso') : null; if(av3){ av3.classList.add('ok'); av3.textContent = r && r.repetida ? 'That copy was already saved.' : 'Saved as a new photo. The original stays as it was.'; }
+    const archivo = await copiaFinal(foto); if(foto.urlOriginal) yo.urlOriginal = foto.urlOriginal;
+    const r = await yo.guardar(archivo);
+    if(E === yo) avisar(r && r.repetida ? 'That copy was already saved.' : 'Saved as a new photo. The original stays as it was.', true);
     const nueva = r && r.foto; const cb = yo.alGuardar;
     setTimeout(() => { if(E === yo) cerrar(true); if(despues) despues(); else if(abrirNueva && nueva && cb) cb(nueva); }, 700);
     return true;
-  }catch(e){ yo.guardando = false; if(E !== yo) return false; const av4 = $('#edAviso'); if(av4) av4.textContent = 'Could not save. ' + String(e && e.message || e); botonesGuardar().forEach(b => { b.disabled = false; }); return false; }
+  }catch(e){ yo.guardando = false; if(E !== yo) return false; document.body.classList.remove('ed-guardando');
+    avisar('Could not save. ' + String(e && e.message || e)); pintarPanel(); botonesGuardar().forEach(b => { b.disabled = false; }); return false; }
 }
 export const guardarCopia = (abrirNueva) => E ? guardar(abrirNueva) : null;
 // ¿Hay algo hecho en el editor que se perdería? (para no salir de la pantalla sin preguntar)
@@ -673,7 +758,7 @@ let PENDIENTE = null;
 export function salir(accion){
   if(!E){ if(accion) accion(); return; }
   // Mientras guarda no se sale (antes se subía la foto equivocada y se cerraba el editor de la siguiente).
-  if(E.guardando){ const av = $('#edAviso'); if(av){ av.classList.remove('ok'); av.textContent = 'Saving… one moment.'; } return; }
+  if(E.guardando){ if(!E.avisoOk) avisar('Saving… one moment.'); return; }   // el aviso se queda hasta que termine
   terminarEscritura();
   if(!hayCambios()){ cerrar(true); if(accion) accion(); return; }
   const d = $('#fvDialogo'); if(!d){ if(confirm('Discard your changes?')){ cerrar(true); if(accion) accion(); } return; }
@@ -711,7 +796,7 @@ function pintarTel(){
   const filaAntes = E.bandeja.querySelector('.ed-tel-opc .ed-fila-x'); const clave = sel ? 'sel' + E.sel : (E.herr || '') + '/' + (enRecorte() ? 'r' : '');
   const xAntes = filaAntes && E.filaClave === clave ? filaAntes.scrollLeft : 0; E.filaClave = clave;
   E.bandeja.innerHTML = `<div class="ed-tel-opc">${opc}<div class="ed-tel-hist"><button type="button" class="ed-ic" data-ed="deshacer"${E.deshacer.length ? '' : ' disabled'} aria-label="Undo">${IC('deshacer')}</button><button type="button" class="ed-ic" data-ed="rehacer"${E.rehacer.length ? '' : ' disabled'} aria-label="Redo">${IC('rehacer')}</button></div></div>
-    <p class="aviso" id="edAviso"></p>
+    ${avisoHtml()}
     <div class="ed-tel-bandeja">
       ${PRINCIPALES.map(h => tile(h, E.herr === h[0] && !enRecorte(), `data-ed-herr="${h[0]}"`)).join('')}
       ${tile(['', 'Crop', 'recortar'], enRecorte(), 'data-ed-abrir="recorte"')}
@@ -720,7 +805,8 @@ function pintarTel(){
       ${tile(['', 'Markup', 'gota'], MARKUP.some(x => x[0] === E.herr) && !enRecorte(), 'data-ed-hoja="markup"')}
     </div>`;
   if(xAntes){ const f = E.bandeja.querySelector('.ed-tel-opc .ed-fila-x'); if(f) f.scrollLeft = xAntes; }
-  const H = E.cajaHoja; H.hidden = !E.hoja; if(E.velo) E.velo.hidden = !E.hoja;
+  // Con la hoja de Markup no hay velo: el toque en la foto dibuja (y cierra la hoja) en vez de perderse.
+  const H = E.cajaHoja; H.hidden = !E.hoja; if(E.velo) E.velo.hidden = !E.hoja || E.hoja === 'markup';
   if(!E.hoja){ H.innerHTML = ''; return; }
   const cab = (t, atras) => `<div class="ed-hoja-cab">${atras ? `<button type="button" class="ed-hoja-atras" data-ed-hoja="${atras}">${IC('chev-izq')}</button>` : ''}<h2>${t}</h2><button type="button" class="ed-x" data-ed-hoja="" aria-label="Close">✕</button></div>`;
   if(E.hoja === 'ajustes') H.innerHTML = cab('Adjustments') + AJ_TEL.map(([k, t, ic, mn, mx]) => `<label class="ed-aj">${IC(ic)}<span>${t}</span><input type="range" min="${mn}" max="${mx}" value="${E.aj[k] || 0}" data-ed-aj="${k}"></label>`).join('')
@@ -743,10 +829,15 @@ export function conectar(){
     if(q('#fvVelo')){ ponerHoja(''); return; }
     // Mientras la foto todavía carga, solo se puede cerrar (girar o recortar antes reventaba y la foto salía girada).
     if((E.cargando || !E.marco) && !q('[data-ed="cerrar"]')) return;
+    // Mientras guarda no se cambia nada (lo cambiado entraba a medias a la foto guardada o se perdía); la X sí avisa.
+    if(E.guardando && !q('[data-ed="cerrar"]')) return;
+    if(E.aviso){ E.aviso = ''; E.avisoOk = false; pintarAviso(); }
     // Si estaba escribiendo, lo escrito se guarda primero y el botón tocado SÍ hace lo suyo (antes ese toque se perdía).
     if(E.escritura) terminarEscritura(true);
     if((el = q('[data-ed-hoja]'))){ ponerHoja(el.dataset.edHoja === E.hoja && el.closest('#edTel') ? '' : el.dataset.edHoja); return; }
-    if((el = q('[data-ed-herr]'))){ const h = el.dataset.edHerr; E.herr = E.herr === h && !el.closest('#edHoja') ? '' : h; E.sel = -1; if(E.abierto === 'recorte'){ E.abierto = ''; colocar(); } if(E.tel && !MARKUP.some(x => x[0] === E.herr)) E.hoja = ''; render(); pintarPanel(); return; }
+    // Tocar la herramienta que ya estaba escogida la suelta, solo si se veía prendida (en el teléfono, con Crop abierto se
+    // ve apagada: el toque la escoge).
+    if((el = q('[data-ed-herr]'))){ const h = el.dataset.edHerr; const enCrop = E.abierto === 'recorte'; E.herr = E.herr === h && !el.closest('#edHoja') && !(enCrop && el.closest('#edTel')) ? '' : h; E.sel = -1; if(E.abierto === 'recorte'){ E.abierto = ''; colocar(); } if(E.tel && !MARKUP.some(x => x[0] === E.herr)) E.hoja = ''; render(); pintarPanel(); return; }
     if((el = q('[data-ed-forma]'))){ E.forma = el.dataset.edForma; pintarPanel(); return; }
     if((el = q('[data-ed-marca]'))){ E.marca = el.dataset.edMarca; pintarPanel(); return; }
     if((el = q('[data-ed-fondo]'))){ const m = E.sel >= 0 ? E.marcas[E.sel] : null;
@@ -777,7 +868,7 @@ export function conectar(){
       return; }
   });
   document.addEventListener('input', (e) => {
-    if(!E) return;
+    if(!E || E.guardando) return;
     if(e.target.id === 'edAncho'){ const n = Number(e.target.value); E.ancho = n; const m = E.sel >= 0 ? E.marcas[E.sel] : null;
       if(m && USA_GROSOR(m.tipo)){ m.ancho = n; if(!E.raf) E.raf = requestAnimationFrame(() => { if(E){ E.raf = 0; render(); } }); }
       return; }

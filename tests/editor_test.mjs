@@ -73,8 +73,8 @@ ok('bordeDeTexto: borde oscuro para letra clara, claro para letra casi negra', E
   ok('las nueve figuras se pintan' + (sinPintar.length ? ' (faltan: ' + sinPintar.map(f => f[0]).join() + ')' : ''), !sinPintar.length); }
 { const src = (await import('node:fs')).readFileSync(new URL('../docs/editor.js', import.meta.url), 'utf8');
   ok('al abrir el editor NO hay herramienta escogida', /herr: '', forma: 'circulo'/.test(src));
-  ok('sin herramienta, tocar la foto no dibuja nada', /const t = herrActual\(\); if\(!t\) return;/.test(src));
-  ok('tocar otra vez la herramienta escogida la suelta', /E\.herr = E\.herr === h && !el\.closest\('#edHoja'\) \? '' : h;/.test(src));
+  ok('sin herramienta, tocar la foto no dibuja nada', /const t0 = herrActual\(\);/.test(src) && /const t = t0; if\(!t\) return;/.test(src));
+  ok('tocar otra vez la herramienta escogida la suelta (salvo en Crop del teléfono, donde se veía apagada)', /E\.herr = E\.herr === h && !el\.closest\('#edHoja'\) && !\(enCrop && el\.closest\('#edTel'\)\) \? '' : h;/.test(src));
   ok('la foto de abajo solo se vuelve a pintar cuando cambia (no con cada movimiento del dedo)', /if\(llave !== E\.baseLlave \|\| E\.baseMarco !== E\.marco\)/.test(src));
   ok('el trazo guarda un punto cada 2 px de pantalla, no en cada evento', /acc\.k < 2\) return; m\.puntos\.push\(p\);/.test(src));
   ok('"Original" en Crop usa la foto como se ve (girada)', /pr\[2\] === -1 \? FW\(\) \/ FH\(\) : pr\[2\]/.test(src)); }
@@ -88,10 +88,10 @@ ok('las marcas miden lo mismo con la foto acostada o parada (la medida es el lad
   ok('tocar afuera de la marca escogida solo la suelta', /if\(E\.sel >= 0\)\{ E\.sel = -1; render\(\); pintarPanel\(\); return; \}/.test(src));
   ok('margen de 6 px para el temblor del dedo antes de mover', /ev\.clientY - acc\.cy\) < 6\) return; acc\.movio = true;/.test(src));
   ok('abrir otra foto mientras la primera carga no pisa al editor nuevo', /if\(E !== yo\)\{ URL\.revokeObjectURL\(url\); return; \}/.test(src) && /if\(E\.lienzo\) return;/.test(src));
-  ok('guardar usa SU editor aunque cambie a mitad', /const archivo = await copiaFinal\(yo\); const r = await yo\.guardar\(archivo\);/.test(src));
+  ok('guardar usa SU editor aunque cambie a mitad, con lo que había al tocar Save', /const s = estado\(\); const foto = \{ \.\.\.yo, marcas: s\.marcas/.test(src) && /const archivo = await copiaFinal\(foto\);[^\n]*\n\s*const r = await yo\.guardar\(archivo\);/.test(src));
   ok('el Save de arriba del teléfono se vuelve a prender', /querySelectorAll\('#fvTelGuardar'\)\.forEach\(b => \{ b\.disabled = false; \}\)/.test(src));
   ok('abrir la hoja Markup ya no escoge Moisture solo', !/E\.herr = 'humedad'/.test(src));
-  ok('Blur: en la vista se difumina la foto de abajo ya ajustada (como en la guardada)', /pixelar\(bx, b,/.test(src) && /dibujar\(ctx, w, h, blurs, limpio\)/.test(src));
+  ok('Blur: en la vista se difumina la foto de abajo ya ajustada (como en la guardada)', /pixelar\(bx, E\.ajustada,/.test(src) && /dibujar\(ctx, w, h, blurs, limpio\)/.test(src));
   ok('un WET/DRY escogido a mano vale solo para esa lectura', /E\.estado = ''; E\.estadoFijo = false;   \/\/ un WET\/DRY/.test(src)); }
 { const app = (await import('node:fs')).readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
   ok('irse a otra pantalla con cambios en el editor pregunta (Save / Discard)', /if\(!forzar && id !== 'pFoto' && editor\.sinGuardar\(\)\)\{ editor\.salir\(\(\) => irA\(id, desde, true\)\); return; \}/.test(app) && /hayCambios\(\) \|\| editor\.sinGuardar\(\)/.test(app)); }
@@ -109,5 +109,34 @@ ok('el botón encendido es el grosor más cercano', E.grosorCercano(5) === 'medi
   // Probado en el iPhone (simulador): tras cerrar el teclado, iOS cancelaba el primer arrastre (pointercancel) y el texto
   // regresaba: "no se puede mover el texto".
   ok('un toque que empieza en la foto nunca mueve la página (iOS ya no cancela el arrastre tras el teclado)', /c\.addEventListener\('touchstart', sinPagina, \{ passive:false \}\); c\.addEventListener\('touchmove', sinPagina, \{ passive:false \}\);/.test(src)); }
+// Segunda revisión (15-oct, 54 agentes, cada hallazgo comprobado dos veces): lo que se arregló.
+ok('con una herramienta escogida, la flecha vieja se agarra solo justo encima (sin el margen extra)', (() => { const m = { tipo:'flecha', ancho:5, puntos:[[0.1, 0.5], [0.5, 0.5]] };
+  return E.tocaMarca(m, 300, 517, 6, 1000, 1000) && !E.tocaMarca(m, 300, 517, 6, 1000, 1000, true) && E.tocaMarca(m, 300, 505, 6, 1000, 1000, true); })());
+ok('la caja de la flecha gruesa encierra su punta (antes el clic en el ala no la agarraba)', (() => { const c = E.cajaMarca({ tipo:'flecha', ancho:14, puntos:[[0.1, 0.5], [0.5, 0.5]] }, 1000, 1000); return E.dentro(c, 470, 530) && E.dentro(c, 470, 470); })());
+ok('la caja de Measure encierra sus rayitas y su letrero', (() => { const c = E.cajaMarca({ tipo:'medida', ancho:9, texto:"12' 6\" long wall", puntos:[[0.5, 0.2], [0.5, 0.3]] }, 1000, 1000); return E.dentro(c, 500 + 9 * 3, 200) && E.dentro(c, 500 + 60, 250); })());
+ok('el rectángulo redondeado se agarra por su esquina redonda (la que se ve)', (() => { const m = { tipo:'redondo', ancho:5, puntos:[[0.2, 0.2], [0.8, 0.8]] }; const r = 720 * 0.18, x = 320 + r - r * Math.SQRT1_2, y = 240 + r - r * Math.SQRT1_2;
+  return E.tocaMarca(m, x, y, 4, 1600, 1200, true) && !E.tocaMarca(m, 330, 250, 4, 1600, 1200, true); })());
+ok('Blur: el cuadrito crece con el cuadro tapado (un número grande queda en 4 cuadritos y ya no se lee)', Math.abs(E.tamBlur(4032, 3024, 400, 220) - 55) < 1e-9 && Math.abs(E.tamBlur(4032, 3024, 60, 40) - 44.8) < 1e-9);
+{ const fs = await import('node:fs'); const src = fs.readFileSync(new URL('../docs/editor.js', import.meta.url), 'utf8');
+  const app = fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8'), foto = fs.readFileSync(new URL('../docs/foto.js', import.meta.url), 'utf8'), css = fs.readFileSync(new URL('../docs/estilo.css', import.meta.url), 'utf8');
+  ok('con Moisture escogido, un Wet area no se agarra (adentro van las lecturas)', /if\(t0 === 'humedad' && mk\.tipo === 'area'\) continue;/.test(src));
+  ok('con herramienta, la marca escogida ya no se agarra por toda su caja (salvo texto, lectura y Blur)', /const porCaja = i === E\.sel && \(!t0 \|\| \['texto', 'humedad', 'borroso'\]\.includes\(mk\.tipo\)\);/.test(src));
+  ok('el asa metida en la caja (marca en la esquina) igual cambia el tamaño, y el cursor dice lo mismo', /function enAsa\(cj, a, fx, fy, radio\)\{ return \(dentro\(cj, a\.x, a\.y, 0\) \|\| !dentro\(cj, fx, fy, 0\)\)/.test(src) && (src.match(/enAsa\(cj, a, fx, fy,/g) || []).length === 3);
+  ok('mientras guarda no se dibuja, no se cambia nada y el teclado no hace Undo', /if\(!E \|\| E\.cargando \|\| E\.guardando\) return;/.test(src) && /if\(E\.guardando && !q\('\[data-ed="cerrar"\]'\)\) return;/.test(src) && /if\(!E \|\| E\.guardando\) return;/.test(src) && /body\.ed-guardando #edTel/.test(css));
+  ok('el aviso (Saving…, Could not save) sale de E.aviso en cada repintado y solo en la parte que se ve', !/\$\('#edAviso'\)/.test(src) && (src.match(/\$\{avisoHtml\(\)\}/g) || []).length === 2 && /zonas\(\)\.forEach\(z => z\.querySelectorAll\('#edAviso'\)/.test(src));
+  ok('Apply se queda apagado mientras guarda (también tras un repintado)', /data-ed="aplicar"\$\{E\.guardando \? ' disabled' : ''\}/.test(src));
+  ok('al pasar a computadora se vacía la bandeja, y al cerrar se limpia siempre', /if\(!tel\)\{ E\.hoja = ''; E\.bandeja\.innerHTML = '';/.test(src) && /if\(x\.bandeja\)\{ x\.bandeja\.hidden = true; x\.bandeja\.innerHTML = ''; \}/.test(src));
+  ok('la hoja de Markup no pone velo, y el toque en la foto la cierra y dibuja', /E\.velo\.hidden = !E\.hoja \|\| E\.hoja === 'markup';/.test(src) && /if\(E\.hoja\)\{ E\.hoja = ''; pintarPanel\(\); \}/.test(src) && /body\.fv-editando \.fv-cab\{ z-index:30; \}/.test(css));
+  ok('Crop: se agarra la esquina MÁS CERCANA', /if\(d < mejor\)\{ mejor = d; i = j; \}/.test(src) && !/esq\.findIndex/.test(src));
+  ok('Undo solo si cambia: la misma proporción y editar dejando lo mismo no gastan un paso', /Math\.abs\(nuevo\.h - c0\.h\) < 1e-9\)\{ pintarPanel\(\); return; \}/.test(src) && /t\.trim\(\) !== \(m\.texto \|\| ''\)/.test(src) && /t\.trim\(\) !== String\(m\.valor == null \? '' : m\.valor\)/.test(src));
+  ok('la proporción regresa con el Undo', /crop: \{ \.\.\.E\.crop \}, prop: E\.prop \}/.test(src) && /E\.prop = s\.prop \|\| 'libre';/.test(src));
+  ok('Undo de solo marcas no reacomoda los lienzos', /if\(girado \|\| recorte\) colocar\(\); else render\(\);/.test(src));
+  ok('si iOS interrumpe un arrastre, el Redo regresa también', /acc\.rehacerAntes = E\.rehacer;/.test(src) && /E\.rehacer = a\.rehacerAntes \|\| \[\]; volver\(s0\);/.test(src));
+  ok('Blur: la foto ajustada se guarda aparte (moverlo no recorre la foto entera en cada cuadro)', /if\(llaveAj !== E\.ajLlave \|\| E\.baseMarco !== E\.marco \|\| !E\.ajustada\)/.test(src));
+  ok('Blur: no se sale de la foto (no queda una franja sin tapar en la orilla)', /if\(m\.tipo === 'borroso'\) m\.puntos = m\.puntos\.map\(q => \[Math\.max\(0, Math\.min\(1, q\[0\]\)\)/.test(src) && /const x0 = Math\.max\(0, Math\.round\(x\)\)/.test(src));
+  ok('girar o agrandar la ventana acomoda una sola vez por cuadro', /window\.addEventListener\('resize', colocarLuego\)/.test(src) && /window\.removeEventListener\('resize', colocarLuego\)/.test(src) && /if\(c\.width !== W \|\| c\.height !== H\)/.test(src));
+  ok('la barra lateral con cambios pregunta ANTES de vaciar la pila', /if\(n !== 'atras' && n !== 'capture' && !TEXTO_PRONTO\[n\] && editor\.sinGuardar\(\)\)\{ editor\.salir\(\(\) => b\.click\(\)\); return; \}/.test(app));
+  ok('Sign Out cierra el editor', /export function salir\(\)\{ if\(editor\.activo\(\)\) editor\.cerrar\(true\);/.test(app));
+  ok('borrar la foto mientras se edita primero sale del editor', /async function borrar\(\)\{ if\(editor\.activo\(\)\)\{ editor\.salir\(\(\) => borrar\(\)\); return; \}/.test(foto)); }
 console.log(`\neditor: ${pass} ok, ${fail} fallas`);
 if(fail) process.exit(1);

@@ -1,15 +1,15 @@
 // Scanova · arranque, sesión y navegación. Las pantallas viven en index.html; lo de trabajos en trabajos.js.
-import { SUPABASE_URL, ANON_KEY, APP_BUILD } from './config.js?v=2026-10-15-5';
-import { ESQUEMA_APARATO, urlEntrarGoogle } from './google.js?v=2026-10-15-5';
-import * as trabajos from './trabajos.js?v=2026-10-15-5';
-import * as personas from './personas.js?v=2026-10-15-5';
-import * as fotos from './fotos.js?v=2026-10-15-5';
-import * as panel from './panel.js?v=2026-10-15-5';
-import * as camara from './camara.js?v=2026-10-15-5';
-import * as direccion from './direccion.js?v=2026-10-15-5';
-import * as proyecto from './proyecto.js?v=2026-10-15-5';
-import * as foto from './foto.js?v=2026-10-15-5';
-import * as editor from './editor.js?v=2026-10-15-5';
+import { SUPABASE_URL, ANON_KEY, APP_BUILD } from './config.js?v=2026-10-15-6';
+import { ESQUEMA_APARATO, urlEntrarGoogle } from './google.js?v=2026-10-15-6';
+import * as trabajos from './trabajos.js?v=2026-10-15-6';
+import * as personas from './personas.js?v=2026-10-15-6';
+import * as fotos from './fotos.js?v=2026-10-15-6';
+import * as panel from './panel.js?v=2026-10-15-6';
+import * as camara from './camara.js?v=2026-10-15-6';
+import * as direccion from './direccion.js?v=2026-10-15-6';
+import * as proyecto from './proyecto.js?v=2026-10-15-6';
+import * as foto from './foto.js?v=2026-10-15-6';
+import * as editor from './editor.js?v=2026-10-15-6';
 
 export const $ = (s, r = document) => r.querySelector(s);
 export const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -256,7 +256,8 @@ function pedirCodigo(){
   $('#gcCorreo').textContent = 'Entró con Google' + (CORREO_GOOGLE ? ' (' + CORREO_GOOGLE + ')' : '') + '. Falta el código del equipo.';
   abrirEntrar('pCodigo');
 }
-export function salir(){ guardarSes(null); PERFIL = null; pila.length = 0; if(esAparato()) irA('pEntrar'); else cerrarEntrar(); }
+// El editor de fotos se cierra antes de borrar la sesión: se quedaba vivo debajo y su aviso salía encima de Sign In.
+export function salir(){ if(editor.activo()) editor.cerrar(true); guardarSes(null); PERFIL = null; pila.length = 0; if(esAparato()) irA('pEntrar'); else cerrarEntrar(); }
 
 // ---------- la bienvenida (la imagen aprobada): se ve solo sin sesión y solo en el navegador ----------
 // En el aparato nativo o en la app guardada en la pantalla de inicio se va derecho a Entrar.
@@ -500,6 +501,8 @@ async function arrancar(){
     const b = e.target.closest('[data-nav]'); if(!b) return;
     document.body.classList.remove('menu-abierto');
     const n = b.dataset.nav;
+    // Con cambios en el editor de fotos se pregunta ANTES de vaciar la pila (con Cancel, el Back llevaba a Home).
+    if(n !== 'atras' && n !== 'capture' && !TEXTO_PRONTO[n] && editor.sinGuardar()){ editor.salir(() => b.click()); return; }
     if(n === 'atras') atras();
     else if(n === 'inicio' && b.closest('#pie') && document.body.classList.contains('pie-atras')) volverUno();
     else if(n === 'inicio' || n === 'trabajos'){ pila.length = 0; irA('pInicio'); panel.pintar(); trabajos.cargar(); }
