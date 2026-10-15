@@ -387,6 +387,8 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
     // la voz sigue en español). Cada app manda su tema al abrirla (ARMeasure.measure({ tema })); Field Reports no
     // manda nada y se queda con estos de siempre. El código es el mismo en las dos apps.
     static var tema = TemaCamara()
+    // El aviso de "la voz es la básica" sale una sola vez mientras la app esté abierta.
+    static var yaAvisoVozBasica = false
     static var colorEscogido: UIColor { tema.escogido }
     static var colorPastilla: UIColor { tema.pastilla }
 
@@ -6971,6 +6973,10 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
         updateLiveLine(from: start)
     }
 
+    private func colorDeLineaViva() -> UIColor {
+        (stage == .measuringWidth || stage == .widthDone) ? Self.tema.lineaAncho : Self.tema.lineaLargo
+    }
+
     // Draws a dashed line from the anchor point (projected from its fixed
     // 3D world position onto the screen this frame) to the crosshair, so
     // the crew can see exactly what's being measured while they move the
@@ -6987,6 +6993,10 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
         }
         let startScreen = CGPoint(x: CGFloat(projected.x), y: CGFloat(projected.y))
         let endScreen = CGPoint(x: sceneView.bounds.midX, y: sceneView.bounds.midY)
+        // EL ANCHO SE VE DE OTRO COLOR (su pedido del 15 oct, con foto): la línea que se va arrastrando es amarilla en el
+        // largo y AZUL en el ancho / el alto, igual que el tramo ya marcado. Así la cuadrilla sabe de un vistazo qué mide.
+        let colorVivo = colorDeLineaViva()
+        if lineLayer.strokeColor != colorVivo.cgColor { lineLayer.strokeColor = colorVivo.cgColor }
         let path = UIBezierPath()
         path.move(to: startScreen)
         path.addLine(to: endScreen)
@@ -7180,7 +7190,7 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
         // .widthDone y sale "Guardar y seguir" - pero `pendingStart` se queda
         // puesto, asi que otro toque lo sigue alargando en vez de dejarlo
         // encerrado. Nadie tiene que aprender nada nuevo para lo de siempre.
-        let marker = addMarker(at: hit, color: pendingStart == nil ? .systemYellow : .systemGreen)
+        let marker = addMarker(at: hit, color: Self.tema.lineaAncho)
         currentMarkers.append(marker)
         if let start = pendingStart {
             currentLines.append(addLineSegment(from: start, to: hit, color: Self.tema.lineaAncho))
@@ -7651,7 +7661,7 @@ fileprivate enum Claro {
     static var rojo: UIColor { ARMeasureViewController.tema.peligro }
 }
 
-fileprivate enum PanelCamara: Equatable { case nivel, cuarto, parte, material }
+fileprivate enum PanelCamara: Equatable { case nivel, cuarto, parte, material, voz }
 
 // Vidrio claro: desenfoque + un velo blanco, para que se lea al sol sobre cualquier cosa que vea la cámara.
 fileprivate final class VidrioCamara: UIView {
@@ -7845,6 +7855,11 @@ extension ARMeasureViewController {
         armarTarjetaNueva()
         armarPanelNuevo()
         pintarCamaraNueva()
+        // Si el teléfono solo tiene la voz básica (la de robot), se dice UNA vez y se enseña dónde arreglarlo.
+        if VozAsistente.soloBasicas() && maqueta == 0 && !Self.yaAvisoVozBasica {
+            Self.yaAvisoVozBasica = true
+            mostrarAvisoNuevo("La voz es la básica. Toque la bolita para ver cómo poner una más natural.", segundos: 7)
+        }
     }
 
     private func armarBarraNueva() {
@@ -8483,7 +8498,7 @@ extension ARMeasureViewController {
     // ---------------- LOS PANELES ----------------
     private func pintarPanelNuevo(_ p: PanelCamara) {
         let n = nueva
-        let firma = "\(p)|\(nivelActual)|\(roomName)|\(section)|\(selectedMaterial?.value ?? "")|\(items.count)|\(materials.count)|\(n.seccionConfirmada)|\(n.panelForzado != nil)"
+        let firma = "\(p)|\(VozAsistente.preferida()?.identifier ?? "")|\(asistenteHabla)|\(nivelActual)|\(roomName)|\(section)|\(selectedMaterial?.value ?? "")|\(items.count)|\(materials.count)|\(n.seccionConfirmada)|\(n.panelForzado != nil)"
         guard firma != n.firmaPanel else { return }
         n.firmaPanel = firma
         n.panelPila.arrangedSubviews.forEach { $0.removeFromSuperview() }
@@ -8492,6 +8507,7 @@ extension ARMeasureViewController {
         case .cuarto: armarPanelCuarto()
         case .parte: armarPanelParte()
         case .material: armarPanelMaterial()
+        case .voz: armarPanelVoz()
         }
         // Cabe en la pantalla pero nunca pasa del 60%: arriba se sigue viendo la cámara, sin velo.
         n.panelPila.layoutIfNeeded()
@@ -8716,6 +8732,74 @@ extension ARMeasureViewController {
         }
     }
 
+    // ---------------- LA VENTANA VOZ (su pedido del 15 oct: "una voz más femenina y más natural") ----------------
+    // LO HONESTO: la app ya escoge sola la mejor voz femenina en español que haya en el teléfono. De fábrica el iPhone
+    // solo trae la BÁSICA (la que suena a robot); la Mejorada y la Premium de esa misma voz se bajan gratis en Ajustes, y
+    // en cuanto están, la app las usa sola. Aquí se ve cuál está sonando, se oyen todas y se escoge.
+    private static let fraseDePrueba = "Hola, soy su asistente. Drywall de la sala: veinticuatro pies por cuatro, noventa y ocho pies cuadrados. ¿Lleva insulación?"
+    private func armarPanelVoz() {
+        let p = nueva.panelPila
+        p.addArrangedSubview(encabezadoPanel("La voz"))
+        let actual = VozAsistente.preferida()
+        if let v = actual {
+            let l = UILabel(); l.numberOfLines = 0
+            l.font = .systemFont(ofSize: 15); l.textColor = Claro.gris
+            l.text = "Está sonando: " + VozAsistente.descripcion(v)
+            p.addArrangedSubview(l)
+        }
+        if VozAsistente.soloBasicas() {
+            let caja = UIView()
+            caja.backgroundColor = UIColor(red: 1.0, green: 0.95, blue: 0.82, alpha: 1)
+            caja.layer.cornerRadius = 12; caja.layer.cornerCurve = .continuous
+            let aviso = UILabel(); aviso.numberOfLines = 0; aviso.translatesAutoresizingMaskIntoConstraints = false
+            let t = NSMutableAttributedString(string: "Este teléfono solo tiene voces Básicas: por eso suena a robot.\n",
+                                              attributes: [.font: UIFont.systemFont(ofSize: 15, weight: .bold), .foregroundColor: Claro.tinta])
+            t.append(NSAttributedString(string: "Para una voz natural: " + VozAsistente.comoBajarUnaMejor + " Después vuelva aquí: la app la usa sola.",
+                                        attributes: [.font: UIFont.systemFont(ofSize: 14), .foregroundColor: Claro.tinta]))
+            aviso.attributedText = t
+            caja.addSubview(aviso)
+            NSLayoutConstraint.activate([aviso.leadingAnchor.constraint(equalTo: caja.leadingAnchor, constant: 12),
+                                         aviso.trailingAnchor.constraint(equalTo: caja.trailingAnchor, constant: -12),
+                                         aviso.topAnchor.constraint(equalTo: caja.topAnchor, constant: 10),
+                                         aviso.bottomAnchor.constraint(equalTo: caja.bottomAnchor, constant: -10)])
+            p.addArrangedSubview(caja)
+        }
+        p.addArrangedSubview(titulito("VOCES DE ESTE TELÉFONO · TOQUE UNA PARA OÍRLA"))
+        let voces = Array(VozAsistente.disponibles().prefix(10))
+        let losetas = voces.map { v -> LosetaCamara in
+            let calidad: String
+            switch v.quality { case .premium: calidad = "Premium · la más natural"; case .enhanced: calidad = "Mejorada · natural"; default: calidad = "Básica" }
+            let l = LosetaCamara(icono: nil, titulo: v.name, sub: VozAsistente.descripcion(v), extra: v.gender == .female ? calidad + " · femenina" : calidad,
+                                 etiqueta: VozAsistente.esLaEscogida(v) ? "SONANDO" : nil, centrada: false, alto: 64)
+            l.marcada = VozAsistente.esLaEscogida(v)
+            l.accion = { [weak self] in self?.escogerVozNueva(v) }
+            return l
+        }
+        p.addArrangedSubview(rejilla(losetas, columnas: 1))
+        p.addArrangedSubview(titulito("VELOCIDAD"))
+        let despacio = LosetaCamara(icono: "tortoise", titulo: "Más despacio", sub: nil, extra: nil, etiqueta: nil, centrada: true, alto: 56)
+        despacio.accion = { [weak self] in VozAsistente.ajustarRitmo(-0.08); self?.oirVozNueva() }
+        let rapido = LosetaCamara(icono: "hare", titulo: "Más rápido", sub: nil, extra: nil, etiqueta: nil, centrada: true, alto: 56)
+        rapido.accion = { [weak self] in VozAsistente.ajustarRitmo(0.08); self?.oirVozNueva() }
+        p.addArrangedSubview(rejilla([despacio, rapido], columnas: 2))
+        let donde = LosetaCamara(icono: "location", titulo: "¿Dónde voy?", sub: nil, extra: nil, etiqueta: nil, centrada: true, alto: 56)
+        donde.accion = { [weak self] in self?.cerrarPanelForzado(); self?.assistantTapped() }
+        let apagar = LosetaCamara(icono: asistenteHabla ? "speaker.slash" : "speaker.wave.2", titulo: asistenteHabla ? "Apagar la voz" : "Prender la voz",
+                                  sub: nil, extra: nil, etiqueta: nil, centrada: true, alto: 56)
+        apagar.accion = { [weak self] in self?.muteTapped(); self?.nueva.firmaPanel = ""; self?.pintarCamaraNueva() }
+        p.addArrangedSubview(rejilla([donde, apagar], columnas: 2))
+    }
+    private func escogerVozNueva(_ v: AVSpeechSynthesisVoice) {
+        VozAsistente.escoger(v)
+        nueva.firmaPanel = ""
+        pintarCamaraNueva()
+        oirVozNueva()
+    }
+    private func oirVozNueva() {
+        speech.stopSpeaking(at: .immediate)
+        decirPorPeticion(Self.fraseDePrueba)
+    }
+
     // ---------------- LO QUE HACE CADA TOQUE (siempre por el mismo camino que la voz) ----------------
     private func dondeEstoy() -> String {
         "\(nivelActual)|\(roomName)|\(section)|\(selectedMaterial?.value ?? "")|\(stage)|\(items.count)"
@@ -8767,8 +8851,8 @@ extension ARMeasureViewController {
     }
 
     @objc fileprivate func orbitaNuevaTocada() {
-        // Fase 6 abre aquí la ventana Voz; por ahora hace lo de siempre: decir dónde va.
-        assistantTapped()
+        // La bolita abre la ventana Voz: qué voz tiene el teléfono, oírlas, escoger, la velocidad, y dónde voy.
+        if nueva.panelForzado == .voz { cerrarPanelForzado() } else { abrirPanelNuevo(.voz) }
     }
     @objc fileprivate func luzNuevaTocada() {
         torchTapped()
@@ -8876,6 +8960,21 @@ extension ARMeasureViewController {
             if maqueta == 6 {
                 pathTotalFeet = 24.5; widthPoints = []; currentWidthFeet = 4; pendingStart = nil
                 stage = .widthDone
+            }
+            // La línea que se va arrastrando, con el MISMO color que usa la cámara de verdad (amarilla en el largo,
+            // azul en el ancho). En el simulador no hay ARKit que la proyecte: se dibuja de una esquina a la mira.
+            if maqueta == 7 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.abrirPanelNuevo(.voz) }
+            }
+            if maqueta == 4 || maqueta == 5 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                    guard let self = self else { return }
+                    let b = self.view.bounds, camino = UIBezierPath()
+                    camino.move(to: CGPoint(x: b.width * 0.22, y: b.height * 0.70))
+                    camino.addLine(to: CGPoint(x: b.midX, y: b.midY))
+                    self.lineLayer.strokeColor = self.colorDeLineaViva().cgColor
+                    self.lineLayer.path = camino.cgPath
+                }
             }
         }
         updateUI()

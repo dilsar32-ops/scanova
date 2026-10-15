@@ -1,16 +1,16 @@
 // Scanova · la ficha de un proyecto (diseño de Amilcar, 12 oct 2026): portada, nombre, dirección, etapa, cliente,
 // encargado y fecha; pestañas Rooms · Photos · Dry Logs · Floor Plan · Measurements · Notes · Documents · Activity.
 // Rooms = niveles (Basement, First Floor…) y sus cuartos (Kitchen…). Photos = las fotos por nivel y por cuarto.
-import { $, $$, authFetch, irA, atras, esManager, PERFIL, marcarLimpio, preguntar } from './app.js?v=2026-10-15-10';
-import * as trabajos from './trabajos.js?v=2026-10-15-10';
-import * as fotos from './fotos.js?v=2026-10-15-10';
-import * as panel from './panel.js?v=2026-10-15-10';
-import * as planos from './planos.js?v=2026-10-15-10';
-import * as camara from './camara.js?v=2026-10-15-10';
-import * as detalles from './detalles.js?v=2026-10-15-10';
-import * as drylog from './drylog.js?v=2026-10-15-10';
-import * as documentos from './documentos.js?v=2026-10-15-10';
-import * as medidas from './medidas.js?v=2026-10-15-10';
+import { $, $$, authFetch, irA, atras, esManager, PERFIL, marcarLimpio, preguntar } from './app.js?v=2026-10-15-11';
+import * as trabajos from './trabajos.js?v=2026-10-15-11';
+import * as fotos from './fotos.js?v=2026-10-15-11';
+import * as panel from './panel.js?v=2026-10-15-11';
+import * as planos from './planos.js?v=2026-10-15-11';
+import * as camara from './camara.js?v=2026-10-15-11';
+import * as detalles from './detalles.js?v=2026-10-15-11';
+import * as drylog from './drylog.js?v=2026-10-15-11';
+import * as documentos from './documentos.js?v=2026-10-15-11';
+import * as medidas from './medidas.js?v=2026-10-15-11';
 
 const esc = (v) => trabajos.esc(v);
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -296,9 +296,12 @@ export function pintarFotos(urls){
       <div class="vistas"><button type="button" class="vista${VISTA === 'grid' ? ' on' : ''}" data-vista="grid" aria-label="Grid">${IC('cuadros')}</button><button type="button" class="vista${VISTA === 'lista' ? ' on' : ''}" data-vista="lista" aria-label="List">${IC('lista')}</button></div>
       <span class="pherr-salto"></span>
       ${selCuarto}
+      ${(FILTRO.nivel === 'todos' && NIVELES.length) ? '<h3 class="psub pherr-titulo solo-movil">By Level</h3>' : ''}
       ${fotos.botonesSubir()}
     </div>`;
-  const porNivel = (FILTRO.nivel === 'todos' && NIVELES.length) ? '<h3 class="psub solo-movil">By Level</h3><div class="plista solo-movil">' + NIVELES.map(nv => { const m = miniDe(todas.filter(f => f.nivel_id === nv.id));
+  // Su pedido (15-oct, foto del teléfono): el título "By Level" sube al hueco que quedaba a la izquierda de Upload Photos,
+  // en la misma fila, y la lista de niveles sube con él.
+  const porNivel = (FILTRO.nivel === 'todos' && NIVELES.length) ? '<div class="plista solo-movil">' + NIVELES.map(nv => { const m = miniDe(todas.filter(f => f.nivel_id === nv.id));
       return `<div class="pfila" data-filtro-nivel="${esc(nv.id)}"><span class="pfila-mini">${m ? '<img src="' + esc(m) + '" alt="">' : IC('cubo')}</span><span class="pfila-txt"><b>${esc(nv.nombre)}</b><small>${c.nivel[nv.id] || 0} photos</small></span>${IC('chev-der', 'chev-der')}</div>`; }).join('') + '</div>' : '';
   const titulo = (FILTRO.cuarto !== 'todos' ? nombreCuarto(FILTRO.cuarto) : FILTRO.nivel === 'todos' ? 'All' : FILTRO.nivel === 'sin' ? 'No Level' : nombreNivel(FILTRO.nivel)) + ' Photos';
   const fs = ordenarFotos(filtrarFotos(todas, FILTRO), ORDEN);

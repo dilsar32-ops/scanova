@@ -676,6 +676,8 @@ body.menu-abierto .menu-velo{ display:block; position:absolute; inset:0; z-index
 .pherr .psel-cuarto{ order:5; flex:1 1 80px; min-width:0; }
 .psel-btn{ order:6; }
 .subir-btn{ order:7; margin-left:auto; min-height:38px; }
+/* "By Level" en la misma fila que Upload Photos (su pedido del 15-oct): ocupa el hueco de la izquierda. */
+.pherr .pherr-titulo{ order:6; margin:0; flex:1 1 auto; min-width:0; align-self:center; }
 .subir-btn .ic{ width:18px; height:18px; }
 .pherr .vista{ height:36px; }
 
