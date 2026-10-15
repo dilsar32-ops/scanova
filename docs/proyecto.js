@@ -1,16 +1,16 @@
 // Scanova · la ficha de un proyecto (diseño de Amilcar, 12 oct 2026): portada, nombre, dirección, etapa, cliente,
 // encargado y fecha; pestañas Rooms · Photos · Dry Logs · Floor Plan · Measurements · Notes · Documents · Activity.
 // Rooms = niveles (Basement, First Floor…) y sus cuartos (Kitchen…). Photos = las fotos por nivel y por cuarto.
-import { $, $$, authFetch, irA, atras, esManager, PERFIL, marcarLimpio, preguntar } from './app.js?v=2026-10-15-11';
-import * as trabajos from './trabajos.js?v=2026-10-15-11';
-import * as fotos from './fotos.js?v=2026-10-15-11';
-import * as panel from './panel.js?v=2026-10-15-11';
-import * as planos from './planos.js?v=2026-10-15-11';
-import * as camara from './camara.js?v=2026-10-15-11';
-import * as detalles from './detalles.js?v=2026-10-15-11';
-import * as drylog from './drylog.js?v=2026-10-15-11';
-import * as documentos from './documentos.js?v=2026-10-15-11';
-import * as medidas from './medidas.js?v=2026-10-15-11';
+import { $, $$, authFetch, irA, atras, esManager, PERFIL, marcarLimpio, preguntar } from './app.js?v=2026-10-15-12';
+import * as trabajos from './trabajos.js?v=2026-10-15-12';
+import * as fotos from './fotos.js?v=2026-10-15-12';
+import * as panel from './panel.js?v=2026-10-15-12';
+import * as planos from './planos.js?v=2026-10-15-12';
+import * as camara from './camara.js?v=2026-10-15-12';
+import * as detalles from './detalles.js?v=2026-10-15-12';
+import * as drylog from './drylog.js?v=2026-10-15-12';
+import * as documentos from './documentos.js?v=2026-10-15-12';
+import * as medidas from './medidas.js?v=2026-10-15-12';
 
 const esc = (v) => trabajos.esc(v);
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -562,7 +562,7 @@ export function conectar(){
   drylog.conectar();
   documentos.conectar();
   medidas.conectar();
-  medidas.usar({ escogerCuarto, asegurarNivel, asegurarCuarto, refrescar: refrescarCuartos, pdf: () => documentos.pdfDeMedidas(T, NIVELES, CUARTOS, medidas.filas(), medidas.nota()) });
+  medidas.usar({ escogerCuarto, asegurarNivel, asegurarCuarto, refrescar: refrescarCuartos, paredes: (tid, nivelId) => planos.paredesParaCamara(tid, nivelId), pdf: () => documentos.pdfDeMedidas(T, NIVELES, CUARTOS, medidas.filas(), medidas.nota()) });
   camara.usarCuartos({ hay: (id) => !!(T && T.id === id), destino: destinoActual, nombre: nombreDestino, escoger: escogerCuarto });
   fotos.alPintar((urls) => { pintarFotos(urls); if(TAB === 'secado' && T) drylog.alCambiarFotos(); });
   fotos.usarDestino(destinoActual);

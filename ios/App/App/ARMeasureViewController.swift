@@ -305,6 +305,9 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
     // calcularlo (eso vive en la web, sobre el plano de LiDAR), asi que llega
     // hecho y aqui solo se consulta al cambiar de cuarto.
     var areasPorCuarto: [String: Double] = [:]
+    // Las paredes de cada cuarto según el plano (largo en pies y si es de afuera). Con esto la tarjeta de guardar
+    // SUGIERE si la pared lleva insulación (su pedido del 15 oct). Vacío = sin plano: no se sugiere nada.
+    var paredesPorCuarto: [String: [(largo: Double, exterior: Bool)]] = [:]
     // El nivel se pregunta UNA vez por recorrido. Eso es todo el punto.
     var nivelActual: String = ""
     // "nivel" = un piso completo, cuarto por cuarto. "cuarto" = solo este.
@@ -709,6 +712,10 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
     private var motorAudio: AVAudioEngine?
     private var peticionVoz: SFSpeechAudioBufferRecognitionRequest?
     private var tareaVoz: SFSpeechRecognitionTask?
+    // Cuál es la tarea de voz VIGENTE. Cada reinicio cancela la anterior a propósito, y Apple contesta esa cancelación
+    // con un "error": sin este número se contaba como micrófono caído (bolita roja) y se programaba OTRO reinicio que
+    // cortaba la tarea nueva, que estaba bien; así cada pocos segundos se le cortaba el oído (su foto del 15 oct).
+    private var generacionVoz = 0
     private var reinicioVoz: Timer?
     private var escuchando = false
     // Pico de volumen desde la ultima frase atendida (ver el tap del micro).
@@ -1067,6 +1074,8 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
         inglesVieja?.endAudio()
         defer { if inglesAndaba { arrancarIngles() } }
         reinicioVoz?.invalidate()
+        generacionVoz += 1
+        let mia = generacionVoz
         let peticion = SFSpeechAudioBufferRecognitionRequest()
         peticion.shouldReportPartialResults = true
         // EN EL TELEFONO, NO EN EL SERVIDOR. Esta es la causa mas probable de
@@ -1153,11 +1162,38 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
             // moria, el microfono se quedaba mudo el resto del trabajo sin que
             // nadie lo supiera. Eso era, literalmente, "se traba y ya no
             // escucha".
-            if error != nil {
-                DispatchQueue.main.async { self?.reintentarTrasFallo() }
+            if let error = error {
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    // Una tarea VIEJA (la cancelamos nosotros al reiniciar): no es una falla, no se toca nada.
+                    guard mia == self.generacionVoz else { return }
+                    // "No oí nada": el reconocedor del teléfono se cierra solo tras un rato de silencio. Tampoco es
+                    // una falla: se vuelve a escuchar en seguida, sin bolita roja.
+                    if Self.esSoloSilencio(error) {
+                        self.reinicioVoz?.invalidate()
+                        self.reinicioVoz = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { [weak self] _ in
+                            guard let self = self, mia == self.generacionVoz else { return }
+                            self.reiniciarTareaVoz()
+                        }
+                        return
+                    }
+                    self.reintentarTrasFallo()
+                }
                 return
             }
             guard let r = resultado else { return }
+            // La tarea terminó por su cuenta con su frase final: se atiende y se vuelve a escuchar en seguida (antes se
+            // quedaba sorda hasta el reinicio de los 40 segundos).
+            if r.isFinal {
+                DispatchQueue.main.async {
+                    guard let self = self, mia == self.generacionVoz else { return }
+                    self.reinicioVoz?.invalidate()
+                    self.reinicioVoz = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [weak self] _ in
+                        guard let self = self, mia == self.generacionVoz else { return }
+                        self.reiniciarTareaVoz()
+                    }
+                }
+            }
             DispatchQueue.main.async {
                 self?.ultimaSeñalDeVoz = Date()
                 if self?.fallosSeguidos != 0 {
@@ -1256,6 +1292,13 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
     // fondo. Se reinicia el contador en cuanto llega una frase de verdad.
     private var fallosSeguidos = 0
     private var ultimaSeñalDeVoz = Date()
+    // Lo que Apple contesta cuando simplemente no oyó a nadie, o cuando la tarea se canceló: no es el micrófono caído.
+    static func esSoloSilencio(_ error: Error) -> Bool {
+        let e = error as NSError
+        if e.domain == "kAFAssistantErrorDomain" && [1110, 203, 216].contains(e.code) { return true }
+        if e.domain == "kLSRErrorDomain" && [301].contains(e.code) { return true }
+        return false
+    }
     private func reintentarTrasFallo() {
         guard motorAudio != nil, !micApagadoPorElUsuario else { return }
         fallosSeguidos += 1
@@ -2924,7 +2967,7 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
                 say("Este material no lleva nada debajo.", .guia)
                 return
             }
-            includeCompanion = (orden == .ponerCompanero)
+            includeCompanion = (orden == .ponerCompanero); respuestasCompanero += 1
             updateUI()
             say(includeCompanion
                 ? "Anotado, con \(c.es.lowercased())."
@@ -3043,7 +3086,7 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
         // pidio con esas palabras, no una costumbre que la app adivino. Pero
         // TIENE que oirlo - si no, es otra insulacion que aparece sin que el
         // sepa, que es justo de lo que se quejo.
-        includeCompanion = (ultima.companion != nil)
+        includeCompanion = (ultima.companion != nil); respuestasCompanero += 1
         let nombre = Self.nombreDeBoton(material)
         var conQue = ""
         if includeCompanion, let c = currentCompanion { conQue = ", con \(c.es.lowercased())" }
@@ -3297,7 +3340,7 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
                 let niega = Self.tienePalabra(t, "no") || t.contains("sin ")
                     || t.contains("quita") || t.contains("tampoco")
                 pasoAbierto = nil
-                includeCompanion = !niega
+                includeCompanion = !niega; respuestasCompanero += 1
                 updateUI()
                 say(niega ? "Ok, sin eso. \(sigue)" : "Anotado. \(sigue)", .guia)
                 return true
@@ -3308,7 +3351,7 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
             if t.contains("tambien") || t.contains("también") || t.contains("si lleva")
                 || t.contains("sí lleva") || t.contains("obvio") || t.contains("por supuesto") {
                 pasoAbierto = nil
-                includeCompanion = true
+                includeCompanion = true; respuestasCompanero += 1
                 updateUI()
                 say("Anotado. \(sigue)", .guia)
                 return true
@@ -3316,7 +3359,7 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
             if t.contains("nomas") || t.contains("nomás") || t.contains("solo eso")
                 || t.contains("solamente") || t.contains("nada mas") || t.contains("nada más") {
                 pasoAbierto = nil
-                includeCompanion = false
+                includeCompanion = false; respuestasCompanero += 1
                 updateUI()
                 say("Ok. \(sigue)", .guia)
                 return true
@@ -3324,14 +3367,14 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
             guard t.split(separator: " ").count <= 3 else { return false }
             if VozAsistente.esSi(t) {
                 pasoAbierto = nil
-                includeCompanion = true
+                includeCompanion = true; respuestasCompanero += 1
                 updateUI()
                 say("Anotado. \(sigue)", .guia)
                 return true
             }
             if VozAsistente.esNo(t) {
                 pasoAbierto = nil
-                includeCompanion = false
+                includeCompanion = false; respuestasCompanero += 1
                 updateUI()
                 say("Ok. \(sigue)", .guia)
                 return true
@@ -3754,6 +3797,14 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
     // Es decir: el corte de pared BAJITO (hasta 2 pies) va por pie lineal,
     // y solo cuando pasa de ahi va por pie cuadrado. Ese detalle es de la
     // factura de ellos, no una opinion.
+    // ALTO O ANCHO (su regla del 15 oct): en la PARED la segunda medida es el alto del corte; en lo plano (piso,
+    // techo, countertop) es el ancho. Lo que va PARADO aunque esté en cocina o baño (backsplash, tile de la regadera,
+    // cement board, greenboard) también es alto.
+    static let materialesParados: Set<String> = ["Backsplash", "Shower Tile", "Shower Surround", "Cement Board", "Greenboard", "Vapor Barrier"]
+    private var segundaEsAlto: Bool {
+        section == "wall" || Self.materialesParados.contains(selectedMaterial?.value ?? "")
+    }
+    private var segundaPalabra: String { segundaEsAlto ? "alto" : "ancho" }
     private enum Unidad { case lineal, cuadrado, depende }
     private func unidad(for material: String) -> Unidad {
         // Primero lo que dijo la web para ESE material (15 oct 2026).
@@ -5056,6 +5107,10 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
     // insulation behind them, so this is asked fresh each time rather than
     // remembered from the last one.
     private var includeCompanion = false
+    // Cuántas veces CONTESTÓ de verdad lo del compañero (sí o no, por voz u "otra igual"). La tarjeta de guardar solo
+    // marca una respuesta si de verdad la hubo: antes, cualquier pregunta nueva que cerrara la anterior se tomaba como
+    // un "no" y la tarjeta salía con "No · sin Insulación" marcado sin que nadie lo dijera (su foto del 15 oct).
+    private var respuestasCompanero = 0
 
     // Every banked measurement, each keeping its own markers so Undo can
     // remove them again if the crew backs out of the last one.
@@ -7496,8 +7551,8 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
         if unidad(for: material.value) == .cuadrado, currentWidthFeet == nil, !yaAvisoFaltaAncho {
             yaAvisoFaltaAncho = true
             let que = section == "wall" ? "la pared" : (section == "ceiling" ? "el techo" : "el piso")
-            avisoEnPantalla = section == "wall" ? "⚠︎ Falta el alto — la pared va largo × alto" : "⚠︎ Falta el ancho — va largo × ancho"
-            say("Ojo: \(que) se cobra por pie cuadrado y solo tiene el largo. Toque Medir Ancho. Si la guarda así, sale sin alto y no se cobra hasta que se lo pongan.", .aviso)
+            avisoEnPantalla = segundaEsAlto ? "⚠︎ Falta el alto — va largo × alto" : "⚠︎ Falta el ancho — va largo × ancho"
+            say("Ojo: \(que) se cobra por pie cuadrado y solo tiene el largo. Toque Medir Ancho. Si la guarda así, sale sin \(segundaPalabra) y no se cobra hasta que se lo pongan.", .aviso)
             instructionLabel.text = avisoEnPantalla
             return
         }
@@ -7555,8 +7610,8 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
             let comoSeguir = (stage == .lengthDone || stage == .widthDone)
                 ? "Toque Medir Ancho"
                 : "Toque Terminar Recorrido y luego Medir Ancho"
-            avisoEnPantalla = section == "wall" ? "⚠︎ Falta el alto — la pared va largo × alto" : "⚠︎ Falta el ancho — va largo × ancho"
-            say("Ojo: \(que) se cobra por pie cuadrado y solo tiene el largo. \(comoSeguir). Si termina así, sale sin alto y no se cobra hasta que se lo pongan.", .aviso)
+            avisoEnPantalla = segundaEsAlto ? "⚠︎ Falta el alto — va largo × alto" : "⚠︎ Falta el ancho — va largo × ancho"
+            say("Ojo: \(que) se cobra por pie cuadrado y solo tiene el largo. \(comoSeguir). Si termina así, sale sin \(segundaPalabra) y no se cobra hasta que se lo pongan.", .aviso)
             instructionLabel.text = avisoEnPantalla
             return
         }
@@ -7650,34 +7705,47 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
 // material en losetas. La tarjeta de guardar, cocina y baño, la ventana de la voz y la hoja de revisar llegan en las
 // fases siguientes.
 
+// SÓLIDO Y ELEGANTE (su pedido del 15 oct: "los botones y el área de los botones son muy grandes... un tipo clase,
+// sólido, elegante"). Superficies OPACAS (sin vidrio), orillas finas, sombra suave, letra más fina y botones compactos.
+// Dos versiones de color con las mismas medidas: blanca (por defecto) y azul marino (`Claro.oscuro`).
 fileprivate enum Claro {
-    static let tinta = UIColor(red: 0.06, green: 0.10, blue: 0.18, alpha: 1)        // #0F1A2E
-    static let gris = UIColor(red: 0.39, green: 0.45, blue: 0.55, alpha: 1)         // #64748B
-    static let linea = UIColor(red: 0.89, green: 0.91, blue: 0.94, alpha: 1)        // #E2E8F0
-    static let azulSuave = UIColor(red: 0.92, green: 0.95, blue: 1.0, alpha: 1)    // #EBF2FF
-    static let apagado = UIColor(red: 0.80, green: 0.83, blue: 0.87, alpha: 1)
+    static var oscuro = false
+    private static func c(_ hex: UInt32) -> UIColor {
+        UIColor(red: CGFloat((hex >> 16) & 0xFF) / 255, green: CGFloat((hex >> 8) & 0xFF) / 255, blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
+    }
+    static var tinta: UIColor { oscuro ? .white : c(0x0F1A2E) }
+    static var gris: UIColor { oscuro ? c(0x9AA8BC) : c(0x64748B) }
+    static var linea: UIColor { oscuro ? c(0x26354D) : c(0xE5E9F0) }
+    static var azulSuave: UIColor { oscuro ? c(0x1C3664) : c(0xEEF3FF) }
+    static var apagado: UIColor { oscuro ? c(0x4A5B74) : c(0xC5CDD8) }
+    static var loseta: UIColor { oscuro ? c(0x172338) : .white }          // el fondo de cada botón
+    static var fondo: UIColor { oscuro ? c(0x0F1A2E) : c(0xF7F8FA) }      // el panel y el muelle
+    static var boton: UIColor { oscuro ? c(0x0F1A2E) : .white }           // los botones de arriba y la ficha
     static var azul: UIColor { ARMeasureViewController.tema.primario.withAlphaComponent(1) }
     static var ambar: UIColor { OrbitaVoz.ambar }
     static var rojo: UIColor { ARMeasureViewController.tema.peligro }
 }
 
-fileprivate enum PanelCamara: Equatable { case nivel, cuarto, parte, material, voz }
+fileprivate enum PanelCamara: Equatable { case nivel, cuarto, parte, material, voz, sigue }
 
 // Vidrio claro: desenfoque + un velo blanco, para que se lea al sol sobre cualquier cosa que vea la cámara.
 fileprivate final class VidrioCamara: UIView {
     let contenido = UIView()
+    private let fondoSolido = UIView()
+    // Los colores se toman al armar la pantalla (la versión clara o la azul marino), no al crear la vista.
+    func repintar() { fondoSolido.backgroundColor = Claro.fondo; fondoSolido.layer.borderColor = Claro.linea.cgColor }
     init(radio: CGFloat) {
         super.init(frame: .zero)
         overrideUserInterfaceStyle = .light
         layer.cornerRadius = radio; layer.cornerCurve = .continuous
-        layer.shadowColor = UIColor.black.cgColor; layer.shadowOpacity = 0.16; layer.shadowRadius = 18
-        layer.shadowOffset = CGSize(width: 0, height: 6)
-        let blur = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialLight))
-        blur.layer.cornerRadius = radio; blur.layer.cornerCurve = .continuous; blur.clipsToBounds = true
-        let velo = UIView(); velo.backgroundColor = UIColor.white.withAlphaComponent(0.72)
-        for v in [blur, velo, contenido] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
-        velo.layer.cornerRadius = radio; velo.layer.cornerCurve = .continuous; velo.clipsToBounds = true
-        for v in [blur, velo, contenido] {
+        layer.shadowColor = UIColor.black.cgColor; layer.shadowOpacity = 0.14; layer.shadowRadius = 14
+        layer.shadowOffset = CGSize(width: 0, height: 4)
+        // Sólido: una sola superficie opaca con su orilla fina. Se lee igual al sol y sobre cualquier cosa.
+        let fondo = fondoSolido; fondo.backgroundColor = Claro.fondo
+        fondo.layer.borderWidth = 0.5; fondo.layer.borderColor = Claro.linea.cgColor
+        for v in [fondo, contenido] { v.translatesAutoresizingMaskIntoConstraints = false; addSubview(v) }
+        fondo.layer.cornerRadius = radio; fondo.layer.cornerCurve = .continuous; fondo.clipsToBounds = true
+        for v in [fondo, contenido] {
             NSLayoutConstraint.activate([v.leadingAnchor.constraint(equalTo: leadingAnchor), v.trailingAnchor.constraint(equalTo: trailingAnchor),
                                          v.topAnchor.constraint(equalTo: topAnchor), v.bottomAnchor.constraint(equalTo: bottomAnchor)])
         }
@@ -7693,27 +7761,27 @@ fileprivate final class LosetaCamara: UIControl {
     private let etiqueta = UILabel()
     init(icono: String?, titulo: String, sub: String?, extra: String?, etiqueta tag: String?, centrada: Bool, alto: CGFloat) {
         super.init(frame: .zero)
-        backgroundColor = .white
-        layer.cornerRadius = 14; layer.cornerCurve = .continuous
-        layer.borderWidth = 1; layer.borderColor = Claro.linea.cgColor
-        pila.axis = .vertical; pila.spacing = 2; pila.alignment = centrada ? .center : .leading
+        backgroundColor = Claro.loseta
+        layer.cornerRadius = 10; layer.cornerCurve = .continuous
+        layer.borderWidth = 0.5; layer.borderColor = Claro.linea.cgColor
+        pila.axis = .vertical; pila.spacing = 1; pila.alignment = centrada ? .center : .leading
         pila.isUserInteractionEnabled = false
         pila.translatesAutoresizingMaskIntoConstraints = false
         addSubview(pila)
-        if let icono = icono, let img = UIImage(systemName: icono, withConfiguration: UIImage.SymbolConfiguration(pointSize: 21, weight: .regular)) {
+        if let icono = icono, let img = UIImage(systemName: icono, withConfiguration: UIImage.SymbolConfiguration(pointSize: 16, weight: .regular)) {
             let iv = UIImageView(image: img); iv.tintColor = Claro.tinta; iv.contentMode = .scaleAspectFit
-            pila.addArrangedSubview(iv); pila.setCustomSpacing(6, after: iv)
+            pila.addArrangedSubview(iv); pila.setCustomSpacing(4, after: iv)
         }
-        let t = UILabel(); t.text = titulo; t.font = .systemFont(ofSize: 17, weight: .semibold); t.textColor = Claro.tinta
+        let t = UILabel(); t.text = titulo; t.font = .systemFont(ofSize: 15, weight: .semibold); t.textColor = Claro.tinta
         t.numberOfLines = 2; t.textAlignment = centrada ? .center : .natural; t.adjustsFontSizeToFitWidth = true; t.minimumScaleFactor = 0.8
         pila.addArrangedSubview(t)
         if let s = sub, !s.isEmpty {
-            let l = UILabel(); l.text = s; l.font = .systemFont(ofSize: 13); l.textColor = Claro.gris; l.numberOfLines = 2
+            let l = UILabel(); l.text = s; l.font = .systemFont(ofSize: 12); l.textColor = Claro.gris; l.numberOfLines = 2
             l.textAlignment = centrada ? .center : .natural
             pila.addArrangedSubview(l)
         }
         if let e = extra, !e.isEmpty {
-            let l = UILabel(); l.text = e; l.font = .systemFont(ofSize: 13, weight: .semibold); l.textColor = Claro.azul
+            let l = UILabel(); l.text = e; l.font = .systemFont(ofSize: 12, weight: .semibold); l.textColor = Claro.azul
             l.textAlignment = centrada ? .center : .natural
             pila.addArrangedSubview(l)
         }
@@ -7721,15 +7789,15 @@ fileprivate final class LosetaCamara: UIControl {
         if let tag = tag, !tag.isEmpty {
             etiqueta.isHidden = false
             etiqueta.text = " " + tag + " "
-            etiqueta.font = .systemFont(ofSize: 11, weight: .bold); etiqueta.textColor = Claro.azul
+            etiqueta.font = .systemFont(ofSize: 10, weight: .bold); etiqueta.textColor = Claro.azul
             etiqueta.backgroundColor = Claro.azulSuave; etiqueta.layer.cornerRadius = 4; etiqueta.clipsToBounds = true
             pila.addArrangedSubview(etiqueta)
         }
         NSLayoutConstraint.activate([
-            pila.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
-            pila.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            pila.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            pila.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
             pila.centerYAnchor.constraint(equalTo: centerYAnchor),
-            pila.topAnchor.constraint(greaterThanOrEqualTo: topAnchor, constant: 8),
+            pila.topAnchor.constraint(greaterThanOrEqualTo: topAnchor, constant: 6),
             heightAnchor.constraint(greaterThanOrEqualToConstant: alto)
         ])
         addTarget(self, action: #selector(tocada), for: .touchUpInside)
@@ -7741,9 +7809,9 @@ fileprivate final class LosetaCamara: UIControl {
     @objc private func tocada() { accion?() }
     override var isHighlighted: Bool { didSet { alpha = isHighlighted ? 0.55 : 1 } }
     private func pintar() {
-        layer.borderWidth = marcada ? 2 : 1
+        layer.borderWidth = marcada ? 1.5 : 0.5
         layer.borderColor = (marcada ? Claro.azul : Claro.linea).cgColor
-        backgroundColor = marcada ? Claro.azulSuave : .white
+        backgroundColor = marcada ? Claro.azulSuave : Claro.loseta
     }
 }
 
@@ -7794,13 +7862,13 @@ fileprivate final class CamaraNueva {
     let pista = UILabel()
     let aviso = UILabel()
     var avisoHasta = Date.distantPast
-    let muelle = VidrioCamara(radio: 28)
+    let muelle = VidrioCamara(radio: 20)
     let rielCuarto = UIControl(), rielParte = UIControl(), rielMaterial = UIControl()
     let deshacer = UIButton(type: .system)
     let gatillo = UIButton(type: .custom)
     let derecho = UIButton(type: .system)
     var accionDerecha: (() -> Void)?
-    let panel = VidrioCamara(radio: 28)
+    let panel = VidrioCamara(radio: 20)
     let panelPila = UIStackView()
     let panelScroll = UIScrollView()
     var panelAlto: NSLayoutConstraint?
@@ -7819,16 +7887,20 @@ fileprivate final class CamaraNueva {
     let columna = UIStackView()
     // LA TARJETA DE GUARDAR (su reporte del 15 oct: "ya no pregunta si esa pared lleva insulación"). La pregunta del
     // compañero se hace al tener la medida completa, y contestar Sí o No ES guardar. Nada viene marcado.
-    let tarjeta = VidrioCamara(radio: 28)
+    let tarjeta = VidrioCamara(radio: 20)
     let tarjetaDonde = UILabel(), tarjetaNumero = UILabel(), tarjetaPregunta = UILabel(), tarjetaAyuda = UILabel()
     let tarjetaSi = UIButton(type: .system), tarjetaNo = UIButton(type: .system), tarjetaCorregir = UIButton(type: .system)
     var tarjetaVisible = false
     var tarjetaPreguntando = false     // la voz hizo la pregunta con la tarjeta abierta: su respuesta guarda
     var tarjetaOculta = false          // tocó "Corregir": se esconde hasta que cambie la medida
     var contestoAntes: Bool?           // ya contestó por voz (al escoger el material): la tarjeta llega marcada
-    var pasoAntesEraCompanero = false
+    var respuestasVistas = 0
     var medidaFirma = ""
     var itemsVistos = -1
+    // "¿QUÉ SIGUE?" (su reporte del 15 oct): al guardar ya no regresa a "¿Qué material?" sin más; sale una pantalla con
+    // los caminos claros: otra igual, otro material, cambiar de parte, otro cuarto, otro nivel, terminar.
+    var acabaDeGuardar = false
+    var sigueDonde = ""
 }
 
 extension ARMeasureViewController {
@@ -7837,6 +7909,9 @@ extension ARMeasureViewController {
     fileprivate func armarCamaraNueva() {
         guard experienciaNueva, !nueva.armada else { return }
         nueva.armada = true
+        // En la maqueta del simulador se puede pedir la versión azul marino, para comparar las dos.
+        if maqueta > 0 { Claro.oscuro = UserDefaults.standard.string(forKey: "maquetaEstilo") == "oscuro" }
+        for v in [nueva.muelle, nueva.panel, nueva.tarjeta] { v.repintar() }
         // Lo viejo se queda (es el estado), pero no se ve ni recibe toques.
         for v in view.subviews where v !== sceneView {
             v.alpha = 0
@@ -7868,8 +7943,8 @@ extension ARMeasureViewController {
         view.addSubview(n.barra)
         // La bolita de siempre, ahora arriba a la izquierda (con un aro blanco para que se vea sobre cualquier fondo).
         n.botonOrbita.translatesAutoresizingMaskIntoConstraints = false
-        n.botonOrbita.backgroundColor = UIColor.white.withAlphaComponent(0.92)
-        n.botonOrbita.layer.cornerRadius = 26
+        n.botonOrbita.backgroundColor = Claro.boton
+        n.botonOrbita.layer.cornerRadius = 22
         n.botonOrbita.accessibilityLabel = "Asistente de voz"
         n.botonOrbita.addTarget(self, action: #selector(orbitaNuevaTocada), for: .touchUpInside)
         orbita.removeFromSuperview()
@@ -7881,58 +7956,58 @@ extension ARMeasureViewController {
         n.luz.translatesAutoresizingMaskIntoConstraints = false
         n.luz.setImage(UIImage(systemName: "flashlight.off.fill"), for: .normal)
         n.luz.tintColor = Claro.tinta
-        n.luz.backgroundColor = UIColor.white.withAlphaComponent(0.92)
-        n.luz.layer.cornerRadius = 12; n.luz.layer.cornerCurve = .continuous
+        n.luz.backgroundColor = Claro.boton
+        n.luz.layer.cornerRadius = 10; n.luz.layer.cornerCurve = .continuous
         n.luz.accessibilityLabel = "Luz"
         n.luz.addTarget(self, action: #selector(luzNuevaTocada), for: .touchUpInside)
         n.luz.isHidden = AVCaptureDevice.default(for: .video)?.hasTorch != true && maqueta == 0
         // Salir / Terminar · N
         n.terminar.translatesAutoresizingMaskIntoConstraints = false
-        n.terminar.backgroundColor = UIColor.white.withAlphaComponent(0.94)
-        n.terminar.layer.cornerRadius = 14; n.terminar.layer.cornerCurve = .continuous
-        n.terminar.titleLabel?.font = .systemFont(ofSize: 16, weight: .semibold)
+        n.terminar.backgroundColor = Claro.boton
+        n.terminar.layer.cornerRadius = 10; n.terminar.layer.cornerCurve = .continuous
+        n.terminar.titleLabel?.font = .systemFont(ofSize: 15, weight: .semibold)
         n.terminar.setTitleColor(Claro.tinta, for: .normal)
         n.terminar.contentEdgeInsets = UIEdgeInsets(top: 0, left: 14, bottom: 0, right: 14)
         n.terminar.addTarget(self, action: #selector(terminarNuevoTocado), for: .touchUpInside)
         n.terminarCuenta.translatesAutoresizingMaskIntoConstraints = false
-        n.terminarCuenta.font = .monospacedDigitSystemFont(ofSize: 15, weight: .bold)
+        n.terminarCuenta.font = .monospacedDigitSystemFont(ofSize: 13, weight: .bold)
         n.terminarCuenta.textColor = .white; n.terminarCuenta.textAlignment = .center
         n.terminarCuenta.backgroundColor = Claro.azul
-        n.terminarCuenta.layer.cornerRadius = 7; n.terminarCuenta.layer.cornerCurve = .continuous; n.terminarCuenta.clipsToBounds = true
+        n.terminarCuenta.layer.cornerRadius = 6; n.terminarCuenta.layer.cornerCurve = .continuous; n.terminarCuenta.clipsToBounds = true
         n.terminarCuenta.isUserInteractionEnabled = false
         n.terminar.addSubview(n.terminarCuenta)
         NSLayoutConstraint.activate([
             n.terminarCuenta.trailingAnchor.constraint(equalTo: n.terminar.trailingAnchor, constant: -8),
             n.terminarCuenta.centerYAnchor.constraint(equalTo: n.terminar.centerYAnchor),
-            n.terminarCuenta.heightAnchor.constraint(equalToConstant: 28),
-            n.terminarCuenta.widthAnchor.constraint(greaterThanOrEqualToConstant: 28)
+            n.terminarCuenta.heightAnchor.constraint(equalToConstant: 22),
+            n.terminarCuenta.widthAnchor.constraint(greaterThanOrEqualToConstant: 22)
         ])
-        for v in [n.botonOrbita, n.luz, n.terminar] { n.barra.addSubview(v); v.layer.shadowColor = UIColor.black.cgColor; v.layer.shadowOpacity = 0.15; v.layer.shadowRadius = 8; v.layer.shadowOffset = CGSize(width: 0, height: 3) }
+        for v in [n.botonOrbita, n.luz, n.terminar] { n.barra.addSubview(v); v.layer.shadowColor = UIColor.black.cgColor; v.layer.shadowOpacity = 0.12; v.layer.shadowRadius = 6; v.layer.shadowOffset = CGSize(width: 0, height: 2) }
         NSLayoutConstraint.activate([
             n.barra.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 14),
             n.barra.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -14),
             n.barra.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 6),
-            n.barra.heightAnchor.constraint(equalToConstant: 52),
+            n.barra.heightAnchor.constraint(equalToConstant: 44),
             n.botonOrbita.leadingAnchor.constraint(equalTo: n.barra.leadingAnchor),
             n.botonOrbita.centerYAnchor.constraint(equalTo: n.barra.centerYAnchor),
-            n.botonOrbita.widthAnchor.constraint(equalToConstant: 52), n.botonOrbita.heightAnchor.constraint(equalToConstant: 52),
+            n.botonOrbita.widthAnchor.constraint(equalToConstant: 44), n.botonOrbita.heightAnchor.constraint(equalToConstant: 44),
             orbita.centerXAnchor.constraint(equalTo: n.botonOrbita.centerXAnchor), orbita.centerYAnchor.constraint(equalTo: n.botonOrbita.centerYAnchor),
-            orbita.widthAnchor.constraint(equalToConstant: 50), orbita.heightAnchor.constraint(equalToConstant: 50),
-            n.luz.leadingAnchor.constraint(equalTo: n.botonOrbita.trailingAnchor, constant: 10),
+            orbita.widthAnchor.constraint(equalToConstant: 42), orbita.heightAnchor.constraint(equalToConstant: 42),
+            n.luz.leadingAnchor.constraint(equalTo: n.botonOrbita.trailingAnchor, constant: 8),
             n.luz.centerYAnchor.constraint(equalTo: n.barra.centerYAnchor),
-            n.luz.widthAnchor.constraint(equalToConstant: 44), n.luz.heightAnchor.constraint(equalToConstant: 44),
+            n.luz.widthAnchor.constraint(equalToConstant: 38), n.luz.heightAnchor.constraint(equalToConstant: 38),
             n.terminar.trailingAnchor.constraint(equalTo: n.barra.trailingAnchor),
             n.terminar.centerYAnchor.constraint(equalTo: n.barra.centerYAnchor),
-            n.terminar.heightAnchor.constraint(equalToConstant: 44)
+            n.terminar.heightAnchor.constraint(equalToConstant: 38)
         ])
         // Los avisos (lo que antes salía en la casilla de arriba): una franja ámbar debajo de la barra.
         n.aviso.translatesAutoresizingMaskIntoConstraints = false
-        n.aviso.font = .systemFont(ofSize: 15, weight: .semibold); n.aviso.textColor = Claro.tinta
+        n.aviso.font = .systemFont(ofSize: 14, weight: .semibold); n.aviso.textColor = UIColor(red: 0.06, green: 0.10, blue: 0.18, alpha: 1)
         n.aviso.backgroundColor = UIColor(red: 1.0, green: 0.95, blue: 0.82, alpha: 0.97)
         n.aviso.numberOfLines = 3; n.aviso.textAlignment = .center
-        n.aviso.layer.cornerRadius = 12; n.aviso.layer.cornerCurve = .continuous; n.aviso.clipsToBounds = true
+        n.aviso.layer.cornerRadius = 10; n.aviso.layer.cornerCurve = .continuous; n.aviso.clipsToBounds = true
         n.aviso.isHidden = true
-        n.aviso.heightAnchor.constraint(greaterThanOrEqualToConstant: 40).isActive = true
+        n.aviso.heightAnchor.constraint(greaterThanOrEqualToConstant: 34).isActive = true
     }
 
     private func armarCentroNuevo() {
@@ -7941,21 +8016,21 @@ extension ARMeasureViewController {
         view.addSubview(n.mira)
         // La ficha blanca con el número grande, pegada debajo de la mira.
         n.ficha.translatesAutoresizingMaskIntoConstraints = false
-        n.ficha.backgroundColor = .white
-        n.ficha.layer.cornerRadius = 16; n.ficha.layer.cornerCurve = .continuous
-        n.ficha.layer.shadowColor = UIColor.black.cgColor; n.ficha.layer.shadowOpacity = 0.18; n.ficha.layer.shadowRadius = 10
+        n.ficha.backgroundColor = Claro.boton
+        n.ficha.layer.cornerRadius = 12; n.ficha.layer.cornerCurve = .continuous
+        n.ficha.layer.shadowColor = UIColor.black.cgColor; n.ficha.layer.shadowOpacity = 0.14; n.ficha.layer.shadowRadius = 8
         n.ficha.layer.shadowOffset = CGSize(width: 0, height: 4)
         n.ficha.isUserInteractionEnabled = false
         let pila = UIStackView(arrangedSubviews: [n.fichaChica, n.fichaGrande])
         pila.axis = .vertical; pila.alignment = .center; pila.spacing = 0
         pila.translatesAutoresizingMaskIntoConstraints = false
         n.ficha.addSubview(pila)
-        n.fichaChica.font = .systemFont(ofSize: 13, weight: .medium); n.fichaChica.textColor = Claro.gris
+        n.fichaChica.font = .systemFont(ofSize: 12, weight: .medium); n.fichaChica.textColor = Claro.gris
         n.fichaGrande.textColor = Claro.tinta
         n.pista.translatesAutoresizingMaskIntoConstraints = false
-        n.pista.font = .systemFont(ofSize: 15, weight: .semibold); n.pista.textColor = Claro.tinta
-        n.pista.backgroundColor = UIColor.white.withAlphaComponent(0.94); n.pista.textAlignment = .center
-        n.pista.layer.cornerRadius = 12; n.pista.layer.cornerCurve = .continuous; n.pista.clipsToBounds = true
+        n.pista.font = .systemFont(ofSize: 13, weight: .semibold); n.pista.textColor = Claro.tinta
+        n.pista.backgroundColor = Claro.boton; n.pista.textAlignment = .center
+        n.pista.layer.cornerRadius = 9; n.pista.layer.cornerCurve = .continuous; n.pista.clipsToBounds = true
         // Arriba, debajo de la barra, nunca encima de la mira: el centro de la cámara queda libre para ver lo que se mide.
         n.columna.axis = .vertical; n.columna.alignment = .center; n.columna.spacing = 8
         n.columna.translatesAutoresizingMaskIntoConstraints = false
@@ -7970,12 +8045,12 @@ extension ARMeasureViewController {
             n.columna.topAnchor.constraint(equalTo: n.barra.bottomAnchor, constant: 12),
             n.columna.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             n.columna.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor, constant: -32),
-            pila.leadingAnchor.constraint(equalTo: n.ficha.leadingAnchor, constant: 18),
-            pila.trailingAnchor.constraint(equalTo: n.ficha.trailingAnchor, constant: -18),
-            pila.topAnchor.constraint(equalTo: n.ficha.topAnchor, constant: 8),
-            pila.bottomAnchor.constraint(equalTo: n.ficha.bottomAnchor, constant: -8),
-            n.pista.heightAnchor.constraint(equalToConstant: 34),
-            n.pista.widthAnchor.constraint(greaterThanOrEqualToConstant: 150)
+            pila.leadingAnchor.constraint(equalTo: n.ficha.leadingAnchor, constant: 14),
+            pila.trailingAnchor.constraint(equalTo: n.ficha.trailingAnchor, constant: -14),
+            pila.topAnchor.constraint(equalTo: n.ficha.topAnchor, constant: 6),
+            pila.bottomAnchor.constraint(equalTo: n.ficha.bottomAnchor, constant: -6),
+            n.pista.heightAnchor.constraint(equalToConstant: 28),
+            n.pista.widthAnchor.constraint(greaterThanOrEqualToConstant: 130)
         ])
     }
 
@@ -7989,8 +8064,8 @@ extension ARMeasureViewController {
         riel.translatesAutoresizingMaskIntoConstraints = false
         for (c, sel) in [(n.rielCuarto, #selector(rielCuartoTocado)), (n.rielParte, #selector(rielParteTocado)), (n.rielMaterial, #selector(rielMaterialTocado))] {
             c.addTarget(self, action: sel, for: .touchUpInside)
-            let tit = UILabel(); tit.tag = 1; tit.font = .systemFont(ofSize: 11, weight: .semibold); tit.textColor = Claro.gris
-            let val = UILabel(); val.tag = 2; val.font = .systemFont(ofSize: 16, weight: .semibold); val.textColor = Claro.tinta
+            let tit = UILabel(); tit.tag = 1; tit.font = .systemFont(ofSize: 10, weight: .semibold); tit.textColor = Claro.gris
+            let val = UILabel(); val.tag = 2; val.font = .systemFont(ofSize: 14, weight: .semibold); val.textColor = Claro.tinta
             val.adjustsFontSizeToFitWidth = true; val.minimumScaleFactor = 0.75
             let p = UIStackView(arrangedSubviews: [tit, val]); p.axis = .vertical; p.spacing = 1; p.isUserInteractionEnabled = false
             p.translatesAutoresizingMaskIntoConstraints = false
@@ -8002,22 +8077,22 @@ extension ARMeasureViewController {
         let raya = UIView(); raya.backgroundColor = Claro.linea; raya.translatesAutoresizingMaskIntoConstraints = false
         // La fila del gatillo: Deshacer · el botón blanco · el siguiente paso con su nombre. No se mueven nunca.
         n.deshacer.translatesAutoresizingMaskIntoConstraints = false
-        n.deshacer.backgroundColor = .white
-        n.deshacer.layer.cornerRadius = 16; n.deshacer.layer.cornerCurve = .continuous
-        n.deshacer.layer.borderWidth = 1; n.deshacer.layer.borderColor = Claro.linea.cgColor
+        n.deshacer.backgroundColor = Claro.loseta
+        n.deshacer.layer.cornerRadius = 12; n.deshacer.layer.cornerCurve = .continuous
+        n.deshacer.layer.borderWidth = 0.5; n.deshacer.layer.borderColor = Claro.linea.cgColor
         n.deshacer.titleLabel?.numberOfLines = 2; n.deshacer.titleLabel?.textAlignment = .center
         n.deshacer.addTarget(self, action: #selector(deshacerNuevoTocado), for: .touchUpInside)
         n.gatillo.translatesAutoresizingMaskIntoConstraints = false
         n.gatillo.backgroundColor = .white
-        n.gatillo.layer.cornerRadius = 41
-        n.gatillo.layer.borderWidth = 4; n.gatillo.layer.borderColor = Claro.azul.cgColor
-        n.gatillo.setImage(UIImage(systemName: "plus", withConfiguration: UIImage.SymbolConfiguration(pointSize: 30, weight: .medium)), for: .normal)
-        n.gatillo.tintColor = Claro.tinta
+        n.gatillo.layer.cornerRadius = 32
+        n.gatillo.layer.borderWidth = 3; n.gatillo.layer.borderColor = Claro.azul.cgColor
+        n.gatillo.setImage(UIImage(systemName: "plus", withConfiguration: UIImage.SymbolConfiguration(pointSize: 24, weight: .medium)), for: .normal)
+        n.gatillo.tintColor = UIColor(red: 0.06, green: 0.10, blue: 0.18, alpha: 1)
         n.gatillo.layer.shadowColor = UIColor.black.cgColor; n.gatillo.layer.shadowOpacity = 0.18; n.gatillo.layer.shadowRadius = 8
         n.gatillo.accessibilityLabel = "Marcar"
         n.gatillo.addTarget(self, action: #selector(gatilloNuevoTocado), for: .touchUpInside)
         n.derecho.translatesAutoresizingMaskIntoConstraints = false
-        n.derecho.layer.cornerRadius = 16; n.derecho.layer.cornerCurve = .continuous
+        n.derecho.layer.cornerRadius = 12; n.derecho.layer.cornerCurve = .continuous
         n.derecho.titleLabel?.numberOfLines = 2; n.derecho.titleLabel?.textAlignment = .center
         n.derecho.addTarget(self, action: #selector(derechoNuevoTocado), for: .touchUpInside)
         for v in [riel, raya, n.deshacer, n.gatillo, n.derecho] { n.muelle.contenido.addSubview(v) }
@@ -8026,26 +8101,26 @@ extension ARMeasureViewController {
             n.muelle.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 10),
             n.muelle.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10),
             n.muelle.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -4),
-            riel.topAnchor.constraint(equalTo: c.topAnchor, constant: 8),
-            riel.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: 6),
-            riel.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -6),
-            riel.heightAnchor.constraint(equalToConstant: 52),
-            raya.topAnchor.constraint(equalTo: riel.bottomAnchor, constant: 4),
+            riel.topAnchor.constraint(equalTo: c.topAnchor, constant: 4),
+            riel.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: 4),
+            riel.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -4),
+            riel.heightAnchor.constraint(equalToConstant: 44),
+            raya.topAnchor.constraint(equalTo: riel.bottomAnchor, constant: 2),
             raya.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: 16),
             raya.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -16),
-            raya.heightAnchor.constraint(equalToConstant: 1),
-            n.gatillo.topAnchor.constraint(equalTo: raya.bottomAnchor, constant: 12),
+            raya.heightAnchor.constraint(equalToConstant: 0.5),
+            n.gatillo.topAnchor.constraint(equalTo: raya.bottomAnchor, constant: 10),
             n.gatillo.centerXAnchor.constraint(equalTo: c.centerXAnchor),
-            n.gatillo.widthAnchor.constraint(equalToConstant: 82), n.gatillo.heightAnchor.constraint(equalToConstant: 82),
-            n.gatillo.bottomAnchor.constraint(equalTo: c.bottomAnchor, constant: -12),
+            n.gatillo.widthAnchor.constraint(equalToConstant: 64), n.gatillo.heightAnchor.constraint(equalToConstant: 64),
+            n.gatillo.bottomAnchor.constraint(equalTo: c.bottomAnchor, constant: -10),
             n.deshacer.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: 12),
             n.deshacer.trailingAnchor.constraint(equalTo: n.gatillo.leadingAnchor, constant: -12),
             n.deshacer.centerYAnchor.constraint(equalTo: n.gatillo.centerYAnchor),
-            n.deshacer.heightAnchor.constraint(equalToConstant: 60),
+            n.deshacer.heightAnchor.constraint(equalToConstant: 48),
             n.derecho.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -12),
             n.derecho.leadingAnchor.constraint(equalTo: n.gatillo.trailingAnchor, constant: 12),
             n.derecho.centerYAnchor.constraint(equalTo: n.gatillo.centerYAnchor),
-            n.derecho.heightAnchor.constraint(equalToConstant: 60)
+            n.derecho.heightAnchor.constraint(equalToConstant: 48)
         ])
         // Una raya entre los pedazos del riel.
         for (a, b) in [(n.rielCuarto, n.rielParte), (n.rielParte, n.rielMaterial)] {
@@ -8065,7 +8140,7 @@ extension ARMeasureViewController {
         n.panelScroll.alwaysBounceVertical = false
         n.panelScroll.showsVerticalScrollIndicator = true
         n.panel.contenido.addSubview(n.panelScroll)
-        n.panelPila.axis = .vertical; n.panelPila.spacing = 10
+        n.panelPila.axis = .vertical; n.panelPila.spacing = 8
         n.panelPila.translatesAutoresizingMaskIntoConstraints = false
         n.panelScroll.addSubview(n.panelPila)
         let alto = n.panel.heightAnchor.constraint(equalToConstant: 300)
@@ -8079,10 +8154,10 @@ extension ARMeasureViewController {
             n.panelScroll.trailingAnchor.constraint(equalTo: n.panel.contenido.trailingAnchor),
             n.panelScroll.topAnchor.constraint(equalTo: n.panel.contenido.topAnchor),
             n.panelScroll.bottomAnchor.constraint(equalTo: n.panel.contenido.bottomAnchor),
-            n.panelPila.leadingAnchor.constraint(equalTo: n.panelScroll.frameLayoutGuide.leadingAnchor, constant: 16),
-            n.panelPila.trailingAnchor.constraint(equalTo: n.panelScroll.frameLayoutGuide.trailingAnchor, constant: -16),
-            n.panelPila.topAnchor.constraint(equalTo: n.panelScroll.contentLayoutGuide.topAnchor, constant: 18),
-            n.panelPila.bottomAnchor.constraint(equalTo: n.panelScroll.contentLayoutGuide.bottomAnchor, constant: -16)
+            n.panelPila.leadingAnchor.constraint(equalTo: n.panelScroll.frameLayoutGuide.leadingAnchor, constant: 14),
+            n.panelPila.trailingAnchor.constraint(equalTo: n.panelScroll.frameLayoutGuide.trailingAnchor, constant: -14),
+            n.panelPila.topAnchor.constraint(equalTo: n.panelScroll.contentLayoutGuide.topAnchor, constant: 14),
+            n.panelPila.bottomAnchor.constraint(equalTo: n.panelScroll.contentLayoutGuide.bottomAnchor, constant: -12)
         ])
         n.panel.isHidden = true
     }
@@ -8106,20 +8181,26 @@ extension ARMeasureViewController {
         // La barra de arriba.
         if items.isEmpty {
             n.terminar.setTitle("✕  Salir", for: .normal)
-            n.terminar.contentEdgeInsets = UIEdgeInsets(top: 0, left: 14, bottom: 0, right: 14)
+            n.terminar.contentEdgeInsets = UIEdgeInsets(top: 0, left: 12, bottom: 0, right: 12)
             n.terminarCuenta.isHidden = true
         } else {
             n.terminar.setTitle("Terminar", for: .normal)
             n.terminarCuenta.text = " \(items.count) "
             n.terminarCuenta.isHidden = false
-            n.terminar.contentEdgeInsets = UIEdgeInsets(top: 0, left: 14, bottom: 0, right: items.count > 9 ? 52 : 44)
+            n.terminar.contentEdgeInsets = UIEdgeInsets(top: 0, left: 12, bottom: 0, right: items.count > 9 ? 44 : 38)
         }
         n.terminar.setTitleColor(Claro.tinta, for: .normal)
         n.terminar.accessibilityLabel = items.isEmpty ? "Salir" : "Terminar, \(items.count) " + (items.count == 1 ? "medida" : "medidas")
         n.luz.setImage(UIImage(systemName: isTorchOn ? "flashlight.on.fill" : "flashlight.off.fill"), for: .normal)
-        n.luz.backgroundColor = isTorchOn ? Claro.azulSuave : UIColor.white.withAlphaComponent(0.92)
+        n.luz.backgroundColor = isTorchOn ? Claro.azulSuave : Claro.boton
         // Un aviso que se tiene que ver (lo que antes iba en la casilla de arriba).
         if let a = avisoEnPantalla { mostrarAvisoNuevo(a, segundos: 6) }
+        // ¿Se acaba de guardar una medida? Entonces lo que sigue es escoger qué sigue (ver armarPanelSigue).
+        if n.itemsVistos >= 0, items.count > n.itemsVistos {
+            n.acabaDeGuardar = true
+            if let u = items.last { n.sigueDonde = "\(u.nivel)|\(u.cuarto)|\(u.seccion)" }
+        }
+        if stage != .pickingMaterial || medidaEnCurso { n.acabaDeGuardar = false }
         n.aviso.isHidden = Date() > n.avisoHasta
         // Panel o muelle: nunca los dos.
         let panel = panelQueToca()
@@ -8147,7 +8228,10 @@ extension ARMeasureViewController {
             if roomName.isEmpty || pasoAbierto == .queCuarto { return .cuarto }
             if !nueva.seccionConfirmada || pasoAbierto == .queSeccion { return .parte }
         }
-        if stage == .pickingMaterial && !materials.isEmpty && !medidaEnCurso { return .material }
+        if stage == .pickingMaterial && !materials.isEmpty && !medidaEnCurso {
+            if nueva.acabaDeGuardar && nueva.sigueDonde == "\(nivelActual)|\(roomName)|\(section)" { return .sigue }
+            return .material
+        }
         return nil
     }
 
@@ -8174,8 +8258,8 @@ extension ARMeasureViewController {
             switch stage {
             case .measuringLength: leyenda = pathPoints.isEmpty ? (items.isEmpty ? "" : "la guardada") : "esquina \(pathPoints.count)"
             case .lengthDone: leyenda = "el largo"
-            case .measuringWidth: leyenda = section == "wall" ? "punto del alto" : "punto del ancho"
-            case .widthDone: leyenda = section == "wall" ? "el alto" : "el ancho"
+            case .measuringWidth: leyenda = "punto del " + segundaPalabra
+            case .widthDone: leyenda = "el " + segundaPalabra
             case .pickingMaterial: leyenda = items.isEmpty ? "" : "la guardada"
             }
         }
@@ -8189,13 +8273,19 @@ extension ARMeasureViewController {
         n.gatillo.accessibilityLabel = esPorPieza ? "Sumar uno" : "Marcar esquina"
         // El siguiente paso, con su nombre escrito.
         let cuadrado = selectedMaterial.map { unidad(for: $0.value) == .cuadrado } ?? false
-        let nombreAlto = section == "wall" ? "Alto" : "Ancho"
+        let nombreAlto = segundaEsAlto ? "Alto" : "Ancho"
         let subAlto = section == "wall" ? "medir el corte" : "medir"
         var titulo = "Listo", sub = "", vivo = false, accion: (() -> Void)? = nil
         if puede.medirAncho && stage == .lengthDone && cuadrado && currentWidthFeet == nil {
             titulo = nombreAlto; sub = subAlto; vivo = true; accion = { [weak self] in self?.addWidthTapped() }
         } else if puede.guardar {
-            titulo = "✓ Guardar"; vivo = true; accion = { [weak self] in self?.saveContinueTapped() }
+            titulo = "✓ Guardar"; vivo = true
+            if currentCompanion != nil && medidaCompletaNueva() {
+                // Lleva compañero (insulación, underlayment, pad): se guarda contestando la tarjeta, nunca sin preguntar.
+                accion = { [weak self] in self?.nueva.tarjetaOculta = false; self?.pintarCamaraNueva() }
+            } else {
+                accion = { [weak self] in self?.saveContinueTapped() }
+            }
         } else if puede.terminarRecorrido {
             titulo = "Listo"; sub = "el largo"; vivo = true; accion = { [weak self] in self?.finishPathTapped() }
         } else if puede.medirAncho {
@@ -8203,7 +8293,7 @@ extension ARMeasureViewController {
         }
         n.accionDerecha = accion
         n.derecho.isEnabled = vivo
-        n.derecho.backgroundColor = vivo ? Claro.azul : UIColor.white.withAlphaComponent(0.85)
+        n.derecho.backgroundColor = vivo ? Claro.azul : Claro.loseta
         n.derecho.setAttributedTitle(Self.dosRenglones(titulo, sub, color: vivo ? .white : Claro.apagado, fuerte: true), for: .normal)
     }
 
@@ -8212,25 +8302,25 @@ extension ARMeasureViewController {
         n.tarjeta.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(n.tarjeta)
         let c = n.tarjeta.contenido
-        n.tarjetaDonde.font = .systemFont(ofSize: 14, weight: .medium); n.tarjetaDonde.textColor = Claro.gris
+        n.tarjetaDonde.font = .systemFont(ofSize: 13, weight: .medium); n.tarjetaDonde.textColor = Claro.gris
         n.tarjetaNumero.textColor = Claro.tinta; n.tarjetaNumero.adjustsFontSizeToFitWidth = true; n.tarjetaNumero.minimumScaleFactor = 0.6
-        n.tarjetaPregunta.font = .systemFont(ofSize: 20, weight: .bold); n.tarjetaPregunta.textColor = Claro.tinta; n.tarjetaPregunta.numberOfLines = 2
-        n.tarjetaAyuda.font = .systemFont(ofSize: 14); n.tarjetaAyuda.textColor = Claro.gris; n.tarjetaAyuda.numberOfLines = 2
+        n.tarjetaPregunta.font = .systemFont(ofSize: 17, weight: .bold); n.tarjetaPregunta.textColor = Claro.tinta; n.tarjetaPregunta.numberOfLines = 2
+        n.tarjetaAyuda.font = .systemFont(ofSize: 13); n.tarjetaAyuda.textColor = Claro.gris; n.tarjetaAyuda.numberOfLines = 2
         let raya = UIView(); raya.backgroundColor = Claro.linea
         raya.heightAnchor.constraint(equalToConstant: 1).isActive = true
         for b in [n.tarjetaSi, n.tarjetaNo] {
-            b.backgroundColor = .white
-            b.layer.cornerRadius = 16; b.layer.cornerCurve = .continuous
-            b.layer.borderWidth = 1; b.layer.borderColor = Claro.linea.cgColor
+            b.backgroundColor = Claro.loseta
+            b.layer.cornerRadius = 12; b.layer.cornerCurve = .continuous
+            b.layer.borderWidth = 0.5; b.layer.borderColor = Claro.linea.cgColor
             b.titleLabel?.numberOfLines = 3; b.titleLabel?.textAlignment = .center
-            b.heightAnchor.constraint(greaterThanOrEqualToConstant: 76).isActive = true
+            b.heightAnchor.constraint(greaterThanOrEqualToConstant: 58).isActive = true
         }
         n.tarjetaSi.addTarget(self, action: #selector(tarjetaSiTocada), for: .touchUpInside)
         n.tarjetaNo.addTarget(self, action: #selector(tarjetaNoTocada), for: .touchUpInside)
         let botones = UIStackView(arrangedSubviews: [n.tarjetaSi, n.tarjetaNo])
         botones.axis = .horizontal; botones.spacing = 10; botones.distribution = .fillEqually
         n.tarjetaCorregir.setTitle("‹ Corregir la medida", for: .normal)
-        n.tarjetaCorregir.titleLabel?.font = .systemFont(ofSize: 16, weight: .medium)
+        n.tarjetaCorregir.titleLabel?.font = .systemFont(ofSize: 14, weight: .medium)
         n.tarjetaCorregir.setTitleColor(Claro.azul, for: .normal)
         n.tarjetaCorregir.contentHorizontalAlignment = .leading
         n.tarjetaCorregir.addTarget(self, action: #selector(tarjetaCorregirTocada), for: .touchUpInside)
@@ -8243,12 +8333,50 @@ extension ARMeasureViewController {
             n.tarjeta.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 10),
             n.tarjeta.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10),
             n.tarjeta.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -4),
-            pila.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: 18),
-            pila.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -18),
-            pila.topAnchor.constraint(equalTo: c.topAnchor, constant: 18),
-            pila.bottomAnchor.constraint(equalTo: c.bottomAnchor, constant: -10)
+            pila.leadingAnchor.constraint(equalTo: c.leadingAnchor, constant: 14),
+            pila.trailingAnchor.constraint(equalTo: c.trailingAnchor, constant: -14),
+            pila.topAnchor.constraint(equalTo: c.topAnchor, constant: 14),
+            pila.bottomAnchor.constraint(equalTo: c.bottomAnchor, constant: -6)
         ])
         n.tarjeta.isHidden = true
+    }
+
+    // ¿QUÉ DICE EL PLANO DE ESTA PARED? (su pedido del 15 oct: "si detecta que estamos en paredes interiores, ya sabe
+    // que no llevan insulación"). El GPS del teléfono no alcanza para saber junto a qué pared está (adentro de una casa
+    // se equivoca por metros), así que se compara lo que ACABA DE MEDIR con las paredes de ese cuarto en el plano:
+    //   - el cuarto no tiene ninguna pared de afuera -> de adentro;
+    //   - cada tramo medido mide lo mismo que paredes de UN solo tipo -> ese tipo;
+    //   - hay de afuera y de adentro con ese largo, o no se parece a ninguna -> no se adivina.
+    // Solo SUGIERE: el botón sugerido se resalta, pero guardar sigue siendo su toque (la insulación es una línea de la
+    // factura y nunca se marca sola, su regla).
+    fileprivate func sugerenciaDelPlano() -> (afuera: Bool, porque: String)? {
+        guard section == "wall", currentCompanion?.value == "Insulation" else { return nil }
+        let clave = roomName.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !clave.isEmpty, let paredes = paredesPorCuarto.first(where: { $0.key.trimmingCharacters(in: .whitespaces).lowercased() == clave })?.value,
+              !paredes.isEmpty else { return nil }
+        if !paredes.contains(where: { $0.exterior }) {
+            return (false, "En el plano, \(roomName) no tiene paredes de afuera.")
+        }
+        var tramos: [Double] = []
+        if pathPoints.count >= 2 {
+            for i in 1..<pathPoints.count { tramos.append(Double(simd_distance(pathPoints[i - 1], pathPoints[i])) * 3.28084) }
+        }
+        tramos = tramos.filter { $0 >= 2 }
+        if tramos.isEmpty && pathTotalFeet >= 2 { tramos = [pathTotalFeet] }
+        guard !tramos.isEmpty else { return nil }
+        var tipo: Bool? = nil
+        for t in tramos {
+            let tolerancia = max(0.75, t * 0.06)
+            let parecidas = paredes.filter { abs($0.largo - t) <= tolerancia }
+            guard !parecidas.isEmpty else { return nil }                     // no se parece a ninguna pared del plano
+            let tipos = Set(parecidas.map { $0.exterior })
+            guard tipos.count == 1, let este = tipos.first else { return nil } // de ese largo hay de afuera y de adentro
+            if let t0 = tipo, t0 != este { return nil }                       // un tramo de afuera y otro de adentro
+            tipo = este
+        }
+        guard let afuera = tipo else { return nil }
+        let largo = Self.pies(tramos.reduce(0, +))
+        return (afuera, "Mide \(largo) pies, igual que una pared de " + (afuera ? "afuera" : "adentro") + " de \(roomName) en el plano.")
     }
 
     // ¿La medida ya está completa para guardarse? (con el alto/ancho si va por pie cuadrado)
@@ -8267,21 +8395,23 @@ extension ARMeasureViewController {
             n.medidaFirma = firma
             n.contestoAntes = nil; n.tarjetaPreguntando = false; n.tarjetaOculta = false
         }
-        // ¿Contestó la pregunta del compañero por voz? (la pregunta se cierra al contestarla)
-        let ahoraCompanero = pasoAbierto == .llevaCompanero
         let completa = medidaCompletaNueva()
+        // "Corregir la medida": en cuanto la medida deja de estar completa (deshizo un punto para volver a marcarlo), la
+        // tarjeta vuelve a estar lista para preguntar al completarla otra vez. Antes se quedaba escondida y Guardar
+        // guardaba sin preguntar por la insulación (su reporte del 15 oct).
+        if !completa { n.tarjetaOculta = false }
         let quiere = completa && currentCompanion != nil && !n.tarjetaOculta && panelQueToca() == nil
-        if n.pasoAntesEraCompanero && !ahoraCompanero {
+        // ¿Contestó DE VERDAD (sí o no, por voz)? Solo entonces se toma su respuesta.
+        if n.respuestasVistas != respuestasCompanero {
+            n.respuestasVistas = respuestasCompanero
             if n.tarjetaVisible && n.tarjetaPreguntando && quiere {
                 // Contestó Sí o No con la tarjeta abierta: eso es guardar (la respuesta ya quedó en includeCompanion).
-                n.pasoAntesEraCompanero = false
                 n.tarjetaPreguntando = false
                 DispatchQueue.main.async { [weak self] in self?.guardarDesdeTarjeta() }
                 return
             }
-            if !n.tarjetaVisible { n.contestoAntes = includeCompanion }
+            n.contestoAntes = includeCompanion
         }
-        n.pasoAntesEraCompanero = ahoraCompanero
         let abre = quiere && !n.tarjetaVisible
         n.tarjetaVisible = quiere
         n.tarjeta.isHidden = !quiere
@@ -8291,7 +8421,7 @@ extension ARMeasureViewController {
         n.tarjetaDonde.text = donde.joined(separator: " · ")
         let numero = NSMutableAttributedString()
         func pon(_ t: String, _ grande: Bool) {
-            numero.append(NSAttributedString(string: t, attributes: [.font: grande ? UIFont.monospacedDigitSystemFont(ofSize: 34, weight: .bold) : UIFont.systemFont(ofSize: 22, weight: .semibold), .foregroundColor: Claro.tinta]))
+            numero.append(NSAttributedString(string: t, attributes: [.font: grande ? UIFont.monospacedDigitSystemFont(ofSize: 28, weight: .semibold) : UIFont.systemFont(ofSize: 18, weight: .medium), .foregroundColor: Claro.tinta]))
         }
         var cantidadDicha = ""
         if let w = currentWidthFeet {
@@ -8316,28 +8446,35 @@ extension ARMeasureViewController {
             n.tarjetaPregunta.text = "¿Lleva \(nombreComp)?"
             n.tarjetaAyuda.text = "Se guarda con la misma medida."
         }
+        let sugerencia = sugerenciaDelPlano()
+        if let sg = sugerencia {
+            n.tarjetaAyuda.text = "Según el plano: pared de " + (sg.afuera ? "afuera" : "adentro") + ". " + sg.porque
+        }
         n.tarjetaAyuda.isHidden = n.tarjetaAyuda.text == nil
         let subSi = esPared && comp.value == "Insulation" ? "pared de afuera" : "se guardan las dos"
         let subNo = esPared && comp.value == "Insulation" ? "pared de adentro" : "solo \(Self.nombreDeBoton(m).lowercased())"
         // Nada viene marcado. Solo si YA lo contestó por voz, sale marcada su respuesta (tocar cualquiera guarda).
-        func pintarBoton(_ b: UIButton, _ titulo: String, _ sub: String, marcado: Bool) {
-            b.setAttributedTitle(Self.dosRenglones(titulo, sub, color: Claro.tinta), for: .normal)
-            b.layer.borderWidth = marcado ? 2 : 1
-            b.layer.borderColor = (marcado ? Claro.azul : Claro.linea).cgColor
-            b.backgroundColor = marcado ? Claro.azulSuave : .white
+        // Lo SUGERIDO por el plano lleva solo la orilla azul y la palabra "sugerido"; lo CONTESTADO va relleno.
+        func pintarBoton(_ b: UIButton, _ titulo: String, _ sub: String, marcado: Bool, sugerido: Bool) {
+            b.setAttributedTitle(Self.dosRenglones(titulo, sugerido && !marcado ? sub + " · sugerido" : sub, color: Claro.tinta), for: .normal)
+            b.layer.borderWidth = marcado ? 1.5 : (sugerido ? 1.5 : 0.5)
+            b.layer.borderColor = (marcado || sugerido ? Claro.azul : Claro.linea).cgColor
+            b.backgroundColor = marcado ? Claro.azulSuave : Claro.loseta
         }
-        pintarBoton(n.tarjetaSi, "Sí · con \(nombreComp)", subSi, marcado: n.contestoAntes == true)
-        pintarBoton(n.tarjetaNo, "No · sin \(nombreComp)", subNo, marcado: n.contestoAntes == false)
+        let sugiereSi = n.contestoAntes == nil && sugerencia?.afuera == true
+        let sugiereNo = n.contestoAntes == nil && sugerencia?.afuera == false
+        pintarBoton(n.tarjetaSi, "Sí · con \(nombreComp)", subSi, marcado: n.contestoAntes == true, sugerido: sugiereSi)
+        pintarBoton(n.tarjetaNo, "No · sin \(nombreComp)", subNo, marcado: n.contestoAntes == false, sugerido: sugiereNo)
         n.tarjetaSi.accessibilityLabel = "Sí, con \(nombreComp). Guarda la medida."
         n.tarjetaNo.accessibilityLabel = "No, sin \(nombreComp). Guarda la medida."
         // Al abrirse, la pregunta se dice (si no la contestó ya). Contestar por voz también guarda.
         if abre && n.contestoAntes == nil {
-            let frase = "\(Self.nombreDeBoton(m)), \(cantidadDicha). " + (n.tarjetaPregunta.text ?? "")
+            var frase = "\(Self.nombreDeBoton(m)), \(cantidadDicha). " + (n.tarjetaPregunta.text ?? "")
+            if let sg = sugerencia { frase += sg.afuera ? " El plano dice que es de afuera." : " El plano dice que es de adentro." }
             if pasoAbierto == .llevaCompanero || pasoPorArmar == .llevaCompanero {
                 say(frase, .aviso)          // la pregunta ya estaba abierta: solo se repite
             } else {
                 preguntar(.llevaCompanero, frase)
-                n.pasoAntesEraCompanero = false
             }
             n.tarjetaPreguntando = true
         }
@@ -8375,10 +8512,10 @@ extension ARMeasureViewController {
     }
     private static func dosRenglones(_ a: String, _ b: String, color: UIColor, fuerte: Bool = false) -> NSAttributedString {
         let p = NSMutableParagraphStyle(); p.alignment = .center
-        let s = NSMutableAttributedString(string: a, attributes: [.font: UIFont.systemFont(ofSize: fuerte ? 18 : 17, weight: .semibold),
+        let s = NSMutableAttributedString(string: a, attributes: [.font: UIFont.systemFont(ofSize: fuerte ? 16 : 15, weight: .semibold),
                                                                    .foregroundColor: color, .paragraphStyle: p])
         if !b.isEmpty {
-            s.append(NSAttributedString(string: "\n" + b, attributes: [.font: UIFont.systemFont(ofSize: 12, weight: .regular),
+            s.append(NSAttributedString(string: "\n" + b, attributes: [.font: UIFont.systemFont(ofSize: 11, weight: .regular),
                                                                        .foregroundColor: color.withAlphaComponent(0.8), .paragraphStyle: p]))
         }
         return s
@@ -8392,9 +8529,9 @@ extension ARMeasureViewController {
         n.mira.isHidden = hayPanel || !midiendo
         func grande(_ numero: String, _ unidad: String, antes: String = "") -> NSAttributedString {
             let s = NSMutableAttributedString()
-            if !antes.isEmpty { s.append(NSAttributedString(string: antes + " ", attributes: [.font: UIFont.systemFont(ofSize: 20, weight: .medium), .foregroundColor: Claro.tinta])) }
-            s.append(NSAttributedString(string: numero, attributes: [.font: UIFont.monospacedDigitSystemFont(ofSize: 34, weight: .bold), .foregroundColor: Claro.tinta]))
-            s.append(NSAttributedString(string: " " + unidad, attributes: [.font: UIFont.systemFont(ofSize: 20, weight: .medium), .foregroundColor: Claro.tinta]))
+            if !antes.isEmpty { s.append(NSAttributedString(string: antes + " ", attributes: [.font: UIFont.systemFont(ofSize: 16, weight: .medium), .foregroundColor: Claro.tinta])) }
+            s.append(NSAttributedString(string: numero, attributes: [.font: UIFont.monospacedDigitSystemFont(ofSize: 28, weight: .semibold), .foregroundColor: Claro.tinta]))
+            s.append(NSAttributedString(string: " " + unidad, attributes: [.font: UIFont.systemFont(ofSize: 16, weight: .medium), .foregroundColor: Claro.tinta]))
             return s
         }
         let f1 = { (x: Double) in Self.pies(x) }
@@ -8419,14 +8556,15 @@ extension ARMeasureViewController {
             case .lengthDone:
                 gran = grande(f1(pathTotalFeet), "pies"); chica = "Largo"
                 let cuadrado = selectedMaterial.map { unidad(for: $0.value) == .cuadrado } ?? false
-                pista = cuadrado && currentWidthFeet == nil ? (section == "wall" ? "Toque Alto" : "Toque Ancho") : "Toque Guardar"
+                pista = cuadrado && currentWidthFeet == nil ? (segundaEsAlto ? "Toque Alto" : "Toque Ancho") : "Toque Guardar"
             case .measuringWidth:
-                let que = section == "wall" ? "Alto" : "Ancho"
+                let que = segundaEsAlto ? "Alto" : "Ancho"
                 let llevado = (currentWidthFeet ?? 0)
                 let ahora = llevado + (widthPoints.isEmpty ? 0 : (vivo ?? 0))
                 chica = "Largo \(f1(pathTotalFeet))"
                 if !widthPoints.isEmpty || currentWidthFeet != nil { gran = grande(f1(ahora), "pies", antes: que) }
-                pista = section == "wall" ? (widthPoints.isEmpty ? "Abajo del corte" : "Arriba del corte") : (widthPoints.isEmpty ? "Una orilla" : "La otra orilla")
+                pista = section == "wall" ? (widthPoints.isEmpty ? "Abajo del corte" : "Arriba del corte")
+                    : segundaEsAlto ? (widthPoints.isEmpty ? "Abajo" : "Arriba") : (widthPoints.isEmpty ? "Una orilla" : "La otra orilla")
             case .widthDone:
                 let w = currentWidthFeet ?? 0
                 gran = grande(f1(pathTotalFeet * w), "pies²", antes: "\(f1(pathTotalFeet)) × \(f1(w)) =")
@@ -8489,7 +8627,7 @@ extension ARMeasureViewController {
 
     fileprivate func mostrarAvisoNuevo(_ texto: String, segundos: Double = 4.5, ok: Bool = false) {
         guard experienciaNueva, nueva.armada else { return }
-        nueva.aviso.backgroundColor = ok ? Claro.azulSuave.withAlphaComponent(0.97) : UIColor(red: 1.0, green: 0.95, blue: 0.82, alpha: 0.97)
+        nueva.aviso.backgroundColor = ok ? UIColor(red: 0.93, green: 0.95, blue: 1.0, alpha: 0.98) : UIColor(red: 1.0, green: 0.95, blue: 0.82, alpha: 0.98)
         nueva.aviso.text = "  " + texto.replacingOccurrences(of: "⚠︎ ", with: "") + "  "
         nueva.avisoHasta = Date().addingTimeInterval(segundos)
         nueva.aviso.isHidden = false
@@ -8498,7 +8636,7 @@ extension ARMeasureViewController {
     // ---------------- LOS PANELES ----------------
     private func pintarPanelNuevo(_ p: PanelCamara) {
         let n = nueva
-        let firma = "\(p)|\(VozAsistente.preferida()?.identifier ?? "")|\(asistenteHabla)|\(nivelActual)|\(roomName)|\(section)|\(selectedMaterial?.value ?? "")|\(items.count)|\(materials.count)|\(n.seccionConfirmada)|\(n.panelForzado != nil)"
+        let firma = "\(p)|\(VozAsistente.preferida()?.identifier ?? "")|\(asistenteHabla)|\(nivelActual)|\(roomName)|\(section)|\(selectedMaterial?.value ?? "")|\(items.count)|\(materials.count)|\(n.seccionConfirmada)|\(n.panelForzado != nil)|\(n.acabaDeGuardar)"
         guard firma != n.firmaPanel else { return }
         n.firmaPanel = firma
         n.panelPila.arrangedSubviews.forEach { $0.removeFromSuperview() }
@@ -8508,12 +8646,13 @@ extension ARMeasureViewController {
         case .parte: armarPanelParte()
         case .material: armarPanelMaterial()
         case .voz: armarPanelVoz()
+        case .sigue: armarPanelSigue()
         }
         // Cabe en la pantalla pero nunca pasa del 60%: arriba se sigue viendo la cámara, sin velo.
         n.panelPila.layoutIfNeeded()
-        let alto = n.panelPila.systemLayoutSizeFitting(CGSize(width: view.bounds.width - 52, height: UIView.layoutFittingCompressedSize.height),
-                                                        withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel).height + 34
-        n.panelAlto?.constant = min(alto, view.bounds.height * 0.6)
+        let alto = n.panelPila.systemLayoutSizeFitting(CGSize(width: view.bounds.width - 48, height: UIView.layoutFittingCompressedSize.height),
+                                                        withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel).height + 26
+        n.panelAlto?.constant = min(alto, view.bounds.height * (p == .sigue ? 0.7 : 0.6))
         n.panelScroll.setContentOffset(.zero, animated: false)
     }
 
@@ -8524,7 +8663,7 @@ extension ARMeasureViewController {
             for (i, (texto, acc)) in migas.enumerated() {
                 let b = UIButton(type: .system)
                 b.setTitle(texto, for: .normal)
-                b.titleLabel?.font = .systemFont(ofSize: 14, weight: i == migas.count - 1 ? .semibold : .regular)
+                b.titleLabel?.font = .systemFont(ofSize: 13, weight: i == migas.count - 1 ? .semibold : .regular)
                 b.setTitleColor(i == migas.count - 1 ? Claro.tinta : Claro.gris, for: .normal)
                 if let acc = acc { b.addAction(UIAction { _ in acc() }, for: .touchUpInside) } else { b.isUserInteractionEnabled = false }
                 fila.addArrangedSubview(b)
@@ -8534,13 +8673,13 @@ extension ARMeasureViewController {
             v.addArrangedSubview(fila)
         }
         let fila = UIStackView(); fila.axis = .horizontal; fila.alignment = .center; fila.spacing = 8
-        let t = UILabel(); t.text = titulo; t.font = .systemFont(ofSize: 22, weight: .bold); t.textColor = Claro.tinta
+        let t = UILabel(); t.text = titulo; t.font = .systemFont(ofSize: 18, weight: .bold); t.textColor = Claro.tinta
         t.adjustsFontSizeToFitWidth = true; t.minimumScaleFactor = 0.8
         fila.addArrangedSubview(t)
         fila.addArrangedSubview(UIView())
         if let d = derecha {
             let b = UIButton(type: .system)
-            b.setTitle(d, for: .normal); b.titleLabel?.font = .systemFont(ofSize: 15, weight: .medium)
+            b.setTitle(d, for: .normal); b.titleLabel?.font = .systemFont(ofSize: 13, weight: .medium)
             b.setTitleColor(accionDerecha == nil ? Claro.gris : Claro.azul, for: .normal)
             if let acc = accionDerecha { b.addAction(UIAction { _ in acc() }, for: .touchUpInside) } else { b.isUserInteractionEnabled = false }
             fila.addArrangedSubview(b)
@@ -8548,10 +8687,10 @@ extension ARMeasureViewController {
         // Un panel abierto a mano (desde el riel) se puede cerrar sin escoger nada.
         if nueva.panelForzado != nil {
             let x = UIButton(type: .system)
-            x.setImage(UIImage(systemName: "xmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)), for: .normal)
-            x.tintColor = Claro.gris; x.backgroundColor = Claro.linea; x.layer.cornerRadius = 15
+            x.setImage(UIImage(systemName: "xmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .semibold)), for: .normal)
+            x.tintColor = Claro.gris; x.backgroundColor = Claro.linea; x.layer.cornerRadius = 13
             x.accessibilityLabel = "Cerrar"
-            x.widthAnchor.constraint(equalToConstant: 30).isActive = true; x.heightAnchor.constraint(equalToConstant: 30).isActive = true
+            x.widthAnchor.constraint(equalToConstant: 26).isActive = true; x.heightAnchor.constraint(equalToConstant: 26).isActive = true
             x.addAction(UIAction { [weak self] _ in self?.cerrarPanelForzado() }, for: .touchUpInside)
             fila.addArrangedSubview(x)
         }
@@ -8560,10 +8699,10 @@ extension ARMeasureViewController {
     }
 
     private func rejilla(_ losetas: [LosetaCamara], columnas: Int) -> UIView {
-        let v = UIStackView(); v.axis = .vertical; v.spacing = 8
+        let v = UIStackView(); v.axis = .vertical; v.spacing = 6
         var i = 0
         while i < losetas.count {
-            let fila = UIStackView(); fila.axis = .horizontal; fila.spacing = 8; fila.distribution = .fillEqually; fila.alignment = .fill
+            let fila = UIStackView(); fila.axis = .horizontal; fila.spacing = 6; fila.distribution = .fillEqually; fila.alignment = .fill
             for k in 0..<columnas {
                 if i + k < losetas.count { fila.addArrangedSubview(losetas[i + k]) }
                 else { fila.addArrangedSubview(UIView()) }   // la fila de abajo no se estira: cuadrícula pareja
@@ -8575,7 +8714,7 @@ extension ARMeasureViewController {
     }
 
     private func renglonPanel(icono: String, _ texto: String, sub: String? = nil, accion: @escaping () -> Void) -> UIView {
-        let l = LosetaCamara(icono: nil, titulo: texto, sub: sub, extra: nil, etiqueta: nil, centrada: false, alto: 50)
+        let l = LosetaCamara(icono: nil, titulo: texto, sub: sub, extra: nil, etiqueta: nil, centrada: false, alto: 42)
         if let img = UIImage(systemName: icono) {
             let iv = UIImageView(image: img); iv.tintColor = Claro.gris; iv.translatesAutoresizingMaskIntoConstraints = false
             iv.isUserInteractionEnabled = false
@@ -8587,7 +8726,7 @@ extension ARMeasureViewController {
     }
 
     private func titulito(_ t: String) -> UILabel {
-        let l = UILabel(); l.text = t; l.font = .systemFont(ofSize: 12, weight: .semibold); l.textColor = Claro.gris
+        let l = UILabel(); l.text = t; l.font = .systemFont(ofSize: 11, weight: .semibold); l.textColor = Claro.gris
         return l
     }
 
@@ -8601,7 +8740,7 @@ extension ARMeasureViewController {
         p.addArrangedSubview(encabezadoPanel("¿En qué nivel?"))
         let losetas = nivelesDisponibles.map { nivel -> LosetaCamara in
             let n = items.filter { $0.nivel == nivel }.count
-            let l = LosetaCamara(icono: "square.3.layers.3d", titulo: nivel, sub: nil, extra: n > 0 ? "✓ " + Self.medidasTexto(n) : nil, etiqueta: nil, centrada: false, alto: 64)
+            let l = LosetaCamara(icono: "square.3.layers.3d", titulo: nivel, sub: nil, extra: n > 0 ? "✓ " + Self.medidasTexto(n) : nil, etiqueta: nil, centrada: false, alto: 50)
             l.marcada = nivel == nivelActual
             l.accion = { [weak self] in self?.elegirNivelNuevo(nivel) }
             return l
@@ -8630,7 +8769,7 @@ extension ARMeasureViewController {
         let losetas = opciones.map { o -> LosetaCamara in
             let n = items.filter { $0.cuarto == o.valor && (nivelActual.isEmpty || $0.nivel == nivelActual) }.count
             let l = LosetaCamara(icono: nil, titulo: o.etiqueta, sub: nil, extra: n > 0 ? "✓ " + Self.medidasTexto(n) : nil,
-                                 etiqueta: o.valor == sigue && roomName.isEmpty ? "SIGUE" : nil, centrada: false, alto: 58)
+                                 etiqueta: o.valor == sigue && roomName.isEmpty ? "SIGUE" : nil, centrada: false, alto: 44)
             l.marcada = o.valor == roomName
             l.accion = { [weak self] in self?.elegirCuartoNuevo(o.valor) }
             return l
@@ -8673,7 +8812,7 @@ extension ARMeasureViewController {
             let lista = medidasDe(cuarto: roomName, nivel: nivelActual, seccion: s)
             let resumen = lista.isEmpty ? nil : "✓ " + totalesTexto(lista, cuadrado: "pies²", union: " · ").joined(separator: " · ")
             let l = LosetaCamara(icono: Self.iconoDeParte(s), titulo: Self.sectionSpokenName(s).capitalized, sub: Self.parteEnIngles(s),
-                                 extra: resumen, etiqueta: s == sigue && lista.isEmpty ? "SIGUE" : nil, centrada: true, alto: 104)
+                                 extra: resumen, etiqueta: s == sigue && lista.isEmpty ? "SIGUE" : nil, centrada: true, alto: 72)
             l.marcada = s == section && nueva.seccionConfirmada
             l.accion = { [weak self] in self?.elegirParteNueva(s) }
             return l
@@ -8693,7 +8832,7 @@ extension ARMeasureViewController {
         let usual = materialMasUsado()
         if let u = usual, let m = opciones.first(where: { $0.value == u }) {
             let l = LosetaCamara(icono: "star.fill", titulo: Self.nombreDeBoton(m), sub: [Self.traduccionDeBoton(m), unidadCorta(m)].filter { !$0.isEmpty }.joined(separator: " · "),
-                                 extra: nil, etiqueta: "EL DE SIEMPRE", centrada: false, alto: 64)
+                                 extra: nil, etiqueta: "EL DE SIEMPRE", centrada: false, alto: 50)
             l.marcada = m.value == selectedMaterial?.value
             l.accion = { [weak self] in self?.elegirMaterialNuevo(m.value) }
             p.addArrangedSubview(l)
@@ -8710,7 +8849,7 @@ extension ARMeasureViewController {
             guard !lista.isEmpty else { continue }
             p.addArrangedSubview(titulito(titulo))
             let losetas = lista.map { m -> LosetaCamara in
-                let l = LosetaCamara(icono: nil, titulo: Self.nombreDeBoton(m), sub: Self.traduccionDeBoton(m), extra: nil, etiqueta: nil, centrada: false, alto: 58)
+                let l = LosetaCamara(icono: nil, titulo: Self.nombreDeBoton(m), sub: Self.traduccionDeBoton(m), extra: nil, etiqueta: nil, centrada: false, alto: 44)
                 l.marcada = m.value == selectedMaterial?.value
                 l.accion = { [weak self] in self?.elegirMaterialNuevo(m.value) }
                 return l
@@ -8721,6 +8860,21 @@ extension ARMeasureViewController {
             self?.nueva.panelForzado = nil
             self?.otroMaterialTapped()
         })
+        // Las migas de arriba se tocan, pero no parecen botones (su reporte del 15 oct): los caminos van aquí, a la vista.
+        if esRecorrido {
+            var cambiar: [LosetaCamara] = []
+            if seccionesDisponibles.count > 1 {
+                let l = LosetaCamara(icono: "arrow.left.arrow.right", titulo: "Cambiar de parte", sub: nil, extra: nil, etiqueta: nil, centrada: true, alto: 44)
+                l.accion = { [weak self] in self?.abrirPanelNuevo(.parte) }
+                cambiar.append(l)
+            }
+            if !esSoloUnCuarto {
+                let l = LosetaCamara(icono: "door.left.hand.open", titulo: "Otro cuarto", sub: nil, extra: nil, etiqueta: nil, centrada: true, alto: 44)
+                l.accion = { [weak self] in self?.abrirPanelNuevo(.cuarto) }
+                cambiar.append(l)
+            }
+            if !cambiar.isEmpty { p.addArrangedSubview(rejilla(cambiar, columnas: cambiar.count)) }
+        }
     }
 
     private func unidadCorta(_ m: ARMaterialOption) -> String {
@@ -8730,6 +8884,59 @@ extension ARMeasureViewController {
         case .lineal: return "pie lineal"
         case .depende: return ""
         }
+    }
+
+    // ---------------- ¿QUÉ SIGUE? (después de guardar) ----------------
+    private func armarPanelSigue() {
+        let p = nueva.panelPila
+        let aqui = items.filter { $0.cuarto == roomName && (nivelActual.isEmpty || $0.nivel == nivelActual) }.count
+        let parte = section.isEmpty ? "" : Self.sectionSpokenName(section).capitalized
+        p.addArrangedSubview(encabezadoPanel("¿Qué sigue?", derecha: roomName.isEmpty ? nil : "\(Self.medidasTexto(aqui)) en \(roomName)"))
+        // 1. Otra igual: el mismo material, otra medida (lo más común en un trabajo de agua).
+        var arriba: [LosetaCamara] = []
+        if let u = items.last, let m = materials.first(where: { $0.value == u.material }) {
+            let nombre = Self.nombreDeBoton(m)
+            let l = LosetaCamara(icono: "arrow.clockwise", titulo: "Otra de \(nombre)", sub: "mismo material",
+                                 extra: nil, etiqueta: nil, centrada: false, alto: 50)
+            l.marcada = true
+            l.accion = { [weak self] in self?.elegirMaterialNuevo(m.value) }
+            arriba.append(l)
+        }
+        let otro = LosetaCamara(icono: "square.grid.2x2", titulo: "Otro material", sub: parte.isEmpty ? nil : "de \(parte.lowercased())", extra: nil, etiqueta: nil, centrada: false, alto: 50)
+        otro.accion = { [weak self] in self?.nueva.acabaDeGuardar = false; self?.nueva.firmaPanel = ""; self?.pintarCamaraNueva() }
+        arriba.append(otro)
+        p.addArrangedSubview(rejilla(arriba, columnas: 2))
+        // 2. Cambiar de parte en este mismo cuarto, con lo que ya lleva cada una.
+        if esRecorrido && seccionesDisponibles.count > 1 {
+            p.addArrangedSubview(titulito(roomName.isEmpty ? "CAMBIAR DE PARTE" : "CAMBIAR DE PARTE EN \(roomName.uppercased())"))
+            let partes = Self.ordenPartes.filter { seccionesDisponibles[$0] != nil }
+            let losetas = partes.map { s -> LosetaCamara in
+                let lista = medidasDe(cuarto: roomName, nivel: nivelActual, seccion: s)
+                let resumen = lista.isEmpty ? nil : "✓ " + totalesTexto(lista, cuadrado: "pies²", union: " · ").joined(separator: " · ")
+                let l = LosetaCamara(icono: nil, titulo: Self.sectionSpokenName(s).capitalized, sub: nil,
+                                     extra: resumen, etiqueta: s == section ? "AQUÍ" : nil, centrada: true, alto: 44)
+                l.accion = { [weak self] in self?.nueva.acabaDeGuardar = false; self?.elegirParteNueva(s) }
+                return l
+            }
+            p.addArrangedSubview(rejilla(losetas, columnas: 3))
+        }
+        // 3. Cambiar de lugar, o terminar.
+        var lugar: [LosetaCamara] = []
+        if esRecorrido && !esSoloUnCuarto {
+            let c = LosetaCamara(icono: "door.left.hand.open", titulo: "Otro cuarto", sub: nil, extra: nil, etiqueta: nil, centrada: true, alto: 50)
+            c.accion = { [weak self] in self?.nueva.acabaDeGuardar = false; self?.abrirPanelNuevo(.cuarto) }
+            lugar.append(c)
+            if nivelesDisponibles.count > 1 && alcance != "cuarto" {
+                let nv = LosetaCamara(icono: "square.3.layers.3d", titulo: "Otro nivel", sub: nil, extra: nil, etiqueta: nil, centrada: true, alto: 50)
+                nv.accion = { [weak self] in self?.nueva.acabaDeGuardar = false; self?.abrirPanelNuevo(.nivel) }
+                lugar.append(nv)
+            }
+        }
+        let fin = LosetaCamara(icono: "paperplane", titulo: "Terminar y mandar", sub: nil, extra: nil, etiqueta: nil, centrada: true, alto: 50)
+        fin.accion = { [weak self] in self?.terminarNuevoTocado() }
+        lugar.append(fin)
+        p.addArrangedSubview(titulito("CAMBIAR DE LUGAR O TERMINAR"))
+        p.addArrangedSubview(rejilla(lugar, columnas: min(3, lugar.count)))
     }
 
     // ---------------- LA VENTANA VOZ (su pedido del 15 oct: "una voz más femenina y más natural") ----------------
@@ -8743,7 +8950,7 @@ extension ARMeasureViewController {
         let actual = VozAsistente.preferida()
         if let v = actual {
             let l = UILabel(); l.numberOfLines = 0
-            l.font = .systemFont(ofSize: 15); l.textColor = Claro.gris
+            l.font = .systemFont(ofSize: 13); l.textColor = Claro.gris
             l.text = "Está sonando: " + VozAsistente.descripcion(v)
             p.addArrangedSubview(l)
         }
@@ -8752,10 +8959,11 @@ extension ARMeasureViewController {
             caja.backgroundColor = UIColor(red: 1.0, green: 0.95, blue: 0.82, alpha: 1)
             caja.layer.cornerRadius = 12; caja.layer.cornerCurve = .continuous
             let aviso = UILabel(); aviso.numberOfLines = 0; aviso.translatesAutoresizingMaskIntoConstraints = false
+            let tintaAviso = UIColor(red: 0.06, green: 0.10, blue: 0.18, alpha: 1)
             let t = NSMutableAttributedString(string: "Este teléfono solo tiene voces Básicas: por eso suena a robot.\n",
-                                              attributes: [.font: UIFont.systemFont(ofSize: 15, weight: .bold), .foregroundColor: Claro.tinta])
+                                              attributes: [.font: UIFont.systemFont(ofSize: 14, weight: .bold), .foregroundColor: tintaAviso])
             t.append(NSAttributedString(string: "Para una voz natural: " + VozAsistente.comoBajarUnaMejor + " Después vuelva aquí: la app la usa sola.",
-                                        attributes: [.font: UIFont.systemFont(ofSize: 14), .foregroundColor: Claro.tinta]))
+                                        attributes: [.font: UIFont.systemFont(ofSize: 13), .foregroundColor: tintaAviso]))
             aviso.attributedText = t
             caja.addSubview(aviso)
             NSLayoutConstraint.activate([aviso.leadingAnchor.constraint(equalTo: caja.leadingAnchor, constant: 12),
@@ -8770,22 +8978,22 @@ extension ARMeasureViewController {
             let calidad: String
             switch v.quality { case .premium: calidad = "Premium · la más natural"; case .enhanced: calidad = "Mejorada · natural"; default: calidad = "Básica" }
             let l = LosetaCamara(icono: nil, titulo: v.name, sub: VozAsistente.descripcion(v), extra: v.gender == .female ? calidad + " · femenina" : calidad,
-                                 etiqueta: VozAsistente.esLaEscogida(v) ? "SONANDO" : nil, centrada: false, alto: 64)
+                                 etiqueta: VozAsistente.esLaEscogida(v) ? "SONANDO" : nil, centrada: false, alto: 50)
             l.marcada = VozAsistente.esLaEscogida(v)
             l.accion = { [weak self] in self?.escogerVozNueva(v) }
             return l
         }
         p.addArrangedSubview(rejilla(losetas, columnas: 1))
         p.addArrangedSubview(titulito("VELOCIDAD"))
-        let despacio = LosetaCamara(icono: "tortoise", titulo: "Más despacio", sub: nil, extra: nil, etiqueta: nil, centrada: true, alto: 56)
+        let despacio = LosetaCamara(icono: "tortoise", titulo: "Más despacio", sub: nil, extra: nil, etiqueta: nil, centrada: true, alto: 44)
         despacio.accion = { [weak self] in VozAsistente.ajustarRitmo(-0.08); self?.oirVozNueva() }
-        let rapido = LosetaCamara(icono: "hare", titulo: "Más rápido", sub: nil, extra: nil, etiqueta: nil, centrada: true, alto: 56)
+        let rapido = LosetaCamara(icono: "hare", titulo: "Más rápido", sub: nil, extra: nil, etiqueta: nil, centrada: true, alto: 44)
         rapido.accion = { [weak self] in VozAsistente.ajustarRitmo(0.08); self?.oirVozNueva() }
         p.addArrangedSubview(rejilla([despacio, rapido], columnas: 2))
-        let donde = LosetaCamara(icono: "location", titulo: "¿Dónde voy?", sub: nil, extra: nil, etiqueta: nil, centrada: true, alto: 56)
+        let donde = LosetaCamara(icono: "location", titulo: "¿Dónde voy?", sub: nil, extra: nil, etiqueta: nil, centrada: true, alto: 44)
         donde.accion = { [weak self] in self?.cerrarPanelForzado(); self?.assistantTapped() }
         let apagar = LosetaCamara(icono: asistenteHabla ? "speaker.slash" : "speaker.wave.2", titulo: asistenteHabla ? "Apagar la voz" : "Prender la voz",
-                                  sub: nil, extra: nil, etiqueta: nil, centrada: true, alto: 56)
+                                  sub: nil, extra: nil, etiqueta: nil, centrada: true, alto: 44)
         apagar.accion = { [weak self] in self?.muteTapped(); self?.nueva.firmaPanel = ""; self?.pintarCamaraNueva() }
         p.addArrangedSubview(rejilla([donde, apagar], columnas: 2))
     }
@@ -8957,12 +9165,19 @@ extension ARMeasureViewController {
                 widthPoints = [p]; nueva.maquetaVivo = 3.5
                 stage = .measuringWidth
             }
-            if maqueta == 6 {
-                pathTotalFeet = 24.5; widthPoints = []; currentWidthFeet = 4; pendingStart = nil
+            if maqueta == 6 || maqueta == 9 {
+                pathTotalFeet = maqueta == 9 ? 12 : 24.5; widthPoints = []; currentWidthFeet = 4; pendingStart = nil
+                paredesPorCuarto = ["Living Room": [(24.5, true), (18, true), (12, false), (6.5, false)]]
                 stage = .widthDone
             }
             // La línea que se va arrastrando, con el MISMO color que usa la cámara de verdad (amarilla en el largo,
             // azul en el ancho). En el simulador no hay ARKit que la proyecte: se dibuja de una esquina a la mira.
+            if maqueta == 8 {
+                guardada("Living Room", "wall", "Drywall", 24.5, 4)
+                pathPoints = []; pendingStart = nil; currentWidthFeet = nil; pathTotalFeet = 0; widthPoints = []
+                nueva.itemsVistos = items.count - 1
+                stage = .pickingMaterial
+            }
             if maqueta == 7 {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.abrirPanelNuevo(.voz) }
             }
@@ -8977,6 +9192,7 @@ extension ARMeasureViewController {
                 }
             }
         }
+        if maqueta != 8 { nueva.itemsVistos = items.count; nueva.acabaDeGuardar = false }
         updateUI()
     }
     private func anotarVisitaDeMaqueta(_ cuarto: String) {

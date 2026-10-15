@@ -6,11 +6,11 @@
 //    Unit, como Field Reports), el total del trabajo por partida y las notas. Los números salen de docs/medidas.js.
 // Cada uno se ve aquí mismo (su propia pantalla, con Back) y se baja en PDF (en el teléfono, la hoja de compartir).
 // Los números salen de docs/registro.js (lo mismo que ve el técnico en el teléfono): nada se calcula dos veces.
-import { $, authFetch, esAparato } from './app.js?v=2026-10-15-11';
-import * as R from './registro.js?v=2026-10-15-11';
-import * as fotos from './fotos.js?v=2026-10-15-11';
-import * as MD from './medidas.js?v=2026-10-15-11';
-import * as planos from './planos.js?v=2026-10-15-11';
+import { $, authFetch, esAparato } from './app.js?v=2026-10-15-12';
+import * as R from './registro.js?v=2026-10-15-12';
+import * as fotos from './fotos.js?v=2026-10-15-12';
+import * as MD from './medidas.js?v=2026-10-15-12';
+import * as planos from './planos.js?v=2026-10-15-12';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';

@@ -125,6 +125,19 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
                 arVC.areasPorPlanta = mapa
             }
             arVC.nivelesDisponibles = (call.getArray("niveles") as? [String]) ?? []
+            // Las paredes del plano por cuarto (largo y si es de afuera): la tarjeta de guardar sugiere la insulación.
+            if let paredes = call.getObject("paredesPorCuarto") {
+                var mapa: [String: [(largo: Double, exterior: Bool)]] = [:]
+                for (cuarto, valor) in paredes {
+                    guard let lista = valor as? [[String: Any]] else { continue }
+                    mapa[cuarto] = lista.compactMap { d in
+                        let largo = (d["largo"] as? Double) ?? (d["largo"] as? NSNumber)?.doubleValue
+                        guard let l = largo, l > 0 else { return nil }
+                        return (largo: l, exterior: (d["exterior"] as? Bool) ?? false)
+                    }
+                }
+                arVC.paredesPorCuarto = mapa
+            }
             if let areas = call.getObject("areasPorCuarto") {
                 var mapa: [String: Double] = [:]
                 for (clave, valor) in areas {

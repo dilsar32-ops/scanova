@@ -2,8 +2,8 @@
 // (el mismo escáner de Field Reports, que ya viene dentro de la app: plugin RoomScan) y se dibuja con el
 // mismo código de Field Reports (plano.js, copiado por tools/extraer_plano.py). Un escaneo por piso;
 // un escaneo nuevo no borra el anterior (queda de historial), se ve el más reciente.
-import * as plano from './plano.js?v=2026-10-15-11';
-import { authFetch, esAparato } from './app.js?v=2026-10-15-11';
+import * as plano from './plano.js?v=2026-10-15-12';
+import { authFetch, esAparato } from './app.js?v=2026-10-15-12';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
@@ -55,6 +55,31 @@ export function largoSinRepetir(paredes){
   let total = 0;
   grupos.forEach(g => { g.tr.sort((a, b) => a[0] - b[0]); let [a, b] = g.tr[0]; for(let i = 1; i < g.tr.length; i++){ const [c, d] = g.tr[i]; if(c <= b + 0.5) b = Math.max(b, d); else { total += b - a; a = c; b = d; } } total += b - a; });
   return total;
+}
+// LAS PAREDES DE CADA CUARTO PARA LA CÁMARA DE MEDIR (su pedido del 15-oct: "si estamos en paredes interiores ya sabe
+// que no llevan insulación"). El GPS del teléfono no alcanza para saber junto a qué pared está; el plano sí sabe qué
+// paredes son de afuera y cuánto mide cada una. La cámara compara lo medido contra esto y SUGIERE (nunca marca sola).
+export async function paredesParaCamara(trabajoId, nivelId){
+  try{
+    const r = await authFetch('/rest/v1/fotos_planos?trabajo_id=eq.' + encodeURIComponent(trabajoId) + '&borrado_at=is.null&select=id,nivel_id,created_at,data&order=created_at.desc&limit=60');
+    if(!r.ok) return {};
+    const lista = await r.json();
+    const p = planoDe(lista, nivelId) || (nivelId ? null : lista[0]);
+    if(!p || !p.data) return {};
+    const d = prepararPlano(p.data);
+    const nivel = nivelDelPlano(d);
+    const rooms = (d.rooms || []).filter(x => !x.deleted && (x.walls || []).length && (x.level || 1) === nivel);
+    const out = {};
+    rooms.forEach(room => {
+      const nombre = String(room.roomName || '').trim(); if(!nombre) return;
+      const paredes = (room.walls || []).filter(w => w && w.start && w.end && !w._ajena)
+        .map(w => ({ largo: Math.round(Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y) * 100) / 100,
+                     exterior: !!plano.floorplanIsExteriorWall(w, room, d.merged === false ? null : rooms) }))
+        .filter(x => x.largo >= 1);
+      if(paredes.length) out[nombre] = (out[nombre] || []).concat(paredes);
+    });
+    return out;
+  }catch(e){ return {}; }
 }
 // El plano que se ve de cada piso: el más reciente (la lista viene ordenada del más nuevo al más viejo).
 export const planoDe = (planos, nivelId) => (planos || []).find(p => (p.nivel_id || SIN_NIVEL) === (nivelId || SIN_NIVEL)) || null;
