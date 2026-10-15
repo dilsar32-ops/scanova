@@ -1,15 +1,15 @@
 // Scanova · arranque, sesión y navegación. Las pantallas viven en index.html; lo de trabajos en trabajos.js.
-import { SUPABASE_URL, ANON_KEY, APP_BUILD } from './config.js?v=2026-10-14-52';
-import { ESQUEMA_APARATO, urlEntrarGoogle } from './google.js?v=2026-10-14-52';
-import * as trabajos from './trabajos.js?v=2026-10-14-52';
-import * as personas from './personas.js?v=2026-10-14-52';
-import * as fotos from './fotos.js?v=2026-10-14-52';
-import * as panel from './panel.js?v=2026-10-14-52';
-import * as camara from './camara.js?v=2026-10-14-52';
-import * as direccion from './direccion.js?v=2026-10-14-52';
-import * as proyecto from './proyecto.js?v=2026-10-14-52';
-import * as foto from './foto.js?v=2026-10-14-52';
-import * as editor from './editor.js?v=2026-10-14-52';
+import { SUPABASE_URL, ANON_KEY, APP_BUILD } from './config.js?v=2026-10-15-5';
+import { ESQUEMA_APARATO, urlEntrarGoogle } from './google.js?v=2026-10-15-5';
+import * as trabajos from './trabajos.js?v=2026-10-15-5';
+import * as personas from './personas.js?v=2026-10-15-5';
+import * as fotos from './fotos.js?v=2026-10-15-5';
+import * as panel from './panel.js?v=2026-10-15-5';
+import * as camara from './camara.js?v=2026-10-15-5';
+import * as direccion from './direccion.js?v=2026-10-15-5';
+import * as proyecto from './proyecto.js?v=2026-10-15-5';
+import * as foto from './foto.js?v=2026-10-15-5';
+import * as editor from './editor.js?v=2026-10-15-5';
 
 export const $ = (s, r = document) => r.querySelector(s);
 export const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -320,12 +320,15 @@ function guardia(seguir){
   preguntar({ texto: 'You have not saved this yet. If you leave, what you typed will be lost.' }).then(ok => { if(ok){ FOTO_FORMA[pantallaVisible()] = null; seguir(); } });
   return false;
 }
-if(typeof window !== 'undefined') window.addEventListener('beforeunload', (e) => { if(hayCambios()){ e.preventDefault(); e.returnValue = ''; } });
+if(typeof window !== 'undefined') window.addEventListener('beforeunload', (e) => { if(hayCambios() || editor.sinGuardar()){ e.preventDefault(); e.returnValue = ''; } });
 // Quien necesite saber que una pantalla volvió a verse (el Dry Log repone su barra al regresar de una foto).
 const AL_MOSTRAR = [];
 export function alMostrar(fn){ AL_MOSTRAR.push(fn); }
 export function irA(id, desde, forzar){
   if(!forzar && id !== pantallaVisible() && !guardia(() => irA(id, desde, true))) return;
+  // Irse del editor de fotos a otra pantalla (barra lateral, Back) pregunta Save / Discard si hay cambios, como la flecha
+  // de la foto (antes los botaba sin preguntar).
+  if(!forzar && id !== 'pFoto' && editor.sinGuardar()){ editor.salir(() => irA(id, desde, true)); return; }
   const enVentana = MODAL && (id === 'pEntrar' || id === 'pCrear' || id === 'pEspera' || id === 'pCodigo' || id === 'pClave');
   if(!enVentana){ MODAL = false; document.body.classList.remove('modal-entrar'); ocultarInicio(); }
   if(desde) pila.push(desde);
@@ -362,7 +365,7 @@ export function volverUno(){
   if(dentro.length){ dentro[dentro.length - 1].click(); return; }
   atras();
 }
-export function atras(forzar){ if(!forzar && !guardia(() => atras(true))) return; const a = pila.pop(); if(a) irA(a); else irA('pInicio'); if(!a || a === 'pInicio' || a === 'pProyectos'){ trabajos.pintar(); trabajos.cargar(); } }
+export function atras(forzar){ if(!forzar && !guardia(() => atras(true))) return; if(!forzar && editor.sinGuardar()){ editor.salir(() => atras(true)); return; } const a = pila.pop(); if(a) irA(a); else irA('pInicio'); if(!a || a === 'pInicio' || a === 'pProyectos'){ trabajos.pintar(); trabajos.cargar(); } }
 // Una sección que todavía no tiene diseño: pantalla que lo dice (no finge que funciona).
 let PRONTO = '';
 const TEXTO_PRONTO = {

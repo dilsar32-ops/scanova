@@ -762,8 +762,10 @@ body.menu-abierto .menu-velo{ display:block; position:absolute; inset:0; z-index
   body.det-oculto #pTrabajo{ max-width:1560px; }   /* su diseño 13-oct: sin la barra de detalles, las fotos usan todo el ancho */
   .pdet-lado{ display:block; position:sticky; top:0; max-height:calc(100vh - 100px); overflow:auto; padding-bottom:12px; }
   body.det-oculto .pdet-lado{ display:none; }
-  body.det-oculto .pdet-mostrar{ display:inline-flex; align-items:center; gap:6px; font:inherit; font-size:13.5px; font-weight:600; color:#fff; background:#1e293b; border:0; border-radius:10px; padding:0 12px; height:40px; cursor:pointer; }
-  .pdet-mostrar .ic{ width:17px; height:17px; }
+  /* Show Sidebar (su pedido, 15-oct: el bloque oscuro no combinaba): el mismo botón blanco con borde que Edit Project */
+  body.det-oculto .pdet-mostrar{ display:inline-flex; }
+  .pdet-mostrar .ic{ width:19px; height:19px; color:var(--ink-soft); }
+  .pcab-acc .mas-cab{ width:44px; height:44px; }   /* los tres botones de la fila con la misma altura */
   .pchips{ display:flex; order:0; flex:1 1 0; min-width:140px; }
   .pherr{ flex-wrap:nowrap; }
   .pchips .chip{ padding:6px 12px; font-size:13.5px; }
@@ -997,6 +999,17 @@ body.fv-editando .fv-asa{ visibility:hidden; }
 @media (prefers-reduced-motion:reduce){ .ed-acc-t .ic:last-child{ transition:none; } }
 .ed-info .ed-colores{ gap:8px; flex-wrap:nowrap; }
 .ed-info .ed-color{ width:26px; height:26px; flex:0 0 26px; }
+/* Editor (15 oct 2026): dibujitos de las figuras, el pincel y el fondo del texto dentro de los botones */
+.ed-fig{ width:16px; height:16px; vertical-align:-3.5px; margin-right:5px; fill:none; stroke:currentColor; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+.ed-chip.solo, .ed-fila-x .ed-chip.solo{ display:inline-flex; align-items:center; justify-content:center; padding:6px 9px; }
+.ed-chip.solo .ed-fig{ margin-right:0; width:18px; height:18px; }
+.ed-info .ed-grosor{ margin-top:10px; gap:10px; }
+.ed-info .ed-grosor > span{ white-space:nowrap; font-size:13.5px; }
+.ed-info .ed-grosor input[type=range]{ flex:1 1 auto; min-width:0; }
+/* Editando: el velo de las hojas (Adjustments, Filters) solo atrapa el toque, no oscurece la foto que se está ajustando */
+body.fv-editando .fv-velo{ background:transparent; }
+/* Con una herramienta escogida, las flechas de otra foto no tapan la orilla de la foto (se dibuja hasta el borde) */
+body.fv-editando.ed-activo .fv-flecha{ opacity:.18; pointer-events:none; }
 
 /* ---------- VENTANA DE LA FOTO: más espacio para la foto (su pedido, 12 oct 2026) ---------- */
 @media (min-width:900px){

@@ -33,5 +33,81 @@ ok('Sharpness: realza el borde y deja igual lo parejo', (() => { const w = 5, h 
   ok('tocar la foto mientras se escribe GUARDA el texto', /if\(E\.escritura\)\{ const f = E\.escrituraListo; if\(f\) f\(true\);/.test(src));
   ok('...y no abre otro cuadrito vacío en ese toque', /if\(t === 'texto'\)\{ if\(recienEscrito\) return;/.test(src));
   ok('el cuadrito deja guardado cómo terminarlo', /E\.escrituraListo = listo;/.test(src) && /z\.escrituraListo = null;/.test(src)); }
+// Su pedido (15-oct): "no hay fondo transparente", "en shapes solo hay dos", "necesito un brush", "ya hay algo
+// seleccionado cuando entro" y "poder mover el texto".
+ok('Shape: nueve figuras, las dos de antes primero', E.FORMAS.map(f => f[0]).join() === 'circulo,cuadro,redondo,linea,doble,triangulo,estrella,cruz,palomita');
+ok('Marker: marcador, pincel (Brush) y resaltador', E.MARCAS.map(f => f[1]).join() === 'Marker,Brush,Highlighter');
+ok('Text: con color o transparente', E.FONDOS.map(f => f[0]).join() === 'lleno,ninguno');
+{ const W = 1000, H = 1000; const circ = { tipo:'circulo', ancho:5, puntos:[[0.2, 0.2], [0.6, 0.6]] };
+  ok('tocar DENTRO de un círculo no lo agarra (se puede poner texto o dibujar adentro)', !E.tocaMarca(circ, 400, 400, 10, W, H));
+  ok('...tocar su línea sí lo agarra', E.tocaMarca(circ, 600, 400, 10, W, H) && E.tocaMarca(circ, 400, 203, 10, W, H));
+  const caja = { tipo:'cuadro', ancho:5, puntos:[[0.2, 0.2], [0.6, 0.6]] };
+  ok('cuadro: el centro libre, el borde se agarra', !E.tocaMarca(caja, 400, 400, 10, W, H) && E.tocaMarca(caja, 200, 400, 10, W, H));
+  const raya = { tipo:'lapiz', ancho:5, puntos:[[0.1, 0.1], [0.5, 0.1], [0.5, 0.5]] };
+  ok('un trazo se agarra por la línea, no por el hueco de su caja', E.tocaMarca(raya, 300, 105, 10, W, H) && !E.tocaMarca(raya, 200, 400, 10, W, H));
+  const pincel = { tipo:'pincel', ancho:5, puntos:[[0.1, 0.5], [0.9, 0.5]] };
+  ok('el pincel es ancho: se agarra un poco más lejos que el marcador', E.tocaMarca(pincel, 500, 515, 10, W, H) && !E.tocaMarca({ ...pincel, tipo:'lapiz' }, 500, 515, 10, W, H));
+  const area = { tipo:'area', texto:'Wet area', puntos:[[0.1, 0.1], [0.5, 0.1], [0.5, 0.5], [0.1, 0.5]] };
+  ok('área mojada: por DENTRO no se agarra (ahí se pone la lectura de humedad); por su orilla y su letrero sí',
+    !E.tocaMarca(area, 200, 380, 10, W, H) && E.tocaMarca(area, 100, 300, 10, W, H) && E.tocaMarca(area, 300, 300, 10, W, H));
+  const med = { tipo:'medida', texto:'4\' 6"', ancho:5, puntos:[[0.1, 0.5], [0.9, 0.5]] };
+  ok('medida: se agarra por su línea y por su letrero', E.tocaMarca(med, 500, 510, 10, W, H) && !E.tocaMarca(med, 500, 600, 10, W, H));
+  const texto = { tipo:'texto', texto:'Mold', puntos:[[0.5, 0.5]], escala:1, fondo:'ninguno' };
+  ok('el texto (con o sin fondo) se agarra en toda su caja: se puede mover', E.tocaMarca(texto, 500, 500, 10, W, H) && E.tocaMarca({ ...texto, fondo:'lleno' }, 500, 500, 10, W, H));
+  const tri = { tipo:'triangulo', ancho:5, puntos:[[0.2, 0.2], [0.6, 0.6]] };
+  ok('triángulo: la punta arriba; girado un cuarto (con la foto) la punta queda a la derecha',
+    E.tocaMarca(tri, 400, 200, 10, W, H) && !E.tocaMarca({ ...tri, giro:1 }, 400, 200, 10, W, H) && E.tocaMarca({ ...tri, giro:1 }, 600, 400, 10, W, H));
+  const est = { tipo:'estrella', ancho:5, puntos:[[0.2, 0.2], [0.6, 0.6]] };
+  ok('estrella: la punta de arriba se agarra, el centro no', E.tocaMarca(est, 400, 200, 10, W, H) && !E.tocaMarca(est, 400, 400, 10, W, H)); }
+ok('bordeDeTexto: borde oscuro para letra clara, claro para letra casi negra', E.bordeDeTexto('#ffffff').includes('0,0,0') && E.bordeDeTexto('#ffd60a').includes('0,0,0') && E.bordeDeTexto('#1d1d1f').includes('255,255,255'));
+{ // Pintar con un lienzo de mentira: el texto transparente NO pinta la pastilla de fondo, solo la letra con su borde.
+  const hecho = []; const ctx = new Proxy({}, { get: (o, k) => k in o ? o[k] : (k === 'measureText' ? (t) => ({ width: String(t).length * 9 }) : (...a) => { hecho.push(k); }), set: (o, k, v) => { o[k] = v; return true; } });
+  E.dibujar(ctx, 1000, 800, [{ tipo:'texto', texto:'Mold', color:'#ffffff', puntos:[[0.5, 0.5]], escala:1, fondo:'ninguno' }]);
+  const suelto = hecho.slice(); hecho.length = 0;
+  E.dibujar(ctx, 1000, 800, [{ tipo:'texto', texto:'Mold', color:'#ffffff', puntos:[[0.5, 0.5]], escala:1 }]);
+  ok('texto transparente: sin pastilla (sin fill de fondo), con la letra bordeada', !suelto.includes('fill') && !suelto.includes('arcTo') && suelto.includes('strokeText') && suelto.includes('fillText'));
+  ok('texto de siempre (sin "fondo" guardado): con su pastilla, como antes', hecho.includes('arcTo') && hecho.includes('fill') && hecho.includes('fillText'));
+  hecho.length = 0; E.dibujar(ctx, 1000, 800, [{ tipo:'pincel', color:'#ff3b30', ancho:5, puntos:[[0.1, 0.1], [0.3, 0.2], [0.5, 0.1], [0.7, 0.3]] }]);
+  ok('pincel: trazo suavizado en dos pasadas', hecho.filter(x => x === 'stroke').length === 2 && hecho.includes('quadraticCurveTo'));
+  const sinPintar = E.FORMAS.filter(([k]) => { hecho.length = 0; E.dibujar(ctx, 1000, 800, [{ tipo:k, color:'#ff3b30', ancho:5, puntos:[[0.2, 0.2], [0.6, 0.5]] }]); return !hecho.includes('stroke'); });
+  ok('las nueve figuras se pintan' + (sinPintar.length ? ' (faltan: ' + sinPintar.map(f => f[0]).join() + ')' : ''), !sinPintar.length); }
+{ const src = (await import('node:fs')).readFileSync(new URL('../docs/editor.js', import.meta.url), 'utf8');
+  ok('al abrir el editor NO hay herramienta escogida', /herr: '', forma: 'circulo'/.test(src));
+  ok('sin herramienta, tocar la foto no dibuja nada', /const t = herrActual\(\); if\(!t\) return;/.test(src));
+  ok('tocar otra vez la herramienta escogida la suelta', /E\.herr = E\.herr === h && !el\.closest\('#edHoja'\) \? '' : h;/.test(src));
+  ok('la foto de abajo solo se vuelve a pintar cuando cambia (no con cada movimiento del dedo)', /if\(llave !== E\.baseLlave \|\| E\.baseMarco !== E\.marco\)/.test(src));
+  ok('el trazo guarda un punto cada 2 px de pantalla, no en cada evento', /acc\.k < 2\) return; m\.puntos\.push\(p\);/.test(src));
+  ok('"Original" en Crop usa la foto como se ve (girada)', /pr\[2\] === -1 \? FW\(\) \/ FH\(\) : pr\[2\]/.test(src)); }
+ok('brillo + contraste como el CSS: el blanco se corta antes del contraste (la foto guardada ya no sale más clara)', (() => { const f = { mult:2, con:0.5, sat:1 }; return E.ajustarPixel(200, f) === 191 && E.ajustarPixel(255, f) === 191; })());
+ok('Sharpness: con paso 2 mira a los vecinos de 2 pixeles (mismo realce relativo en la foto grande)', (() => { const w = 9, h = 5, d = new Uint8ClampedArray(w * h * 4).fill(100); for(let y = 0; y < h; y++) for(let x = 5; x < w; x++){ const i = (y * w + x) * 4; d[i] = d[i + 1] = d[i + 2] = 200; }
+  const r1 = E.nitidez(new Uint8ClampedArray(d), w, h, 100, 1), r2 = E.nitidez(new Uint8ClampedArray(d), w, h, 100, 2); const at = (r, x) => r[(2 * w + x) * 4]; return at(r1, 3) === 100 && at(r2, 3) < 100 && at(r2, 4) < 100; })());
+ok('las marcas miden lo mismo con la foto acostada o parada (la medida es el lado largo)', (() => { const m = { tipo:'texto', texto:'Mold', puntos:[[0.5, 0.5]], escala:1 }; const a = E.cajaMarca(m, 1600, 1200), b = E.cajaMarca(m, 1200, 1600); return Math.abs(a.w - b.w) < 1e-9 && Math.abs(a.h - b.h) < 1e-9; })());
+{ const src = (await import('node:fs')).readFileSync(new URL('../docs/editor.js', import.meta.url), 'utf8');
+  ok('un dedo a la vez: el segundo dedo de un pellizco no dibuja ni suelta lo que se arrastra', /if\(acc \|\| ev\.isPrimary === false \|\| ev\.button > 0\) return;/.test(src) && /if\(ev\.pointerId !== acc\.id\) return;/.test(src));
+  ok('si iOS interrumpe el toque, se descarta (no se guarda como si hubiera soltado)', /c\.addEventListener\('pointercancel', cancelar\)/.test(src) && !/addEventListener\('pointercancel', fin\)/.test(src));
+  ok('tocar afuera de la marca escogida solo la suelta', /if\(E\.sel >= 0\)\{ E\.sel = -1; render\(\); pintarPanel\(\); return; \}/.test(src));
+  ok('margen de 6 px para el temblor del dedo antes de mover', /ev\.clientY - acc\.cy\) < 6\) return; acc\.movio = true;/.test(src));
+  ok('abrir otra foto mientras la primera carga no pisa al editor nuevo', /if\(E !== yo\)\{ URL\.revokeObjectURL\(url\); return; \}/.test(src) && /if\(E\.lienzo\) return;/.test(src));
+  ok('guardar usa SU editor aunque cambie a mitad', /const archivo = await copiaFinal\(yo\); const r = await yo\.guardar\(archivo\);/.test(src));
+  ok('el Save de arriba del teléfono se vuelve a prender', /querySelectorAll\('#fvTelGuardar'\)\.forEach\(b => \{ b\.disabled = false; \}\)/.test(src));
+  ok('abrir la hoja Markup ya no escoge Moisture solo', !/E\.herr = 'humedad'/.test(src));
+  ok('Blur: en la vista se difumina la foto de abajo ya ajustada (como en la guardada)', /pixelar\(bx, b,/.test(src) && /dibujar\(ctx, w, h, blurs, limpio\)/.test(src));
+  ok('un WET/DRY escogido a mano vale solo para esa lectura', /E\.estado = ''; E\.estadoFijo = false;   \/\/ un WET\/DRY/.test(src)); }
+{ const app = (await import('node:fs')).readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8');
+  ok('irse a otra pantalla con cambios en el editor pregunta (Save / Discard)', /if\(!forzar && id !== 'pFoto' && editor\.sinGuardar\(\)\)\{ editor\.salir\(\(\) => irA\(id, desde, true\)\); return; \}/.test(app) && /hayCambios\(\) \|\| editor\.sinGuardar\(\)/.test(app)); }
+// Su "sí" (15-oct): Line width junto a las herramientas que lo usan, no en Markup Tools.
+ok('cuatro grosores para el teléfono (Thin, Medium, Thick, Extra thick)', E.GROSORES.map(g => g[2]).join() === '2,5,9,14');
+ok('qué marcas tienen grosor: flecha, marcadores, figuras y medida; texto, humedad, área y blur no', ['flecha', 'lapiz', 'pincel', 'resalta', 'medida', 'circulo', 'estrella'].every(E.USA_GROSOR) && !['texto', 'humedad', 'area', 'borroso'].some(E.USA_GROSOR));
+ok('el botón encendido es el grosor más cercano', E.grosorCercano(5) === 'medio' && E.grosorCercano(1) === 'fino' && E.grosorCercano(12) === 'extra' && E.grosorCercano(7.4) === 'grueso');
+{ const src = (await import('node:fs')).readFileSync(new URL('../docs/editor.js', import.meta.url), 'utf8');
+  ok('Markup Tools ya no tiene la barra de Line width (un solo lugar: junto a la herramienta)', !/seccion\('markup'[^\n]*Line width/.test(src) && !/<div class="ed-fila"><span>Line width<\/span>/.test(src));
+  ok('la barra sale en las opciones de la herramienta y de la marca escogida', /USA_GROSOR\(sel\.tipo\) \? filaGrosor\(sel\.ancho\)/.test(src) && /USA_GROSOR\(herrActual\(\)\) \? filaGrosor\(E\.ancho\)/.test(src));
+  ok('en el teléfono, los grosores en la fila de Shape, Marker, Arrow/Measure y de la marca escogida', (src.match(/chipsGrosor\(/g) || []).length >= 4);
+  ok('cambiar el grosor con una marca escogida la cambia (con Undo)', /if\(m && USA_GROSOR\(m\.tipo\) && \(m\.ancho \|\| 4\) !== n\)\{ E\.deshacer\.push\(estado\(\)\); E\.rehacer = \[\]; m\.ancho = n;/.test(src));
+  ok('el estado de antes del slider es siempre el de ese momento', /\(e\.target\.dataset\.edAj \|\| e\.target\.id === 'edAncho'\)\) E\.ajAntes = estado\(\); \};/.test(src)); }
+{ const src = (await import('node:fs')).readFileSync(new URL('../docs/editor.js', import.meta.url), 'utf8');
+  // Probado en el iPhone (simulador): tras cerrar el teclado, iOS cancelaba el primer arrastre (pointercancel) y el texto
+  // regresaba: "no se puede mover el texto".
+  ok('un toque que empieza en la foto nunca mueve la página (iOS ya no cancela el arrastre tras el teclado)', /c\.addEventListener\('touchstart', sinPagina, \{ passive:false \}\); c\.addEventListener\('touchmove', sinPagina, \{ passive:false \}\);/.test(src)); }
 console.log(`\neditor: ${pass} ok, ${fail} fallas`);
 if(fail) process.exit(1);
