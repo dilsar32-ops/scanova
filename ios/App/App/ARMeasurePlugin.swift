@@ -138,6 +138,24 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
                 }
                 arVC.paredesPorCuarto = mapa
             }
+            // La forma de cada cuarto (paredes con sus puntas, ventanas y puertas): para ubicarse dentro del plano.
+            if let formas = call.getObject("planoPorCuarto") {
+                func num(_ x: Any?) -> Double? { (x as? Double) ?? (x as? NSNumber)?.doubleValue }
+                var mapa: [String: (paredes: [UbicadorEnPlano.ParedPlano], senas: [UbicadorEnPlano.SenaPlano])] = [:]
+                for (cuarto, valor) in formas {
+                    guard let f = valor as? [String: Any] else { continue }
+                    let paredes: [UbicadorEnPlano.ParedPlano] = ((f["paredes"] as? [[Any]]) ?? []).compactMap { w in
+                        guard w.count >= 5, let x1 = num(w[0]), let y1 = num(w[1]), let x2 = num(w[2]), let y2 = num(w[3]) else { return nil }
+                        return UbicadorEnPlano.ParedPlano(seg: UbicadorEnPlano.Segmento(a: SIMD2(x1, y1), b: SIMD2(x2, y2)), exterior: (num(w[4]) ?? 0) > 0.5)
+                    }
+                    let senas: [UbicadorEnPlano.SenaPlano] = ((f["senas"] as? [[Any]]) ?? []).compactMap { x in
+                        guard x.count >= 3, let px = num(x[0]), let py = num(x[1]) else { return nil }
+                        return UbicadorEnPlano.SenaPlano(p: SIMD2(px, py), esVentana: (num(x[2]) ?? 0) > 0.5)
+                    }
+                    if paredes.count >= 3 { mapa[cuarto] = (paredes, senas) }
+                }
+                arVC.planoPorCuarto = mapa
+            }
             if let areas = call.getObject("areasPorCuarto") {
                 var mapa: [String: Double] = [:]
                 for (clave, valor) in areas {

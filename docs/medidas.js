@@ -11,7 +11,7 @@
 //    del trabajo por partida; las notas; y el PDF "Measurements & Demo" (lo arma Documents).
 // Lo que cambia contra Field Reports: aquí el trabajo ya es el proyecto (cliente, dirección y fecha ya están), y los
 // niveles y cuartos son los del proyecto (los mismos de Photos y Dry Logs).
-import { $, authFetch, esAparato, preguntar, PERFIL } from './app.js?v=2026-10-15-12';
+import { $, authFetch, esAparato, preguntar, PERFIL } from './app.js?v=2026-10-15-13';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -448,9 +448,12 @@ async function lanzarCamara(alcance, d){
   // Las paredes del plano de este piso (largo y si es de afuera), para que la cámara sugiera lo de la insulación.
   let paredesPorCuarto = {};
   try{ if(AYUDA.paredes) paredesPorCuarto = (await AYUDA.paredes(tid, nivel ? nivel.id : null)) || {}; }catch(e){ paredesPorCuarto = {}; }
+  // Y la forma de cada cuarto, para que la cámara se ubique dentro del plano con el LiDAR (15-oct).
+  let planoPorCuarto = {};
+  try{ if(AYUDA.formas) planoPorCuarto = AYUDA.formas() || {}; }catch(e){ planoPorCuarto = {}; }
   try{
     res = await ARMeasure.measure({ modo: 'recorrido', alcance, nivel: nivel ? nivel.nombre : '', section: 'floor', materials: secciones.floor, secciones, cuartos, niveles,
-      areasPorCuarto: {}, cuartosPorPlanta, areasPorPlanta: {}, crewName: String((PERFIL && PERFIL.full_name) || '').split(' ')[0], roomName: cuarto ? cuarto.nombre : '', roomAreaSqFt: 0, tema: TEMA_CAMARA, experiencia: EXPERIENCIA_CAMARA, paredesPorCuarto });
+      areasPorCuarto: {}, cuartosPorPlanta, areasPorPlanta: {}, crewName: String((PERFIL && PERFIL.full_name) || '').split(' ')[0], roomName: cuarto ? cuarto.nombre : '', roomAreaSqFt: 0, tema: TEMA_CAMARA, experiencia: EXPERIENCIA_CAMARA, paredesPorCuarto, planoPorCuarto });
   }catch(e){ avisar('Could not open the measuring camera. ' + msg(e)); return; }
   if(!res || res.cancelled){ if(res && res.error) avisar(res.error); return; }
   const nuevas = filasDeCamara(res.measurements, { nivel: nivel ? nivel.nombre : '', cuarto: cuarto ? cuarto.nombre : '', orden: Date.now() }).map(f => ({ ...f, id: nuevoId() }));

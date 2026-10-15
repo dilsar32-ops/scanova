@@ -2,8 +2,8 @@
 // (el mismo escáner de Field Reports, que ya viene dentro de la app: plugin RoomScan) y se dibuja con el
 // mismo código de Field Reports (plano.js, copiado por tools/extraer_plano.py). Un escaneo por piso;
 // un escaneo nuevo no borra el anterior (queda de historial), se ve el más reciente.
-import * as plano from './plano.js?v=2026-10-15-12';
-import { authFetch, esAparato } from './app.js?v=2026-10-15-12';
+import * as plano from './plano.js?v=2026-10-15-13';
+import { authFetch, esAparato } from './app.js?v=2026-10-15-13';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
@@ -60,6 +60,7 @@ export function largoSinRepetir(paredes){
 // que no llevan insulación"). El GPS del teléfono no alcanza para saber junto a qué pared está; el plano sí sabe qué
 // paredes son de afuera y cuánto mide cada una. La cámara compara lo medido contra esto y SUGIERE (nunca marca sola).
 export async function paredesParaCamara(trabajoId, nivelId){
+  FORMAS = {};   // nunca la forma de otro proyecto o de otro piso
   try{
     const r = await authFetch('/rest/v1/fotos_planos?trabajo_id=eq.' + encodeURIComponent(trabajoId) + '&borrado_at=is.null&select=id,nivel_id,created_at,data&order=created_at.desc&limit=60');
     if(!r.ok) return {};
@@ -77,10 +78,24 @@ export async function paredesParaCamara(trabajoId, nivelId){
                      exterior: !!plano.floorplanIsExteriorWall(w, room, d.merged === false ? null : rooms) }))
         .filter(x => x.largo >= 1);
       if(paredes.length) out[nombre] = (out[nombre] || []).concat(paredes);
+      // Y la forma del cuarto (15-oct): cada pared con sus dos puntas, y las ventanas y puertas. Con esto la cámara
+      // se UBICA dentro del plano con lo que ve el LiDAR, y sabe en qué pared cae un corte aunque sea parcial.
+      const forma = { paredes: [], senas: [] };
+      (room.walls || []).forEach(w => {
+        if(!w || !w.start || !w.end || w._ajena) return;
+        if(Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y) < 1) return;
+        const r2 = v => Math.round(v * 100) / 100;
+        forma.paredes.push([r2(w.start.x), r2(w.start.y), r2(w.end.x), r2(w.end.y), plano.floorplanIsExteriorWall(w, room, d.merged === false ? null : rooms) ? 1 : 0]);
+      });
+      ['windows', 'doors'].forEach(k => (room[k] || []).forEach(x => { if(x && x.position && !x._removed) forma.senas.push([Math.round(x.position.x * 100) / 100, Math.round(x.position.y * 100) / 100, k === 'windows' ? 1 : 0]); }));
+      if(forma.paredes.length >= 3) FORMAS[nombre] = forma;
     });
     return out;
   }catch(e){ return {}; }
 }
+// La forma de cada cuarto del último plano pedido (la llena paredesParaCamara, para no pedir el plano dos veces).
+let FORMAS = {};
+export function formasParaCamara(){ return FORMAS; }
 // El plano que se ve de cada piso: el más reciente (la lista viene ordenada del más nuevo al más viejo).
 export const planoDe = (planos, nivelId) => (planos || []).find(p => (p.nivel_id || SIN_NIVEL) === (nivelId || SIN_NIVEL)) || null;
 // El escaneo sale del iPhone con el ángulo con que se sostuvo el teléfono. Field Reports lo endereza al

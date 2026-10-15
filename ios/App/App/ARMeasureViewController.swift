@@ -308,6 +308,9 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
     // Las paredes de cada cuarto según el plano (largo en pies y si es de afuera). Con esto la tarjeta de guardar
     // SUGIERE si la pared lleva insulación (su pedido del 15 oct). Vacío = sin plano: no se sugiere nada.
     var paredesPorCuarto: [String: [(largo: Double, exterior: Bool)]] = [:]
+    // La FORMA de cada cuarto en el plano (paredes con sus puntas, ventanas y puertas), en pies. Con esto la cámara se
+    // ubica dentro del plano con lo que ve el LiDAR (ver "UBICARSE DENTRO DEL PLANO", al final).
+    var planoPorCuarto: [String: (paredes: [UbicadorEnPlano.ParedPlano], senas: [UbicadorEnPlano.SenaPlano])] = [:]
     // El nivel se pregunta UNA vez por recorrido. Eso es todo el punto.
     var nivelActual: String = ""
     // "nivel" = un piso completo, cuarto por cuarto. "cuarto" = solo este.
@@ -7848,6 +7851,68 @@ fileprivate final class MiraCamara: UIView {
     }
 }
 
+// EL MINIMAPA (15 oct): el cuarto del plano, visto desde arriba, con el teléfono y hacia dónde apunta cuando ya se ubicó.
+// Las paredes de afuera van gruesas; las ventanas en azul; la puerta en gris. Es para que el grupo VEA que la app sabe
+// dónde está — y para que vea cuando todavía no.
+fileprivate final class MinimapaCamara: UIView {
+    var paredes: [UbicadorEnPlano.ParedPlano] = [] { didSet { setNeedsDisplay() } }
+    var senas: [UbicadorEnPlano.SenaPlano] = [] { didSet { setNeedsDisplay() } }
+    var telefono: SIMD2<Double>? { didSet { setNeedsDisplay() } }
+    var mirando: SIMD2<Double>? { didSet { setNeedsDisplay() } }
+    var medida: [SIMD2<Double>] = [] { didSet { setNeedsDisplay() } }
+    let estado = UILabel()
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .white
+        layer.cornerRadius = 12; layer.cornerCurve = .continuous
+        layer.borderWidth = 0.5; layer.borderColor = Claro.linea.cgColor
+        layer.shadowColor = UIColor.black.cgColor; layer.shadowOpacity = 0.14; layer.shadowRadius = 6; layer.shadowOffset = CGSize(width: 0, height: 2)
+        isUserInteractionEnabled = false
+        estado.font = .systemFont(ofSize: 10, weight: .semibold); estado.textAlignment = .center
+        estado.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(estado)
+        NSLayoutConstraint.activate([estado.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+                                     estado.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+                                     estado.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4)])
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) no se usa") }
+    override func draw(_ rect: CGRect) {
+        guard let ctx = UIGraphicsGetCurrentContext(), !paredes.isEmpty else { return }
+        let pts = paredes.flatMap { [$0.seg.a, $0.seg.b] }
+        let minX = pts.map { $0.x }.min()!, maxX = pts.map { $0.x }.max()!, minY = pts.map { $0.y }.min()!, maxY = pts.map { $0.y }.max()!
+        let caja = rect.insetBy(dx: 10, dy: 10).inset(by: UIEdgeInsets(top: 0, left: 0, bottom: 12, right: 0))
+        let esc = min(Double(caja.width) / max(maxX - minX, 1), Double(caja.height) / max(maxY - minY, 1))
+        let ox = Double(caja.midX) - (minX + maxX) / 2 * esc, oy = Double(caja.midY) - (minY + maxY) / 2 * esc
+        func p(_ v: SIMD2<Double>) -> CGPoint { CGPoint(x: v.x * esc + ox, y: v.y * esc + oy) }
+        ctx.setLineCap(.round)
+        for w in paredes {
+            ctx.setStrokeColor((w.exterior ? Claro.tinta : Claro.gris).cgColor)
+            ctx.setLineWidth(w.exterior ? 3 : 1.5)
+            ctx.move(to: p(w.seg.a)); ctx.addLine(to: p(w.seg.b)); ctx.strokePath()
+        }
+        for s in senas {
+            ctx.setFillColor((s.esVentana ? Claro.azul : Claro.gris).cgColor)
+            let q = p(s.p); ctx.fill(CGRect(x: q.x - 3, y: q.y - 3, width: 6, height: 6))
+        }
+        if medida.count >= 2 {
+            ctx.setStrokeColor(ARMeasureViewController.tema.lineaLargo.cgColor); ctx.setLineWidth(3)
+            ctx.move(to: p(medida[0])); for m in medida.dropFirst() { ctx.addLine(to: p(m)) }; ctx.strokePath()
+        }
+        if let t = telefono {
+            let q = p(t)
+            if let m = mirando {
+                let a = CGPoint(x: q.x + CGFloat(m.x) * 14, y: q.y + CGFloat(m.y) * 14)
+                ctx.setStrokeColor(Claro.azul.withAlphaComponent(0.6).cgColor); ctx.setLineWidth(2)
+                ctx.move(to: q); ctx.addLine(to: a); ctx.strokePath()
+            }
+            ctx.setFillColor(Claro.azul.cgColor)
+            ctx.fillEllipse(in: CGRect(x: q.x - 5, y: q.y - 5, width: 10, height: 10))
+            ctx.setStrokeColor(UIColor.white.cgColor); ctx.setLineWidth(2)
+            ctx.strokeEllipse(in: CGRect(x: q.x - 5, y: q.y - 5, width: 10, height: 10))
+        }
+    }
+}
+
 // Todo lo de la pantalla nueva vive aquí (una extensión no puede guardar nada por su cuenta).
 fileprivate final class CamaraNueva {
     let barra = UIView()
@@ -7901,6 +7966,12 @@ fileprivate final class CamaraNueva {
     // los caminos claros: otra igual, otro material, cambiar de parte, otro cuarto, otro nivel, terminar.
     var acabaDeGuardar = false
     var sigueDonde = ""
+    // UBICARSE EN EL PLANO (15 oct): las paredes que el LiDAR va viendo, el acomodo encontrado y el minimapa.
+    var planosVistos: [UUID: ARPlaneAnchor] = [:]
+    var acomodo: UbicadorEnPlano.Acomodo?
+    var acomodoCuarto = ""
+    var ultimoUbicar = Date.distantPast
+    let minimapa = MinimapaCamara(frame: .zero)
 }
 
 extension ARMeasureViewController {
@@ -7929,6 +8000,7 @@ extension ARMeasureViewController {
         armarMuelleNuevo()
         armarTarjetaNueva()
         armarPanelNuevo()
+        armarMinimapa()
         pintarCamaraNueva()
         // Si el teléfono solo tiene la voz básica (la de robot), se dice UNA vez y se enseña dónde arreglarlo.
         if VozAsistente.soloBasicas() && maqueta == 0 && !Self.yaAvisoVozBasica {
@@ -8297,6 +8369,101 @@ extension ARMeasureViewController {
         n.derecho.setAttributedTitle(Self.dosRenglones(titulo, sub, color: vivo ? .white : Claro.apagado, fuerte: true), for: .normal)
     }
 
+    private func armarMinimapa() {
+        let m = nueva.minimapa
+        m.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(m)
+        NSLayoutConstraint.activate([
+            m.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -14),
+            m.bottomAnchor.constraint(equalTo: nueva.muelle.topAnchor, constant: -10),
+            m.widthAnchor.constraint(equalToConstant: 118), m.heightAnchor.constraint(equalToConstant: 118)
+        ])
+        m.isHidden = true
+    }
+
+    // La forma del cuarto escogido en el plano (por nombre, sin importar mayúsculas), o nil si no hay plano.
+    fileprivate func formaDelCuarto() -> (paredes: [UbicadorEnPlano.ParedPlano], senas: [UbicadorEnPlano.SenaPlano])? {
+        let clave = roomName.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !clave.isEmpty else { return nil }
+        return planoPorCuarto.first(where: { $0.key.trimmingCharacters(in: .whitespaces).lowercased() == clave })?.value
+    }
+
+    // Una pared vertical que ve el LiDAR, pasada al piso en pies: el tramo de pared que cubre.
+    fileprivate static func segmentoDe(_ a: ARPlaneAnchor) -> UbicadorEnPlano.Segmento? {
+        let t = a.transform
+        let n = SIMD2<Double>(Double(t.columns.1.x), Double(t.columns.1.z))
+        let ln = simd_length(n)
+        guard ln > 0.7 else { return nil }                  // la normal de una pared va acostada
+        let nn = n / ln, dir = SIMD2(-nn.y, nn.x), pies = 3.28084
+        var lo = Double.infinity, hi = -Double.infinity, off = 0.0, cuenta = 0.0
+        for v in a.geometry.boundaryVertices {
+            let w = t * SIMD4<Float>(v.x, v.y, v.z, 1)
+            let q = SIMD2(Double(w.x), Double(w.z)) * pies
+            let s = simd_dot(q, dir)
+            lo = min(lo, s); hi = max(hi, s); off += simd_dot(q, nn); cuenta += 1
+        }
+        guard cuenta > 2, hi - lo >= 1 else { return nil }
+        off /= cuenta
+        return UbicadorEnPlano.Segmento(a: dir * lo + nn * off, b: dir * hi + nn * off)
+    }
+
+    // Las paredes que llegan del LiDAR (solo las verticales; ARKit las va agrandando mientras el teléfono se mueve).
+    fileprivate func anotarPlanosVistos(_ anchors: [ARAnchor]) {
+        guard experienciaNueva, !planoPorCuarto.isEmpty else { return }
+        for a in anchors { if let p = a as? ARPlaneAnchor, p.alignment == .vertical { nueva.planosVistos[p.identifier] = p } }
+    }
+
+    // Una vez por segundo: ¿dónde estoy en el plano de este cuarto?
+    fileprivate func ubicarseEnElPlano() {
+        let n = nueva
+        guard let forma = formaDelCuarto() else { n.acomodo = nil; return }
+        if n.acomodoCuarto != roomName { n.acomodoCuarto = roomName; n.acomodo = nil }
+        guard maqueta == 0, Date().timeIntervalSince(n.ultimoUbicar) > 1 else { return }
+        n.ultimoUbicar = Date()
+        var vistos: [UbicadorEnPlano.Visto] = []
+        for p in n.planosVistos.values {
+            guard let seg = Self.segmentoDe(p) else { continue }
+            let clase: UbicadorEnPlano.Clase
+            switch p.classification {
+            case .window: clase = .ventana
+            case .door: clase = .puerta
+            default: clase = .pared
+            }
+            vistos.append(UbicadorEnPlano.Visto(seg: seg, clase: clase))
+        }
+        var cam: SIMD2<Double>? = nil
+        if let t = sceneView.session.currentFrame?.camera.transform { cam = SIMD2(Double(t.columns.3.x), Double(t.columns.3.z)) * 3.28084 }
+        if let ac = UbicadorEnPlano.ubicar(paredes: forma.paredes, senas: forma.senas, vistos: vistos, camara: cam) {
+            // Una respuesta segura reemplaza a la anterior; una dudosa no tumba una que ya era segura.
+            if ac.seguro || !(n.acomodo?.seguro ?? false) { n.acomodo = ac }
+        }
+    }
+
+    // Los puntos que se marcaron, en pies sobre el piso (para pasarlos al plano).
+    fileprivate func puntosMedidosEnPies() -> [SIMD2<Double>] {
+        pathPoints.map { SIMD2(Double($0.x), Double($0.z)) * 3.28084 }
+    }
+
+    private func pintarMinimapa() {
+        let n = nueva, m = n.minimapa
+        guard let forma = formaDelCuarto(), n.panel.isHidden, !n.tarjetaVisible else { m.isHidden = true; return }
+        m.isHidden = false
+        if m.paredes.count != forma.paredes.count { m.paredes = forma.paredes; m.senas = forma.senas }
+        if let ac = n.acomodo, ac.seguro {
+            if maqueta == 0, let t = sceneView.session.currentFrame?.camera.transform {
+                m.telefono = ac.aplicar(SIMD2(Double(t.columns.3.x), Double(t.columns.3.z)) * 3.28084)
+                let f = SIMD2(-Double(t.columns.2.x), -Double(t.columns.2.z)), lf = simd_length(f)
+                if lf > 0.2 { let g = ac.giro; let r = SIMD2(cos(g) * f.x - sin(g) * f.y, sin(g) * f.x + cos(g) * f.y) / lf; m.mirando = r }
+            }
+            m.medida = puntosMedidosEnPies().map { ac.aplicar($0) }
+            m.estado.text = "✓ Ubicado"; m.estado.textColor = Claro.azul
+        } else {
+            m.telefono = nil; m.mirando = nil; m.medida = []
+            m.estado.text = n.acomodo == nil ? "Buscando paredes…" : "Mire otra pared"
+            m.estado.textColor = Claro.gris
+        }
+    }
+
     private func armarTarjetaNueva() {
         let n = nueva
         n.tarjeta.translatesAutoresizingMaskIntoConstraints = false
@@ -8351,6 +8518,12 @@ extension ARMeasureViewController {
     // factura y nunca se marca sola, su regla).
     fileprivate func sugerenciaDelPlano() -> (afuera: Bool, porque: String)? {
         guard section == "wall", currentCompanion?.value == "Insulation" else { return nil }
+        // 1. UBICADO EN EL PLANO: se sabe en qué pared cayó lo medido, aunque el corte sea de un pedazo.
+        if let ac = nueva.acomodo, ac.seguro, let forma = formaDelCuarto(),
+           let afuera = UbicadorEnPlano.paredMedida(ac, puntos: puntosMedidosEnPies(), paredes: forma.paredes) {
+            return (afuera, "Por dónde midió, en el plano es una pared de " + (afuera ? "afuera" : "adentro") + " de \(roomName).")
+        }
+        // 2. Sin ubicarse: por el largo, como antes.
         let clave = roomName.trimmingCharacters(in: .whitespaces).lowercased()
         guard !clave.isEmpty, let paredes = paredesPorCuarto.first(where: { $0.key.trimmingCharacters(in: .whitespaces).lowercased() == clave })?.value,
               !paredes.isEmpty else { return nil }
@@ -8622,6 +8795,8 @@ extension ARMeasureViewController {
         }
         // El número cambia con cada cuadro; lo demás solo cuando cambia el estado (pintarCamaraNueva).
         if pendingStart != nil || stage == .measuringWidth { pintarCentroNuevo() }
+        ubicarseEnElPlano()
+        pintarMinimapa()
         nueva.aviso.isHidden = Date() > nueva.avisoHasta
     }
 
@@ -9172,6 +9347,22 @@ extension ARMeasureViewController {
             }
             // La línea que se va arrastrando, con el MISMO color que usa la cámara de verdad (amarilla en el largo,
             // azul en el ancho). En el simulador no hay ARKit que la proyecte: se dibuja de una esquina a la mira.
+            if maqueta == 10 {
+                // Ubicado en el plano: el Living Room de 20 x 12 con su ventana, midiendo un pedazo de la pared de afuera.
+                func w(_ a: Double, _ b: Double, _ c: Double, _ d: Double, _ e: Bool) -> UbicadorEnPlano.ParedPlano {
+                    UbicadorEnPlano.ParedPlano(seg: UbicadorEnPlano.Segmento(a: SIMD2(a, b), b: SIMD2(c, d)), exterior: e) }
+                planoPorCuarto = ["Living Room": ([w(0, 0, 20, 0, true), w(20, 0, 20, 12, false), w(20, 12, 0, 12, false), w(0, 12, 0, 0, true)],
+                                                  [UbicadorEnPlano.SenaPlano(p: SIMD2(6, 0), esVentana: true), UbicadorEnPlano.SenaPlano(p: SIMD2(20, 8), esVentana: false)])]
+                nueva.acomodo = UbicadorEnPlano.Acomodo(giro: 0, mov: .zero, puntaje: 20, segundo: 4, seguro: true)
+                nueva.acomodoCuarto = "Living Room"
+                let m = Float(1 / 3.28084)
+                pathPoints = [SIMD3<Float>(0.2 * m, 0, 3 * m), SIMD3<Float>(0.2 * m, 0, 7.5 * m)]
+                pathTotalFeet = 4.5; pendingStart = pathPoints.last; nueva.maquetaVivo = 0
+                stage = .measuringLength
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                    self?.nueva.minimapa.telefono = SIMD2(6, 6); self?.nueva.minimapa.mirando = SIMD2(-0.94, -0.34)
+                }
+            }
             if maqueta == 8 {
                 guardada("Living Room", "wall", "Drywall", 24.5, 4)
                 pathPoints = []; pendingStart = nil; currentWidthFeet = nil; pathTotalFeet = 0; widthPoints = []
@@ -9198,5 +9389,156 @@ extension ARMeasureViewController {
     private func anotarVisitaDeMaqueta(_ cuarto: String) {
         let antes = roomName
         roomName = cuarto; anotarVisita(); roomName = antes
+    }
+}
+
+// MARK: - ============ UBICARSE DENTRO DEL PLANO (15 oct 2026) ============
+//
+// Su pedido: "ya tenemos el mapa en 3D... cuando seleccionamos en qué cuarto vamos a medir, el sistema ya tiene que
+// saber cómo es el cuarto, y el LiDAR solo va a ayudar a ubicarnos... quizá reconozca otra pared o la ventana".
+//
+// CÓMO: el plano y la cámara usan el MISMO piso (x, z del mundo, en pies), pero cada vez que se abre la cámara ARKit
+// arranca con su propio origen. Hay que encontrar el acomodo — un giro y un movimiento — que hace calzar las paredes
+// que el LiDAR va viendo con las paredes de ESE cuarto en el plano. Las ventanas y puertas que el iPhone reconoce
+// sirven de señas para desempatar (un cuarto rectangular se ve igual al revés).
+//
+// LO HONESTO: solo se dice "ubicado" cuando una sola respuesta gana con claridad. Con una sola pared vista, o un cuarto
+// simétrico sin ventana ni puerta a la vista, se dice que todavía no — nunca se adivina. Y una pared ya demolida (solo
+// studs) el LiDAR casi no la ve: sirven las que siguen enteras arriba del corte, la ventana, la puerta.
+struct UbicadorEnPlano {
+    struct Segmento { var a: SIMD2<Double>; var b: SIMD2<Double>
+        var largo: Double { simd_length(b - a) }
+        var medio: SIMD2<Double> { (a + b) / 2 }
+        var angulo: Double { atan2(b.y - a.y, b.x - a.x) }
+    }
+    struct ParedPlano { var seg: Segmento; var exterior: Bool }
+    struct SenaPlano { var p: SIMD2<Double>; var esVentana: Bool }        // ventana o puerta del plano (su centro)
+    enum Clase { case pared, ventana, puerta }
+    struct Visto { var seg: Segmento; var clase: Clase }                  // lo que el LiDAR ve, ya en pies (x, z)
+    struct Acomodo {
+        var giro: Double; var mov: SIMD2<Double>
+        var puntaje: Double; var segundo: Double; var seguro: Bool
+        func aplicar(_ p: SIMD2<Double>) -> SIMD2<Double> {
+            let c = cos(giro), s = sin(giro)
+            return SIMD2(c * p.x - s * p.y, s * p.x + c * p.y) + mov
+        }
+        func aplicar(_ s: Segmento) -> Segmento { Segmento(a: aplicar(s.a), b: aplicar(s.b)) }
+    }
+
+    /// Diferencia de dirección entre dos líneas, sin importar hacia dónde apunten (0 a π/2).
+    static func difLinea(_ a: Double, _ b: Double) -> Double {
+        var d = fmod(abs(a - b), Double.pi)
+        if d > Double.pi / 2 { d = Double.pi - d }
+        return d
+    }
+    static func distanciaALinea(_ p: SIMD2<Double>, _ s: Segmento) -> Double {
+        let d = s.b - s.a, L = simd_length(d)
+        guard L > 1e-6 else { return simd_length(p - s.a) }
+        return abs((p.x - s.a.x) * d.y - (p.y - s.a.y) * d.x) / L
+    }
+    /// Dónde cae `p` a lo largo de la pared (0 = un extremo, largo = el otro).
+    static func alLargo(_ p: SIMD2<Double>, _ s: Segmento) -> Double {
+        let d = s.b - s.a, L = simd_length(d)
+        guard L > 1e-6 else { return 0 }
+        return simd_dot(p - s.a, d) / L
+    }
+
+    /// Qué tan bien calza un acomodo: cuántos pies de lo visto caen sobre paredes del plano, más las señas.
+    static func puntaje(_ ac: Acomodo, paredes: [ParedPlano], senas: [SenaPlano], vistos: [Visto], camara: SIMD2<Double>?, caja: (SIMD2<Double>, SIMD2<Double>)) -> Double {
+        if let c = camara {
+            let p = ac.aplicar(c)
+            // El teléfono tiene que estar DENTRO del cuarto escogido (con un pie de holgura).
+            if p.x < caja.0.x - 1.5 || p.y < caja.0.y - 1.5 || p.x > caja.1.x + 1.5 || p.y > caja.1.y + 1.5 { return -1_000 }
+        }
+        var total = 0.0
+        for v in vistos {
+            let s = ac.aplicar(v.seg)
+            if v.clase == .pared {
+                var mejor = false
+                for w in paredes where difLinea(s.angulo, w.seg.angulo) < 0.21 {
+                    let d = distanciaALinea(s.medio, w.seg)
+                    let t = alLargo(s.medio, w.seg)
+                    if d < 0.7 && t > -1.5 && t < w.seg.largo + 1.5 { mejor = true; break }
+                }
+                // Lo que calza suma su largo; lo que cae en medio de la nada (o en una pared que no existe) resta.
+                total += mejor ? min(v.seg.largo, 20) : -0.5 * min(v.seg.largo, 20)
+            } else {
+                let quiere = v.clase == .ventana
+                let cerca = senas.filter { $0.esVentana == quiere }.map { simd_length($0.p - s.medio) }.min() ?? .infinity
+                total += cerca < 2.5 ? 4 : -2
+            }
+        }
+        return total
+    }
+
+    /// El mejor acomodo, o nil si todavía no hay con qué. `seguro` = uno gana con claridad.
+    static func ubicar(paredes: [ParedPlano], senas: [SenaPlano], vistos: [Visto], camara: SIMD2<Double>?) -> Acomodo? {
+        let pp = paredes.filter { $0.seg.largo >= 1.5 }
+        let muros = vistos.filter { $0.clase == .pared && $0.seg.largo >= 1.0 }.sorted { $0.seg.largo > $1.seg.largo }
+        guard !pp.isEmpty, let o0 = muros.first else { return nil }
+        // La segunda pared tiene que ir cruzada (de otro lado del cuarto): con dos paralelas no se sabe dónde va.
+        guard let o1 = muros.dropFirst().first(where: { difLinea($0.seg.angulo, o0.seg.angulo) > 0.78 }) else { return nil }
+        let pts = pp.flatMap { [$0.seg.a, $0.seg.b] }
+        let caja = (SIMD2(pts.map { $0.x }.min()!, pts.map { $0.y }.min()!), SIMD2(pts.map { $0.x }.max()!, pts.map { $0.y }.max()!))
+        var candidatos: [Acomodo] = []
+        for wi in pp {
+            for vuelta in [0.0, Double.pi] {
+                let giro = wi.seg.angulo - o0.seg.angulo + vuelta
+                let c = cos(giro), s = sin(giro)
+                func rot(_ p: SIMD2<Double>) -> SIMD2<Double> { SIMD2(c * p.x - s * p.y, s * p.x + c * p.y) }
+                let ni = SIMD2(-sin(wi.seg.angulo), cos(wi.seg.angulo))
+                let ci = simd_dot(ni, wi.seg.a) - simd_dot(ni, rot(o0.seg.medio))
+                let a1 = o1.seg.angulo + giro
+                for wk in pp where difLinea(wk.seg.angulo, a1) < 0.21 {
+                    let nk = SIMD2(-sin(wk.seg.angulo), cos(wk.seg.angulo))
+                    let ck = simd_dot(nk, wk.seg.a) - simd_dot(nk, rot(o1.seg.medio))
+                    let det = ni.x * nk.y - ni.y * nk.x
+                    guard abs(det) > 0.3 else { continue }
+                    let mov = SIMD2((ci * nk.y - ni.y * ck) / det, (ni.x * ck - ci * nk.x) / det)
+                    var ac = Acomodo(giro: giro, mov: mov, puntaje: 0, segundo: 0, seguro: false)
+                    ac.puntaje = puntaje(ac, paredes: pp, senas: senas, vistos: vistos, camara: camara, caja: caja)
+                    candidatos.append(ac)
+                }
+            }
+        }
+        // El mejor, y el mejor de los que son OTRA respuesta (otro giro, u otro lugar a más de pie y medio).
+        guard let mejor = candidatos.max(by: { $0.puntaje < $1.puntaje }), mejor.puntaje > 0 else { return nil }
+        let otro = candidatos.filter { ac in
+            let dg = abs(atan2(sin(ac.giro - mejor.giro), cos(ac.giro - mejor.giro)))
+            return dg > 0.17 || simd_length(ac.mov - mejor.mov) > 1.5
+        }.map { $0.puntaje }.max() ?? -1_000
+        var r = mejor
+        r.segundo = otro
+        // Seguro: al menos 6 pies de pared calzando y que le gane por 4 a cualquier otra respuesta (una ventana o puerta
+        // que calza, o 4 pies más de pared). En un cuarto simétrico sin señas las dos empatan: no se dice ubicado.
+        r.seguro = mejor.puntaje >= 6 && mejor.puntaje - otro >= 4
+        return r
+    }
+
+    /// Con el acomodo: ¿sobre qué paredes del plano cayó lo que se midió? (afuera = true). nil si no se sabe.
+    static func paredMedida(_ ac: Acomodo, puntos: [SIMD2<Double>], paredes: [ParedPlano]) -> Bool? {
+        guard puntos.count >= 2 else { return nil }
+        var tipo: Bool? = nil
+        for i in 1..<puntos.count {
+            let s = Segmento(a: ac.aplicar(puntos[i - 1]), b: ac.aplicar(puntos[i]))
+            guard s.largo >= 1 else { continue }
+            let cerca = paredes.filter { w in
+                difLinea(s.angulo, w.seg.angulo) < 0.3 && distanciaALinea(s.medio, w.seg) < 1.5
+                    && alLargo(s.medio, w.seg) > -1 && alLargo(s.medio, w.seg) < w.seg.largo + 1
+            }.sorted { distanciaALinea(s.medio, $0.seg) < distanciaALinea(s.medio, $1.seg) }
+            guard let w = cerca.first else { return nil }
+            if let t = tipo, t != w.exterior { return nil }
+            tipo = w.exterior
+        }
+        return tipo
+    }
+}
+
+// Las paredes que ARKit va encontrando (para ubicarse en el plano). Solo se guardan; se usan una vez por segundo.
+extension ARMeasureViewController {
+    func session(_ session: ARSession, didAdd anchors: [ARAnchor]) { anotarPlanosVistos(anchors) }
+    func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) { anotarPlanosVistos(anchors) }
+    func session(_ session: ARSession, didRemove anchors: [ARAnchor]) {
+        for a in anchors { nueva.planosVistos[a.identifier] = nil }
     }
 }
