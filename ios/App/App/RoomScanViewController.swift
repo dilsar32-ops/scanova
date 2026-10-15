@@ -37,11 +37,10 @@ enum RoomScanOutcome {
 // Wraps RoomPlan's own RoomCaptureView, which already renders the live 3D
 // wireframe overlay and Apple's built-in scan-quality coaching text during
 // capture. Multi-room: after each room, capture stops (keeping the
-// ARSession itself alive via stop(pauseARSession: false) - the real
-// precondition for StructureBuilder to align the next room into the same
-// coordinate space, confirmed against Apple's WWDC23 RoomPlan session and
-// developer-forum guidance rather than assumed) and the user chooses to
-// scan another room or finish. Only the thin button/prompt bar around
+// ARSession itself alive via stop(pauseARSession: false)) and the user
+// chooses to scan another room or finish. CORRECCIÓN (14-oct): eso no deja
+// los cuartos en un mismo espacio - cada captura trae su propio origen y es
+// StructureBuilder el que los junta (ver "LOS MARCOS"). Only the thin button/prompt bar around
 // Apple's own camera screen is custom here - no custom SceneKit/RealityKit
 // renderer, same as Phase 1.
 class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeechSynthesizerDelegate {
@@ -294,6 +293,9 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
     private var mergeGeneration = 0
     private var mergeInFlight = false
     private var mergeQueued = false
+    // La casa juntada por Apple en el último merge en vivo (CapturedStructure,
+    // iOS 17): la vista 3D de la revisión la exporta entera.
+    private var liveStructure: Any?
 
     private let speechSynthesizer = AVSpeechSynthesizer()
     private let speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "es-MX"))
@@ -400,6 +402,35 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
     private var parcheDe: [Int: Int] = [:]
     private var incompletos = Set<Int>()
     private var huecosPorGrupo: [Int: [(CGPoint, CGPoint)]] = [:]
+    // LOS MARCOS (14-oct, la casa de Harold: "puso un cuarto encima de la
+    // cocina"). Cada captura de RoomPlan arranca con SU propio origen: ARKit
+    // pone el (0,0) donde está el teléfono al empezar. Las paredes de dos
+    // capturas distintas NO se pueden juntar ni comparar tal cual; antes se
+    // juntaban (el parche con su cuarto, la caminata con todos los cuartos,
+    // el minimapa con todo) y de ahí salían cuartos encimados y avisos que no
+    // eran. Aquí se lleva la cuenta de qué captura es cada cuarto y del
+    // movimiento que lleva cada uno al plano.
+    private var capturaActual = 0
+    private var capturaDeCuarto: [Int: Int] = [:]
+    // Cuarto i (como lo entregó RoomPlan) -> el plano en vivo (el último
+    // merge de Apple). Se saca de las MISMAS paredes antes y después.
+    private var marcoVivo: [Int: FloorPlanEncoder.Rigido2D] = [:]
+    // Parche p -> su cuarto. Lo saca Apple juntando los dos (StructureBuilder
+    // con solo esos dos); si no cuadra, el parche NO se pega.
+    private var alineacionParche: [Int: FloorPlanEncoder.Rigido2D] = [:]
+    private var parcheSinAlinear = Set<Int>()
+    private var alineandoParches = false
+    private var alListosLosMarcos: [() -> Void] = []
+    // "Terminar" tocado con la captura siguiente ya andando: si lo que trajo
+    // es el mismo cuarto donde estaba parado, se junta con ese cuarto (como
+    // un parche) en vez de guardarse como otro cuarto encima.
+    private var posiblesDuplicados = Set<Int>()
+    // El nivel en que iba antes de "Completar" un cuarto de otro piso.
+    private var nivelAntesDeCompletar: Int?
+    // La entrega va con los cuartos tal como se escanearon (sin StructureBuilder:
+    // un solo cuarto, merge que falló o el vigilante): cada uno ya está en su marco.
+    private var entregaCruda = false
+    private struct ParAlineado { let t: FloorPlanEncoder.Rigido2D; let frac: Double; let dentro: Bool }
     private struct Aviso { let grupo: Int; let titulo: String; let terminar: Bool }
     private var aviso: Aviso?
     private var enRevisionFinal = false
@@ -509,7 +540,7 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         // binary) exactly which build a field scan ran on - a scan came
         // back with a payload only an older build could emit, and this
         // removes that ambiguity permanently. Bump per deploy.
-        NSLog("[RoomScan] build tag: 2026-10-16 (segundo cerebro, un solo asistente)")
+        NSLog("[RoomScan] build tag: 2026-10-14-marcos (cada captura en su marco, parche acomodado por Apple)")
         view.backgroundColor = .black
         captureView.delegate = self
         // Sin el modelito 3D de Apple abajo: el plano en vivo ya está en el
@@ -1254,7 +1285,7 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         // Los del proyecto: los que ya se usaron en este plano y los que este
         // teléfono ya aprendió de él.
         let usados = voiceNames.compactMap { $0 } + learnedRoomNames.sorted().map { $0.prefix(1).uppercased() + $0.dropFirst() }
-        for n in usados where !nombres.contains(where: { Self.sinAcentos($0) == Self.sinAcentos(n) }) {
+        for n in usados where !Self.traeOrden(n) && !nombres.contains(where: { Self.sinAcentos($0) == Self.sinAcentos(n) }) {
             nombres.append(n)
         }
         return nombres
@@ -1508,7 +1539,9 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         aviso = nil
         completandoIndice = a.grupo
         pendingRoomNameAfterGap = nil
-        // El parche se escanea en el nivel de SU cuarto.
+        // El parche se escanea en el nivel de SU cuarto; al terminarlo se
+        // regresa al nivel en que iba.
+        if nivelAntesDeCompletar == nil { nivelAntesDeCompletar = currentLevel }
         if a.grupo < roomLevels.count { currentLevel = roomLevels[a.grupo] }
         let nombre = a.grupo < voiceNames.count ? voiceNames[a.grupo] : nil
         startCapturingRoom()
@@ -1538,15 +1571,167 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         }
     }
 
+    // ===== LOS MARCOS =====
+    // Del cuarto i (como lo entregó RoomPlan) al plano en vivo. Un parche
+    // pasa primero a su cuarto y de ahí al plano. nil = todavía no se sabe:
+    // ese cuarto no se dibuja junto a los demás ni se compara con ellos
+    // (mejor que falte un momento a que salga encimado).
+    private func marcoEnPlano(_ i: Int) -> FloorPlanEncoder.Rigido2D? {
+        if let g = parcheDe[i] {
+            guard let a = alineacionParche[i], let m = marcoVivo[g] else { return nil }
+            return a.luego(m)
+        }
+        return marcoVivo[i]
+    }
+
+    private func lineaPies(_ s: CapturedRoom.Surface) -> (CGPoint, CGPoint) {
+        let f = FloorPlanEncoder.metersToFeet
+        let (a, b) = FloorPlanEncoder.wallEndpoints(s)
+        return (CGPoint(x: Double(a.x) * f, y: Double(a.y) * f), CGPoint(x: Double(b.x) * f, y: Double(b.y) * f))
+    }
+    private func centroPies(_ s: CapturedRoom.Surface) -> CGPoint {
+        let f = FloorPlanEncoder.metersToFeet
+        return CGPoint(x: Double(s.transform.columns.3.x) * f, y: Double(s.transform.columns.3.z) * f)
+    }
+    private func moverLinea(_ l: (CGPoint, CGPoint), _ t: FloorPlanEncoder.Rigido2D) -> (CGPoint, CGPoint) {
+        let f = FloorPlanEncoder.metersToFeet
+        return (t.aplicarPies(l.0, f: f), t.aplicarPies(l.1, f: f))
+    }
+
+    // LO QUE LOS PARCHES SÍ LE AGREGAN A SU CUARTO, en las coordenadas del
+    // cuarto (pies): solo los pedazos que caen en un hueco de su contorno y
+    // que no se meten en el piso de otro cuarto, y las puertas o ventanas
+    // pegadas a esos pedazos que el cuarto no tenía. Un parche que no se
+    // pudo alinear no agrega nada.
+    private struct PiezasDeGrupo {
+        var paredes: [(CGPoint, CGPoint)] = []
+        var aberturas: [(CGPoint, CGPoint, MiniCuarto.Tipo)] = []
+        var pasos: [(CGPoint, Double)] = []
+    }
+    // Las paredes de los otros cuartos del nivel, llevadas al marco del
+    // cuarto g (solo si el plano en vivo ya los juntó), cuarto por cuarto.
+    private func vecinosEnMarcoDe(_ g: Int) -> [[(CGPoint, CGPoint)]] {
+        guard let mg = marcoVivo[g] else { return [] }
+        let alCuarto = mg.inverso
+        let nivel = g < roomLevels.count ? roomLevels[g] : 1
+        return gruposDelNivel(nivel).filter { $0 != g }.compactMap { j in
+            guard let mj = marcoVivo[j] else { return nil }
+            let t = mj.luego(alCuarto)
+            return capturedRooms[j].walls.map { moverLinea(lineaPies($0), t) }
+        }
+    }
+
+    private func piezasDelGrupo(_ g: Int) -> PiezasDeGrupo {
+        var out = PiezasDeGrupo()
+        guard g < capturedRooms.count, !parches(de: g).isEmpty else { return out }
+        let f = FloorPlanEncoder.metersToFeet
+        // Los otros cuartos del nivel, llevados al marco de este cuarto (si
+        // el plano en vivo ya los juntó).
+        let vecinos = vecinosEnMarcoDe(g)
+        let otras = vecinos.flatMap { $0 }
+        let contornos = vecinos.map { FloorPlanEncoder.contornoYHuecos(wallsFt: $0).poly }
+        var aceptadas = capturedRooms[g].walls.map(lineaPies)
+        let viejas = (capturedRooms[g].doors + capturedRooms[g].windows + capturedRooms[g].openings).map(centroPies)
+        for p in parches(de: g) where p < capturedRooms.count {
+            guard let a = alineacionParche[p] else { continue }
+            let r = capturedRooms[p]
+            let pared = r.walls.map { moverLinea(lineaPies($0), a) }
+            let piezas = FloorPlanEncoder.piezasDeParche(parcheFt: pared, propiasFt: aceptadas, otrasFt: otras, otrosContornos: contornos)
+            out.paredes += piezas
+            aceptadas += piezas
+            let tipos: [([CapturedRoom.Surface], MiniCuarto.Tipo)] = [(r.doors, .puerta), (r.windows, .ventana), (r.openings, .paso)]
+            for (lista, tipo) in tipos {
+                for o in lista {
+                    let c = a.aplicarPies(centroPies(o), f: f)
+                    guard piezas.contains(where: { FloorPlanEncoder.distSegmento(c, $0.0, $0.1) <= 1.0 }) else { continue }
+                    guard !viejas.contains(where: { hypot($0.x - c.x, $0.y - c.y) < 1.5 }),
+                          !out.pasos.contains(where: { hypot($0.0.x - c.x, $0.0.y - c.y) < 1.5 }) else { continue }
+                    let l = moverLinea(lineaPies(o), a)
+                    out.aberturas.append((l.0, l.1, tipo))
+                    out.pasos.append((c, Double(o.dimensions.x) * f))
+                }
+            }
+        }
+        return out
+    }
+
+    // Las paredes del cuarto con lo que sus parches sí agregaron, y sus
+    // pasos (puertas, ventanas, aberturas), todo en el marco del cuarto.
+    private func paredesDelGrupo(_ g: Int) -> (paredes: [(CGPoint, CGPoint)], pasos: [(CGPoint, Double)]) {
+        guard g < capturedRooms.count else { return ([], []) }
+        let f = FloorPlanEncoder.metersToFeet
+        let r = capturedRooms[g]
+        let pz = piezasDelGrupo(g)
+        let pasos = (r.doors + r.windows + r.openings).map { (centroPies($0), Double($0.dimensions.x) * f) } + pz.pasos
+        return (r.walls.map(lineaPies) + pz.paredes, pasos)
+    }
+
+    // ¿El contorno del cuarto cierra? Lados abiertos y esquinas sin cerrar,
+    // con lo que sus parches alineados sí agregaron. Se guarda por grupo
+    // (el cuarto y sus parches).
+    @discardableResult
+    private func revisarGrupo(_ g: Int) -> (gaps: [FloorPlanEncoder.OutlineGap], esquinas: [FloorPlanEncoder.CornerFinding]) {
+        let (todas, pasos) = paredesDelGrupo(g)
+        // Una pared del cuarto de al lado que RoomPlan metió en este no cuenta
+        // para buscar huecos (paredesAjenas); un hueco que cubre la pared de
+        // otro cuarto tampoco es hueco.
+        let otras = vecinosEnMarcoDe(g).flatMap { $0 }
+        let ajenas = FloorPlanEncoder.paredesAjenas(propias: todas, otras: otras)
+        let sketchWalls = todas.enumerated().filter { !ajenas.contains($0.offset) }.map { $0.element }
+        let openGaps = FloorPlanEncoder.outlineGaps(wallsFt: sketchWalls)
+            .filter { $0.ft > FloorPlanEncoder.outlineGapWarnFt
+                      && !FloorPlanEncoder.gapCoveredByWalls($0, walls: sketchWalls)
+                      && (otras.isEmpty || !FloorPlanEncoder.gapCoveredByWalls($0, walls: otras)) }
+        roomGapsByIndex[g] = openGaps.map { $0.ft }
+        huecosPorGrupo[g] = openGaps.map { ($0.a, $0.b) }
+        let esquinas = FloorPlanEncoder.cornerFindings(wallsFt: sketchWalls, portsFt: pasos.map { (center: $0.0, widthFt: $0.1) })
+        roomCornersByIndex[g] = esquinas
+        huecosPorGrupo[g, default: []] += esquinas.filter { $0.d >= 2 }.flatMap { [($0.a, $0.vertex), ($0.vertex, $0.b)] }
+        for p in parches(de: g) { roomGapsByIndex[p] = []; roomCornersByIndex[p] = [] }
+        return (openGaps, esquinas)
+    }
+
+    // Las esquinas del cuarto que acaba de terminar, en el panel del plano
+    // (que dibuja el plano JUNTADO): solo si ya se sabe dónde va ese cuarto.
+    private func marcarEsquinasEnPanel(_ g: Int?) {
+        guard let g = g, let m = marcoEnPlano(g) else { floorPlanPanelView.marcarEsquinas([]); return }
+        let f = FloorPlanEncoder.metersToFeet
+        floorPlanPanelView.marcarEsquinas((roomCornersByIndex[g] ?? []).map { m.aplicarPies($0.vertex, f: f) })
+    }
+
+    // El cuarto con lo que sus parches SÍ le agregaron (ya acomodado), en
+    // el marco del cuarto. Antes se le sumaban las paredes del parche tal
+    // cual, en las coordenadas de otra captura.
     private func miniGrupo(_ g: Int) -> MiniCuarto {
         let base = miniCuarto(capturedRooms[g], nombre: nombreDelGrupo(g))
-        var paredes = base.paredes, ab = base.aberturas
-        for p in parches(de: g) {
-            let m = miniCuarto(capturedRooms[p], nombre: nil)
-            paredes += m.paredes
-            ab += m.aberturas
+        let pz = piezasDelGrupo(g)
+        return MiniCuarto(nombre: base.nombre, paredes: base.paredes + pz.paredes, aberturas: base.aberturas + pz.aberturas)
+    }
+
+    // El mismo, llevado al plano. nil si todavía no se sabe dónde va.
+    private func miniGrupoEnPlano(_ g: Int) -> MiniCuarto? {
+        guard let m = marcoEnPlano(g) else { return nil }
+        let c = miniGrupo(g)
+        return MiniCuarto(nombre: c.nombre, paredes: c.paredes.map { moverLinea($0, m) },
+                          aberturas: c.aberturas.map { let l = moverLinea(($0.0, $0.1), m); return (l.0, l.1, $0.2) })
+    }
+
+    // Los cuartos del nivel para dibujar JUNTOS: en el plano los que ya se
+    // sabe dónde van. Si ninguno se sabe (sin merge), cada uno en su marco
+    // puesto en fila, sin encimarlos, como el panel de arriba.
+    private func gruposParaDibujar(_ grupos: [Int]) -> [MiniCuarto] {
+        let enPlano = grupos.compactMap { miniGrupoEnPlano($0) }
+        if !enPlano.isEmpty || grupos.isEmpty { return enPlano }
+        var cursor: CGFloat = 0
+        return grupos.map { g in
+            let c = miniGrupo(g)
+            let xs = c.paredes.flatMap { [$0.0.x, $0.1.x] }
+            let dx = cursor - (xs.min() ?? 0)
+            cursor = (xs.max() ?? 0) + dx + 3
+            func mv(_ p: CGPoint) -> CGPoint { CGPoint(x: p.x + dx, y: p.y) }
+            return MiniCuarto(nombre: c.nombre, paredes: c.paredes.map { (mv($0.0), mv($0.1)) },
+                              aberturas: c.aberturas.map { (mv($0.0), mv($0.1), $0.2) })
         }
-        return MiniCuarto(nombre: base.nombre, paredes: paredes, aberturas: ab)
     }
 
     private func abrirRevisionFinal() {
@@ -1558,7 +1743,7 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         planoGrande.isHidden = false
         vista3D.isHidden = true
         let grupos = gruposDelNivel(currentLevel)
-        planoGrande.pintar(guardados: grupos.map { miniGrupo($0) }, actual: nil, punto: nil)
+        planoGrande.pintar(guardados: gruposParaDibujar(grupos), actual: nil, punto: nil)
         let total = gruposDelNivel(nil).count
         let niveles = Set(gruposDelNivel(nil).map { $0 < roomLevels.count ? roomLevels[$0] : 1 }).count
         var datos = "\(total) cuarto\(total == 1 ? "" : "s")" + (niveles > 1 ? " · \(niveles) niveles" : "") + " · se ve \(nombreDelNivel(currentLevel))"
@@ -1575,26 +1760,48 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         if tres && !tresDCargado { cargar3D() }
     }
 
-    // El 3D: cada cuarto exportado por RoomPlan (cajas limpias) y puestos
-    // juntos; vienen en las mismas coordenadas, así que encajan solos.
+    // El 3D: la casa juntada por Apple, exportada entera (cajas limpias).
     private func cargar3D() {
         tresDCargado = true
-        let cuartos = capturedRooms.enumerated().filter { !deletedRoomIndices.contains($0.offset) }.map { $0.element }
+        // La casa JUNTADA por Apple (el último merge en vivo), en un solo
+        // archivo. Antes se exportaba cada cuarto por separado y se ponían
+        // juntos "porque venían en las mismas coordenadas": no venían. Cada
+        // captura trae su propio origen, y en 3D salían encimados (y los
+        // parches, encima de su cuarto).
+        let estructura = liveStructure
+        let visibles = gruposDelNivel(nil)
+        let cuartos = visibles.map { capturedRooms[$0] }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let dir = FileManager.default.temporaryDirectory.appendingPathComponent("revision3d-\(UUID().uuidString)")
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-            var urls: [URL] = []
-            for (i, r) in cuartos.enumerated() {
-                let u = dir.appendingPathComponent("cuarto\(i).usdz")
-                if (try? r.export(to: u, exportOptions: .parametric)) != nil { urls.append(u) }
+            // (archivo, cuánto se corre en x para no encimarse)
+            var archivos: [(URL, Float)] = []
+            if #available(iOS 17.0, *), let s = estructura as? CapturedStructure {
+                let u = dir.appendingPathComponent("casa.usdz")
+                if (try? s.export(to: u, exportOptions: .parametric)) != nil { archivos.append((u, 0)) }
+            } else {
+                // Sin casa juntada (falló el merge o iOS 16): cada cuarto en fila,
+                // separado, igual que el plano 2D de la revisión. Nunca encimados
+                // ni una pantalla vacía.
+                var cursor: Float = 0
+                for (i, r) in cuartos.enumerated() {
+                    let u = dir.appendingPathComponent("cuarto\(i).usdz")
+                    guard (try? r.export(to: u, exportOptions: .parametric)) != nil else { continue }
+                    let xs = r.walls.flatMap { w -> [Float] in let (a, b) = FloorPlanEncoder.wallEndpoints(w); return [a.x, b.x] }
+                    let dx = cursor - (xs.min() ?? 0)
+                    cursor = (xs.max() ?? 0) + dx + 1
+                    archivos.append((u, dx))
+                }
             }
             DispatchQueue.main.async {
                 guard let self = self, self.enRevisionFinal else { return }
                 let escena = SCNScene()
-                for u in urls {
-                    if let s = try? SCNScene(url: u, options: nil) {
-                        for c in s.rootNode.childNodes { escena.rootNode.addChildNode(c) }
-                    }
+                for (u, dx) in archivos {
+                    guard let s = try? SCNScene(url: u, options: nil) else { continue }
+                    let nodo = SCNNode()
+                    nodo.position = SCNVector3(dx, 0, 0)
+                    for c in s.rootNode.childNodes { nodo.addChildNode(c) }
+                    escena.rootNode.addChildNode(nodo)
                 }
                 self.vista3D.scene = escena
             }
@@ -1654,19 +1861,43 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         validacionGen += 1
         let gen = validacionGen
         updateUI()
-        struct G { let g: Int; let nivel: Int; let paredes: [(CGPoint, CGPoint)]; let pasos: [(CGPoint, Double)] }
+        // Los cuartos se comparan entre sí YA acomodados en el plano: primero
+        // se espera a que el merge en vivo y los parches terminen.
+        esperarMarcos { [weak self] in
+            guard let self = self, self.revisandoTodo, !self.sessionDelivered, self.validacionGen == gen else { return }
+            self.validarConMarcos(gen: gen)
+        }
+    }
+
+    private func validarConMarcos(gen: Int) {
+        typealias R = FloorPlanEncoder.Rigido2D
+        struct G {
+            let g: Int; let nivel: Int
+            let paredes: [(CGPoint, CGPoint)]; let pasos: [(CGPoint, Double)]
+            let enPlano: Bool
+            let marco: R?
+            // Qué capturas tienen sus poses y fotos en el marco de este grupo,
+            // y cómo pasarlas a ese marco (metros).
+            let capturas: [Int: R]
+        }
         let f = FloorPlanEncoder.metersToFeet
         var grupos: [G] = []
         for g in gruposDelNivel(nil) {
-            let miembros = [g] + parches(de: g)
-            let paredes = miembros.flatMap { roomSketch(for: capturedRooms[$0], name: nil).walls }
-            let pasos: [(CGPoint, Double)] = miembros.flatMap { i -> [(CGPoint, Double)] in
-                let r = capturedRooms[i]
-                return (r.doors + r.windows + r.openings).map { o in
-                    (CGPoint(x: Double(o.transform.columns.3.x) * f, y: Double(o.transform.columns.3.z) * f), Double(o.dimensions.x) * f)
-                }
+            var (paredes, pasos) = paredesDelGrupo(g)
+            let marco = marcoEnPlano(g)
+            if let m = marco {
+                paredes = paredes.map { moverLinea($0, m) }
+                pasos = pasos.map { (m.aplicarPies($0.0, f: f), $0.1) }
             }
-            grupos.append(G(g: g, nivel: g < roomLevels.count ? roomLevels[g] : 1, paredes: paredes, pasos: pasos))
+            // La captura del cuarto y la de cada parche que sí se acomodó.
+            var capturas: [Int: R] = [:]
+            if let c = capturaDeCuarto[g] { capturas[c] = marco ?? .identidad }
+            for p in parches(de: g) {
+                guard let c = capturaDeCuarto[p], let a = alineacionParche[p] else { continue }
+                capturas[c] = marco.map { a.luego($0) } ?? a
+            }
+            grupos.append(G(g: g, nivel: g < roomLevels.count ? roomLevels[g] : 1, paredes: paredes, pasos: pasos,
+                            enPlano: marco != nil, marco: marco, capturas: capturas))
         }
         let rec = keyframeRecorder
         let alTerminar: ([ScanKeyframeRecorder.PoseRecord], [ScanKeyframeRecorder.KeyframeMeta]) -> Void = { [weak self] poses, fotos in
@@ -1674,14 +1905,35 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
                 var problemas: [Problema] = []
                 var cuenta = ["revisados": 0, "otroCuarto": 0, "puerta": 0, "camino": 0, "foto": 0]
                 let empezo = Date()
+                // Las capturas que ya se sabe dónde van en el plano.
+                var alPlano: [Int: R] = [:]
+                for G0 in grupos where G0.enPlano { for (c, t) in G0.capturas { alPlano[c] = t } }
                 for G0 in grupos {
-                    let otras = grupos.filter { $0.g != G0.g && $0.nivel == G0.nivel }.flatMap { $0.paredes }
-                    let pasos = grupos.filter { $0.nivel == G0.nivel }.flatMap { $0.pasos }
-                    let camino: [CGPoint] = poses.filter { $0.level == G0.nivel }.map {
-                        CGPoint(x: Double($0.transform.columns.3.x) * f, y: Double($0.transform.columns.3.z) * f)
+                    // Lo de los otros cuartos solo cuenta si los dos están en el
+                    // plano; un cuarto que todavía no se acomodó se revisa solo.
+                    let vecinos = G0.enPlano ? grupos.filter { $0.g != G0.g && $0.nivel == G0.nivel && $0.enPlano } : []
+                    let otras = vecinos.flatMap { $0.paredes }
+                    let pasos = G0.pasos + vecinos.flatMap { $0.pasos }
+                    // El camino de la cámara, en el marco de este cuarto: las
+                    // capturas que se sabe cómo traer, nada más.
+                    let traer = G0.enPlano ? alPlano : G0.capturas
+                    let camino: [CGPoint] = poses.compactMap { p in
+                        guard p.level == G0.nivel, let t = traer[p.captura] else { return nil }
+                        return t.aplicarPies(CGPoint(x: Double(p.transform.columns.3.x) * f, y: Double(p.transform.columns.3.z) * f), f: f)
                     }
-                    let huecos = FloorPlanEncoder.outlineGaps(wallsFt: G0.paredes)
-                        .filter { $0.ft > FloorPlanEncoder.outlineGapWarnFt && !FloorPlanEncoder.gapCoveredByWalls($0, walls: G0.paredes) }
+                    let vistas: [(file: URL, punto: CGPoint)] = fotos.compactMap { k in
+                        guard k.level == G0.nivel, let h = k.hit, let t = traer[k.captura] else { return nil }
+                        return (k.file, t.aplicarPies(CGPoint(x: Double(h.x) * f, y: Double(h.z) * f), f: f))
+                    }
+                    // Una pared del cuarto de al lado que RoomPlan metió en
+                    // este no cuenta para buscar huecos: encadenar por su
+                    // punta suelta da un "lado faltante" en diagonal que no
+                    // existe (la sala y la cocina de Harold).
+                    let ajenas = FloorPlanEncoder.paredesAjenas(propias: G0.paredes, otras: otras)
+                    let paredes = G0.paredes.enumerated().filter { !ajenas.contains($0.offset) }.map { $0.element }
+                    if !ajenas.isEmpty { cuenta["paredAjena", default: 0] += ajenas.count }
+                    let huecos = FloorPlanEncoder.outlineGaps(wallsFt: paredes)
+                        .filter { $0.ft > FloorPlanEncoder.outlineGapWarnFt && !FloorPlanEncoder.gapCoveredByWalls($0, walls: paredes) }
                     for h in huecos {
                         cuenta["revisados", default: 0] += 1
                         if !otras.isEmpty, FloorPlanEncoder.gapCoveredByWalls(h, walls: otras) { cuenta["otroCuarto", default: 0] += 1; continue }
@@ -1691,10 +1943,10 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
                         if pasos.contains(where: { Self.distSegmento($0.0, h.a, h.b) < 1.0 && $0.1 >= h.ft - 1.5 }) { cuenta["puerta", default: 0] += 1; continue }
                         if h.ft <= 6, Self.caminoCruza(camino, h.a, h.b) { cuenta["camino", default: 0] += 1; continue }
                         if h.ft <= 8, Date().timeIntervalSince(empezo) < 2.5,
-                           Self.fotosVenPaso(fotos, nivel: G0.nivel, a: h.a, b: h.b) { cuenta["foto", default: 0] += 1; continue }
+                           Self.fotosVenPaso(vistas, a: h.a, b: h.b) { cuenta["foto", default: 0] += 1; continue }
                         problemas.append(Problema(grupo: G0.g, tipo: "lado", ft: h.ft, a: h.a, b: h.b))
                     }
-                    let esquinas = FloorPlanEncoder.cornerFindings(wallsFt: G0.paredes, portsFt: pasos.map { (center: $0.0, widthFt: $0.1) })
+                    let esquinas = FloorPlanEncoder.cornerFindings(wallsFt: paredes, portsFt: pasos.map { (center: $0.0, widthFt: $0.1) })
                         .filter { $0.d >= 2 }
                     for e in esquinas {
                         cuenta["revisados", default: 0] += 1
@@ -1711,10 +1963,21 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
                                            "resueltosPorPuerta": cuenta["puerta"] ?? 0,
                                            "resueltosPorCamino": cuenta["camino"] ?? 0,
                                            "resueltosPorFoto": cuenta["foto"] ?? 0,
-                                           "pendientes": problemas.count]
+                                           "paredesAjenasIgnoradas": cuenta["paredAjena"] ?? 0,
+                                           "pendientes": problemas.count,
+                                           "cuartosSinAcomodar": grupos.filter { !$0.enPlano }.count]
                     NSLog("[RoomScan] segundo cerebro: %@", String(describing: self.segundoCerebro))
                     // Lo que ya se marcó como incompleto no se vuelve a preguntar.
-                    self.problemasFinales = problemas.filter { !self.incompletos.contains($0.grupo) }
+                    // Los puntos del problema vienen en el marco en que se revisó
+                    // (el plano, o el del cuarto): el aviso los pinta en el
+                    // marco del cuarto (huecosPorGrupo), así que se regresan.
+                    self.problemasFinales = problemas.filter { !self.incompletos.contains($0.grupo) }.map { pr in
+                        // Con el MISMO marco con que se revisó (el merge pudo
+                        // cambiar mientras tanto).
+                        guard let m = grupos.first(where: { $0.g == pr.grupo })?.marco else { return pr }
+                        let inv = m.inverso
+                        return Problema(grupo: pr.grupo, tipo: pr.tipo, ft: pr.ft, a: inv.aplicarPies(pr.a, f: f), b: inv.aplicarPies(pr.b, f: f))
+                    }
                     if let primero = self.problemasFinales.first {
                         self.mostrarAviso(grupo: primero.grupo, terminar: true)
                     } else {
@@ -1751,12 +2014,10 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
     }
 
     // ¿Las fotos que apuntaban a ese hueco se ven como puerta o ventana?
-    static func fotosVenPaso(_ fotos: [ScanKeyframeRecorder.KeyframeMeta], nivel: Int, a: CGPoint, b: CGPoint) -> Bool {
-        let f = FloorPlanEncoder.metersToFeet
-        let cerca = fotos.filter { k in
-            guard k.level == nivel, let h = k.hit else { return false }
-            return distSegmento(CGPoint(x: Double(h.x) * f, y: Double(h.z) * f), a, b) < 2.0
-        }.prefix(3)
+    // Las fotos llegan con el punto al que apuntaban YA en el marco en que se
+    // revisa (el plano o el del cuarto), y solo las del mismo nivel.
+    static func fotosVenPaso(_ fotos: [(file: URL, punto: CGPoint)], a: CGPoint, b: CGPoint) -> Bool {
+        let cerca = fotos.filter { distSegmento($0.punto, a, b) < 2.0 }.prefix(3)
         for k in cerca {
             let req = VNClassifyImageRequest()
             guard (try? VNImageRequestHandler(url: k.file, options: [:]).perform([req])) != nil,
@@ -1778,6 +2039,7 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
     // se enseña como lo dijeron.
     private static let cuartosEnIngles: [String: String] = [
         "recamara principal": "Master Bedroom", "cuarto principal": "Master Bedroom",
+        "dormitorio principal": "Master Bedroom", "habitacion principal": "Master Bedroom",
         "recamara": "Bedroom", "dormitorio": "Bedroom", "habitacion": "Bedroom", "alcoba": "Bedroom",
         "bano principal": "Master Bathroom", "bano": "Bathroom", "sanitario": "Bathroom",
         "medio bano": "Half Bathroom", "cocina": "Kitchen", "sala": "Living Room",
@@ -1806,6 +2068,11 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         guard !crudo.isEmpty else { return crudo }
         var base = sinAcentos(crudo)
         var num = ""
+        // "habitación dos" = "habitación 2".
+        let numeros = ["uno": "1", "dos": "2", "tres": "3", "cuatro": "4", "cinco": "5", "seis": "6"]
+        if let u = base.split(separator: " ").last, base.contains(" "), let d = numeros[String(u)] {
+            base = String(base.dropLast(u.count)).trimmingCharacters(in: .whitespaces) + " " + d
+        }
         if let r = base.range(of: #"\s*(\d+)$"#, options: .regularExpression) {
             num = " " + base[r].trimmingCharacters(in: .whitespaces)
             base = String(base[..<r.lowerBound])
@@ -1874,21 +2141,17 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
     }
 
     // Lo que de verdad lleva: los cuartos ya guardados de ESTE nivel en
-    // gris, y donde está parado ahora en azul. Las formas salen de RoomPlan
-    // tal cual (las mismas coordenadas de la cámara); el cuarto en curso
-    // aparece con su forma al tocar "Cuarto listo".
+    // gris (acomodados en el plano), y donde está parado ahora en azul.
+    // Mientras escanea solo sale lo que ve y dónde está: su captura tiene su
+    // propio origen hasta que se guarda y Apple la junta con las demás.
     private func refrescarMinimapa() {
         planCardTitle.text = nivelBase.isEmpty && eligiendoNivel ? "Plano" : nombreDelNivel(currentLevel)
         guard !soloVistaPrevia else { return }
-        var guardados: [MiniCuarto] = []
         // El cuarto que se está completando, o el que trae aviso, va en azul
         // (con lo que falta en ámbar); los demás guardados, en gris.
         let destacado: Int? = completandoIndice ?? (state == .roomDonePrompt ? aviso?.grupo : nil)
         let nivelVisto = destacado.map { $0 < roomLevels.count ? roomLevels[$0] : currentLevel } ?? currentLevel
         planCardTitle.text = nombreDelNivel(nivelVisto)
-        for g in gruposDelNivel(nivelVisto) where g != destacado {
-            guardados.append(miniGrupo(g))
-        }
         let actual: String?
         if state == .scanningRoom && !eligiendoNivel {
             actual = pendingCurrentRoomName.map { Self.enIngles($0) } ?? "Room \(numeroSiguiente)"
@@ -1896,13 +2159,35 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
             actual = nil
         }
         let enCurso = state == .scanningRoom
+        let f = FloorPlanEncoder.metersToFeet
         if let g = destacado, g < capturedRooms.count, !enCurso {
-            minimapa.pintar(guardados: guardados, actual: nombreDelGrupo(g), punto: posicionCamara,
-                            enVivo: miniGrupo(g), huecos: huecosPorGrupo[g] ?? [], huecosAmbar: true)
+            // La cámara solo se pinta si sigue en la captura de ese cuarto (si
+            // no, su posición está en otro marco).
+            let mismaCaptura = capturaDeCuarto[g] == capturaActual
+            if let m = marcoEnPlano(g), let azul = miniGrupoEnPlano(g) {
+                let otros = gruposDelNivel(nivelVisto).filter { $0 != g }.compactMap { miniGrupoEnPlano($0) }
+                minimapa.pintar(guardados: otros, actual: nombreDelGrupo(g),
+                                punto: mismaCaptura ? posicionCamara.map { m.aplicarPies($0, f: f) } : nil,
+                                enVivo: azul, huecos: (huecosPorGrupo[g] ?? []).map { moverLinea($0, m) }, huecosAmbar: true)
+            } else {
+                minimapa.pintar(guardados: [], actual: nombreDelGrupo(g), punto: mismaCaptura ? posicionCamara : nil,
+                                enVivo: miniGrupo(g), huecos: huecosPorGrupo[g] ?? [], huecosAmbar: true)
+            }
             return
         }
-        minimapa.pintar(guardados: guardados, actual: actual, punto: enCurso ? posicionCamara : nil,
-                        enVivo: enCurso ? cuartoEnVivo : nil, huecos: enCurso ? huecosEnVivo : [])
+        if enCurso {
+            // Escaneando: esta captura arrancó con su propio origen y todavía
+            // no se sabe dónde cae en el plano. Se dibuja SOLO lo que se está
+            // viendo y dónde está parado (los dos en el mismo marco). Los
+            // cuartos guardados vuelven a salir, juntos y bien puestos, en
+            // cuanto se guarda este. Antes salían encima, cada uno en su
+            // propio marco.
+            minimapa.pintar(guardados: [], actual: actual, punto: posicionCamara,
+                            enVivo: cuartoEnVivo, huecos: huecosEnVivo)
+            return
+        }
+        minimapa.pintar(guardados: gruposParaDibujar(gruposDelNivel(nivelVisto)), actual: actual, punto: nil,
+                        enVivo: nil, huecos: [])
     }
 
     private func engancharEnVivo() {
@@ -1934,15 +2219,14 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         let sostener: CFTimeInterval = 3
         paredesVistas = paredesVistas.filter { ahora - $0.value.t <= sostener }
         aberturasVistas = aberturasVistas.filter { ahora - $0.value.t <= sostener }
-        var c = MiniCuarto(nombre: nil, paredes: paredesVistas.values.map { $0.linea },
+        let c = MiniCuarto(nombre: nil, paredes: paredesVistas.values.map { $0.linea },
                            aberturas: aberturasVistas.values.map { ($0.linea.0, $0.linea.1, $0.tipo) })
-        if let g = completandoIndice, g < capturedRooms.count {
-            // Completando: lo que ya estaba + lo nuevo, como un solo cuarto.
-            let base = miniGrupo(g)
-            c = MiniCuarto(nombre: nil, paredes: base.paredes + c.paredes, aberturas: base.aberturas + c.aberturas)
-        }
+        // Completando un cuarto, lo nuevo NO se junta aquí con lo que ya
+        // estaba: son dos capturas con origen distinto. Se junta al
+        // terminar, acomodado por Apple (alinearParchesPendientes). Y los
+        // huecos de un pedazo de cuarto no son huecos: no se pintan.
         cuartoEnVivo = c
-        huecosEnVivo = FloorPlanEncoder.outlineGaps(wallsFt: c.paredes).map { ($0.a, $0.b) }
+        huecosEnVivo = completandoIndice != nil ? [] : FloorPlanEncoder.outlineGaps(wallsFt: c.paredes).map { ($0.a, $0.b) }
         refrescarMinimapa()
     }
 
@@ -2048,7 +2332,7 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         // Keep the walkthrough recorder's room/level tag and its
         // photos-allowed flag in sync with the scan state (photos are
         // gated to .scanningRoom; the pose trace never stops).
-        keyframeRecorder?.update(roomIndex: capturedRooms.count, level: currentLevel, scanning: state == .scanningRoom)
+        keyframeRecorder?.update(roomIndex: capturedRooms.count, level: currentLevel, scanning: state == .scanningRoom, captura: capturaActual)
         // Only mention the level once a second one's actually in play -
         // the common single-level scan stays uncluttered.
         // Con la planta escogida se dice SIEMPRE, aunque sea la primera: si esta
@@ -2376,7 +2660,7 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
             arSession
         })
         keyframeRecorder = recorder
-        recorder.update(roomIndex: 0, level: currentLevel, scanning: true)
+        recorder.update(roomIndex: 0, level: currentLevel, scanning: true, captura: capturaActual)
         // EL ASISTENTE DE MADERAS, EN VIVO. Su pedido del 12 de septiembre:
         // "cuando vea todas esas maderas, sepa identificar que ahí hay una
         // pared". RoomPlan no la va a dibujar (no tiene categoría de
@@ -2545,6 +2829,10 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         }
         pendingRoomNameAfterGap = nil
         pendingMirroredPort = nil
+        // Una captura nueva = un marco nuevo (ARKit reinicia el origen en
+        // run()). Se cuenta ANTES de updateUI para que la grabadora marque
+        // desde ya las poses con esta captura.
+        capturaActual += 1
         isSessionRunning = true
         state = .scanningRoom
         // Si el nombre ya venía dicho, la bandeja sale recogida (solo botones).
@@ -2613,9 +2901,11 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         roomSplitConfirmationTimer = nil
         pendingRoomSplitCandidateName = nil
         // Stopping with pauseARSession:false keeps the underlying ARSession
-        // (world tracking) alive so the *next* room, if any, lands in the
-        // same coordinate space - stopping the room capture is not the same
-        // as pausing tracking. Apple's own finishing/refinement pass runs
+        // (world tracking) alive. OJO (14-oct, medido en la casa de Harold):
+        // eso NO deja el cuarto siguiente en las mismas coordenadas - cada
+        // run() arranca con su propio origen (el camino brinca a (0,0) en cada
+        // captura). StructureBuilder es lo que los junta; ver "LOS MARCOS".
+        // Apple's own finishing/refinement pass runs
         // next; the refined room comes back via captureView(didPresent:).
         // That overload only exists on iOS 17+ (matching StructureBuilder's
         // own minimum) - on iOS 16 there's no multi-room merge to preserve
@@ -2712,7 +3002,43 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
     // merge is still in flight, the final merge waits its turn (consumed
     // in the live merge's completion) instead of running alongside it.
     private var pendingFinishSession = false
+    // EL VIGILANTE DE 30 s. Se arma en cuanto se pide terminar, aunque haya un
+    // merge o un acomodo de parche todavía en vuelo (antes se armaba solo
+    // dentro de finishSession, y si Apple se colgaba antes de llegar ahí la
+    // pantalla se quedaba en "Uniendo cuartos…" para siempre). Si ya está
+    // armado, no se vuelve a armar.
+    private func armarVigilanteFinal() {
+        guard finishingWatchdogTimer?.isValid != true else { return }
+        finishingWatchdogTimer?.invalidate()
+        finishingWatchdogTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: false) { [weak self] _ in
+            guard let self = self, !self.sessionDelivered else { return }
+            NSLog("[RoomScan] finishing watchdog fired - delivering %d rooms unmerged", self.capturedRooms.count)
+            self.sessionDelivered = true
+            self.keyframeRecorder?.stopAndDeleteAll()
+            self.keyframeRecorder = nil
+            // Lo que seguía sin resolverse no se pierde: una captura "posible
+            // duplicado" sale como su propio cuarto (como antes de este cambio)
+            // y un parche sin acomodar deja su cuarto incompleto.
+            for p in self.posiblesDuplicados { self.indicesParche.remove(p); self.parcheDe[p] = nil }
+            self.posiblesDuplicados = []
+            for p in self.parchesPorAlinear { self.parcheSinAlinear.insert(p) }
+            self.entregaCruda = true
+            let x = self.sinParches()
+            // Lo que viaja con el plano (niveles, incompletos, parches) no
+            // se pierde por entregar de emergencia.
+            var insp: [String: Any] = ["version": 1, "status": "skipped", "reason": "finish_watchdog"]
+            insp.merge(self.extrasDeEntrega(x.rooms, juntado: false)) { _, nuevo in nuevo }
+            self.onFinish?(.finished(rooms: x.rooms, structure: nil, merged: false,
+                                     levels: x.levels, voiceNames: x.names,
+                                     equipment: x.equipment, deletedIndices: x.deleted,
+                                     inspection: insp,
+                                     surfaceAnswers: self.voiceSurfaceAnswers))
+        }
+    }
+
     private func requestFinishSession() {
+        armarVigilanteFinal()
+        keyframeRecorder?.pauseTicking()
         if mergeInFlight {
             pendingFinishSession = true
             mergeQueued = false
@@ -2782,13 +3108,24 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
     private func deliverFinished(rooms: [CapturedRoom], structure: Any?, merged: Bool,
                                  levels: [Int], voiceNames: [String?],
                                  equipment: [[String: EquipmentEntry]], deletedIndices: Set<Int>) {
+        // Ya hay plano: las guardas de 3 s y 5 s de abajo aseguran la entrega,
+        // y un plano juntado nunca se cambia por uno sin unir.
+        finishingWatchdogTimer?.invalidate()
+        finishingWatchdogTimer = nil
+        entregaCruda = structure == nil
         let preMergeRooms = capturedRooms
         let preMergeLevels = roomLevels
         let preMergeDeleted = deletedRoomIndices.union(indicesParche)
-        // Lo que se completó y lo que se dejó incompleto, ya con el índice del
-        // plano entregado.
-        let parchesEntrega = parchesParaEntregar(rooms)
-        let incompletosEntrega = incompletos.compactMap { g in rooms.firstIndex { originalRoomIndex(for: $0) == g } }.sorted()
+        // Lo que se completó y lo que se dejó incompleto (y los niveles), ya
+        // con el índice del plano entregado.
+        let extras = extrasDeEntrega(rooms, juntado: merged)
+        // Dónde quedó cada cuarto en el plano entregado, y cada captura.
+        let (marcoCuarto, capturas) = marcosDeEntrega(rooms, juntado: merged)
+        // La captura de cada foto, aunque su cuarto no vaya en el plano (un
+        // cuarto borrado, un parche que no se pegó): para no heredarle a una
+        // foto el número de otro cuarto.
+        var cuartoDeCaptura: [Int: Int] = [:]
+        for (i, c) in capturaDeCuarto { cuartoDeCaptura[c] = grupoDe(i) }
         let recorder = keyframeRecorder
         keyframeRecorder = nil
         let newSessionDir = recorder?.sessionDir
@@ -2798,8 +3135,13 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         var esquinasPorSalida: [String: [[String: Any]]] = [:]
         for (out, room) in rooms.enumerated() {
             guard let pre = originalRoomIndex(for: room), let lista = roomCornersByIndex[pre], !lista.isEmpty else { continue }
-            esquinasPorSalida[String(out)] = lista.map { e in
-                ["x": (Double(e.vertex.x) * 100).rounded() / 100, "y": (Double(e.vertex.y) * 100).rounded() / 100,
+            // Las esquinas se sacaron en el marco del cuarto; van al plano.
+            guard let m = marcoCuarto[pre] else { continue }
+            let f = FloorPlanEncoder.metersToFeet
+            esquinasPorSalida[String(out)] = lista.map { e0 -> [String: Any] in
+                let v = m.aplicarPies(e0.vertex, f: f)
+                let e = (vertex: v, d: e0.d, legA: e0.legA, legB: e0.legB)
+                return ["x": (Double(e.vertex.x) * 100).rounded() / 100, "y": (Double(e.vertex.y) * 100).rounded() / 100,
                  "d": (e.d * 100).rounded() / 100, "legA": (e.legA * 100).rounded() / 100, "legB": (e.legB * 100).rounded() / 100]
             }
         }
@@ -2811,20 +3153,14 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
                 var inspection = inspectionIn
                 // Camino 2: lo que la sonda vio viaja con el plano para
                 // poder leerlo después. No cambia nada del plano.
-                if !self.nombresDeNivel.isEmpty {
+                if !extras.isEmpty {
                     var d = inspection ?? ["version": 1, "status": "skipped"]
-                    d["nombresDeNivel"] = Dictionary(uniqueKeysWithValues: self.nombresDeNivel.map { (String($0.key), $0.value) })
+                    d.merge(extras) { _, nuevo in nuevo }
                     inspection = d
                 }
                 if !self.segundoCerebro.isEmpty {
                     var d = inspection ?? ["version": 1, "status": "skipped"]
                     d["segundoCerebro"] = self.segundoCerebro
-                    inspection = d
-                }
-                if !parchesEntrega.isEmpty || !incompletosEntrega.isEmpty {
-                    var d = inspection ?? ["version": 1, "status": "skipped"]
-                    if !parchesEntrega.isEmpty { d["parches"] = parchesEntrega }
-                    if !incompletosEntrega.isEmpty { d["incompleteRooms"] = incompletosEntrega }
                     inspection = d
                 }
                 probeLock.lock(); let mp = meshProbe; probeLock.unlock()
@@ -2839,6 +3175,9 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
                 if !esquinasPorSalida.isEmpty {
                     var d = inspection ?? ["version": 1, "status": "skipped"]
                     d["scanCorners"] = esquinasPorSalida
+                    // Van en el plano entregado (o en su cuarto, sin merge), y la
+                    // web lo tiene que saber aunque la inspección se saltara.
+                    if d["frame"] == nil { d["frame"] = merged ? "plano" : "cuarto" }
                     inspection = d
                 }
                 self.sessionDelivered = true
@@ -2894,6 +3233,8 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
                 let inspection = ScanInspector.remapRoomIndices(
                     ScanInspector.inspect(rooms: preMergeRooms, deletedIndices: preMergeDeleted,
                                           levels: preMergeLevels, trace: trace,
+                                          marcoCuarto: marcoCuarto, capturas: capturas, juntado: merged,
+                                          cuartoDeCaptura: cuartoDeCaptura,
                                           isCancelled: isDelivered),
                     mapa: mapaIndices)
                 deliverOnce(inspection)
@@ -2940,23 +3281,32 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
             onFinish?(.finished(rooms: [], structure: nil, merged: true, levels: [], voiceNames: [], equipment: [], deletedIndices: [], inspection: nil, surfaceAnswers: [:]))
             return
         }
-        // Arm the finishing escape hatch: 30s covers a normal
-        // StructureBuilder merge + inspection many times over; anything
-        // longer is a hang, and the rooms ship unmerged instead of
-        // never.
-        finishingWatchdogTimer?.invalidate()
-        finishingWatchdogTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: false) { [weak self] _ in
-            guard let self = self, !self.sessionDelivered else { return }
-            NSLog("[RoomScan] finishing watchdog fired - delivering %d rooms unmerged", self.capturedRooms.count)
-            self.sessionDelivered = true
-            self.keyframeRecorder?.stopAndDeleteAll()
-            self.keyframeRecorder = nil
-            let x = self.sinParches()
-            self.onFinish?(.finished(rooms: x.rooms, structure: nil, merged: false,
-                                     levels: x.levels, voiceNames: x.names,
-                                     equipment: x.equipment, deletedIndices: x.deleted,
-                                     inspection: ["version": 1, "status": "skipped", "reason": "finish_watchdog"],
-                                     surfaceAnswers: self.voiceSurfaceAnswers))
+        armarVigilanteFinal()
+        // Los parches que todavía no se acomodaron se acomodan AHORA, uno por
+        // uno con Apple, antes del merge final. Un parche sin acomodo no se
+        // pega (y su cuarto queda incompleto).
+        let porAlinear = parchesPorAlinear
+        if !porAlinear.isEmpty {
+            if #available(iOS 17.0, *) {
+                let pares = porAlinear.compactMap { p -> (Int, CapturedRoom, CapturedRoom)? in
+                    guard let g = parcheDe[p] else { return nil }
+                    return (p, capturedRooms[g], capturedRooms[p])
+                }
+                NSLog("[RoomScan] acomodando %d parche(s) antes del merge final", pares.count)
+                Task { [weak self] in
+                    var hechos: [Int: ParAlineado] = [:]
+                    for (p, base, parche) in pares {
+                        if let t = await Self.alinearPar(base: base, parche: parche) { hechos[p] = t }
+                    }
+                    await MainActor.run {
+                        guard let self = self, !self.sessionDelivered else { return }
+                        self.guardarAlineaciones(hechos: hechos, fallidos: porAlinear.filter { hechos[$0] == nil })
+                        self.finishSession()
+                    }
+                }
+                return
+            }
+            guardarAlineaciones(hechos: [:], fallidos: porAlinear)
         }
         // A room the tech explicitly rejected must not steer the merge.
         // StructureBuilder aligns the WHOLE house from the rooms it is
@@ -2981,6 +3331,12 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
             return
         }
         if #available(iOS 17.0, *) {
+            // El merge final tiene sus 30 s propios (la espera del merge en vivo
+            // no le quita tiempo). Si el merge en vivo se colgó, nunca se llega
+            // aquí y el vigilante armado al pedir terminar entrega.
+            finishingWatchdogTimer?.invalidate()
+            finishingWatchdogTimer = nil
+            armarVigilanteFinal()
             let rooms = keptIdx.map { capturedRooms[$0] }
             let leftOut = dropIdx.map { capturedRooms[$0] }
             NSLog("[RoomScan] final merge starting: %d rooms (%d rejected, kept out of the merge)", rooms.count, leftOut.count)
@@ -3035,7 +3391,7 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
     // los niveles y nombres de TODOS: se corrían de cuarto.
     private func sinParches() -> (rooms: [CapturedRoom], levels: [Int], names: [String?], equipment: [[String: EquipmentEntry]], deleted: Set<Int>) {
         var r: [CapturedRoom] = [], l: [Int] = [], n: [String?] = [], e: [[String: EquipmentEntry]] = [], d = Set<Int>()
-        for i in capturedRooms.indices where !indicesParche.contains(i) {
+        for i in capturedRooms.indices where !indicesParche.contains(i) || posiblesDuplicados.contains(i) {
             if deletedRoomIndices.contains(i) { d.insert(r.count) }
             r.append(capturedRooms[i])
             l.append(i < roomLevels.count ? roomLevels[i] : 1)
@@ -3045,81 +3401,162 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         return (r, l, n, e, d)
     }
 
-    // EL PARCHE UNIDO A SU CUARTO. El merge de Apple mueve y gira cada
-    // cuarto; ese mismo movimiento se calcula con las paredes que el cuarto
-    // conserva (mismo identificador antes y después) y se le aplica al
-    // parche, que se escaneó en las coordenadas de antes. De lo escaneado en
-    // el parche solo pasa lo que el cuarto NO tenía: el pedazo de pared que
-    // faltaba, y las puertas o ventanas nuevas. Nada se borra ni se mueve
-    // del cuarto original.
-    private func parchesParaEntregar(_ rooms: [CapturedRoom]) -> [String: [String: Any]] {
+    // Dónde quedó cada cuarto (índice de capturedRooms) en el plano que se
+    // entrega, y cada captura (con su parche). Del cuarto: el movimiento de
+    // sus MISMAS paredes antes y después del merge (sin merge, el mismo
+    // cuarto: no se mueve). De un parche: su acomodo en el cuarto y luego el
+    // del cuarto.
+    private func marcosDeEntrega(_ rooms: [CapturedRoom], juntado: Bool) -> ([Int: FloorPlanEncoder.Rigido2D], [Int: ScanInspector.MarcoDeCaptura]) {
+        var marcoCuarto: [Int: FloorPlanEncoder.Rigido2D] = [:]
+        // Sin merge el cuarto que se entrega ES el escaneado: no se mueve (y no
+        // se calcula, que con puras paredes paralelas el ajuste no sale).
+        if !juntado || entregaCruda {
+            for room in rooms {
+                guard let pre = originalRoomIndex(for: room), pre < capturedRooms.count, !deletedRoomIndices.contains(pre) else { continue }
+                marcoCuarto[pre] = .identidad
+            }
+        }
+        for room in rooms where juntado && !entregaCruda {
+            // Un cuarto rechazado viaja tal como se escaneó (fuera del merge,
+            // en su propio marco): no tiene lugar en el plano juntado, y su
+            // caminata no debe mezclarse con la de los demás.
+            guard let pre = originalRoomIndex(for: room), pre < capturedRooms.count, marcoCuarto[pre] == nil,
+                  !deletedRoomIndices.contains(pre) else { continue }
+            let antes = capturedRooms[pre]
+            if let t = FloorPlanEncoder.rigidoEntre(antes.walls + antes.doors + antes.windows + antes.openings,
+                                                    room.walls + room.doors + room.windows + room.openings) {
+                marcoCuarto[pre] = t
+            }
+        }
+        var capturas: [Int: ScanInspector.MarcoDeCaptura] = [:]
+        for (i, c) in capturaDeCuarto {
+            if let g = parcheDe[i] {
+                guard let a = alineacionParche[i], let m = marcoCuarto[g] else { continue }
+                capturas[c] = ScanInspector.MarcoDeCaptura(propio: i, grupo: g, marco: a.luego(m))
+            } else if let m = marcoCuarto[i] {
+                capturas[c] = ScanInspector.MarcoDeCaptura(propio: i, grupo: i, marco: m)
+            }
+        }
+        return (marcoCuarto, capturas)
+    }
+
+    // Lo que viaja con el plano además de los cuartos: los nombres de los
+    // niveles, lo que los parches sí agregaron, qué cuartos quedaron
+    // incompletos y cuántos parches no se pudieron pegar. Lo usan la entrega
+    // normal y la de emergencia (el vigilante), para que nunca se pierda.
+    private func extrasDeEntrega(_ rooms: [CapturedRoom], juntado: Bool) -> [String: Any] {
+        var d: [String: Any] = [:]
+        if !nombresDeNivel.isEmpty {
+            d["nombresDeNivel"] = Dictionary(uniqueKeysWithValues: nombresDeNivel.map { (String($0.key), $0.value) })
+        }
+        let parchesEntrega = parchesParaEntregar(rooms, juntado: juntado)
+        if !parchesEntrega.isEmpty { d["parches"] = parchesEntrega }
+        // Un cuarto cuyo parche no se pudo acomodar (o sigue sin acomodarse), y
+        // ninguno otro sí, sigue incompleto: el hueco que se quiso cerrar sigue ahí.
+        let pendientes = Set(parchesPorAlinear).subtracting(posiblesDuplicados)
+        // Un parche acomodado cuyo cuarto no se pudo ubicar en el plano que se
+        // entrega tampoco se pega: se dice.
+        let (marcosEnt, _) = marcosDeEntrega(rooms, juntado: juntado)
+        let sinLugar = Set(alineacionParche.keys.filter { p in parcheDe[p].map { marcosEnt[$0] == nil } ?? false })
+        let noPegados = parcheSinAlinear.union(pendientes).union(sinLugar)
+        let sinUnir = Set(noPegados.compactMap { parcheDe[$0] }).filter { g in
+            !parches(de: g).contains { alineacionParche[$0] != nil && !noPegados.contains($0) }
+        }
+        let inc = incompletos.union(sinUnir).filter { !deletedRoomIndices.contains($0) }
+        let incompletosEntrega = inc.compactMap { g in rooms.firstIndex { originalRoomIndex(for: $0) == g } }.sorted()
+        if !incompletosEntrega.isEmpty { d["incompleteRooms"] = incompletosEntrega }
+        let descartados = noPegados.filter { p in parcheDe[p].map { !deletedRoomIndices.contains($0) } ?? false }.count
+        if descartados > 0 { d["parchesDescartados"] = descartados }
+        // El nombre que el teléfono enseñó como sugerencia (por los muebles)
+        // viaja aparte, nunca como nombre dicho: el plano lo usa marcado como
+        // sugerido. Antes solo viajaba el nombre dicho, y un cuarto que en el
+        // teléfono decía "Dining Room" salía "ROOM 1" en el plano.
+        var sugeridos: [String: String] = [:]
+        for (k, room) in rooms.enumerated() {
+            guard let pre = originalRoomIndex(for: room), pre < capturedRooms.count,
+                  !(pre < voiceNames.count && voiceNames[pre] != nil) else { continue }
+            if let n = suggestedRoomName(for: capturedRooms[pre]) { sugeridos[String(k)] = Self.enIngles(n) }
+        }
+        if !sugeridos.isEmpty { d["nombresSugeridos"] = sugeridos }
+        return d
+    }
+
+    // EL PARCHE UNIDO A SU CUARTO. El parche ya viene acomodado en su cuarto
+    // (alinearPar: Apple juntó los dos); ese acomodo, seguido del movimiento
+    // del cuarto al plano entregado, lo pone en su lugar. Antes se le
+    // aplicaba solo el movimiento del cuarto - como si el parche estuviera
+    // en las mismas coordenadas, y no lo estaba: así cayó una caja de paredes
+    // encima de la cocina de Harold. De lo escaneado en el parche solo pasa
+    // lo que cae en un hueco del cuarto y no se mete en otro cuarto
+    // (FloorPlanEncoder.piezasDeParche), y las puertas o ventanas pegadas a
+    // esos pedazos que el cuarto no tenía. Nada se borra ni se mueve del
+    // cuarto original. Un parche sin acomodo no se pega.
+    private func parchesParaEntregar(_ rooms: [CapturedRoom], juntado: Bool) -> [String: [String: Any]] {
         var out: [String: [String: Any]] = [:]
         let f = FloorPlanEncoder.metersToFeet
         func conf(_ c: CapturedRoom.Confidence) -> String {
             switch c { case .high: return "high"; case .medium: return "medium"; default: return "low" }
         }
+        let (marcoCuarto, _) = marcosDeEntrega(rooms, juntado: juntado)
+        func enPies(_ s: CapturedRoom.Surface) -> (CGPoint, CGPoint) { lineaPies(s) }
         for g in Set(parcheDe.values) where !deletedRoomIndices.contains(g) && g < capturedRooms.count {
-            guard let k = rooms.firstIndex(where: { originalRoomIndex(for: $0) == g }) else { continue }
-            let raw = capturedRooms[g], dest = rooms[k]
-            var destPorId: [UUID: CapturedRoom.Surface] = [:]
-            for w in dest.walls { destPorId[w.identifier] = w }
-            var sumSin = 0.0, sumCos = 0.0
-            var pares: [(SIMD2<Double>, SIMD2<Double>)] = []
-            for w in raw.walls {
-                guard let d = destPorId[w.identifier] else { continue }
-                let (a0, b0) = FloorPlanEncoder.wallEndpoints(w)
-                let (a1, b1) = FloorPlanEncoder.wallEndpoints(d)
-                let ang = atan2(Double(b1.y - a1.y), Double(b1.x - a1.x)) - atan2(Double(b0.y - a0.y), Double(b0.x - a0.x))
-                let peso = max(Double(w.dimensions.x), 0.1)
-                sumSin += sin(ang) * peso
-                sumCos += cos(ang) * peso
-                pares.append((SIMD2(Double(a0.x + b0.x) / 2, Double(a0.y + b0.y) / 2),
-                              SIMD2(Double(a1.x + b1.x) / 2, Double(a1.y + b1.y) / 2)))
+            guard let k = rooms.firstIndex(where: { originalRoomIndex(for: $0) == g }), let mg = marcoCuarto[g] else { continue }
+            let dest = rooms[k]
+            let nivel = g < roomLevels.count ? roomLevels[g] : 1
+            // Los demás cuartos del mismo nivel, como se entregan. Sin merge cada
+            // cuarto está en el marco de su propia captura: no se comparan.
+            var otras: [(CGPoint, CGPoint)] = [], contornos: [[CGPoint]] = []
+            if !juntado {
+                // Sin merge el cuarto entregado está en su propio marco, el mismo
+                // en que el teléfono acomodó a sus vecinos: lo entregado sale
+                // igual a lo que se vio (si no, la pared ajena volvía a esconder
+                // el hueco y el parche bueno se tiraba).
+                let v = vecinosEnMarcoDe(g)
+                otras = v.flatMap { $0 }
+                contornos = v.map { FloorPlanEncoder.contornoYHuecos(wallsFt: $0).poly }
             }
-            let th = pares.isEmpty ? 0 : atan2(sumSin, sumCos)
-            let co = cos(th), si = sin(th)
-            func rot(_ p: SIMD2<Double>) -> SIMD2<Double> { SIMD2(co * p.x - si * p.y, si * p.x + co * p.y) }
-            var tr = SIMD2<Double>(0, 0)
-            if !pares.isEmpty {
-                for (r0, r1) in pares { tr += r1 - rot(r0) }
-                tr /= Double(pares.count)
+            for (j, r) in rooms.enumerated() where juntado && j != k {
+                guard let pre = originalRoomIndex(for: r), !deletedRoomIndices.contains(pre),
+                      (pre < roomLevels.count ? roomLevels[pre] : 1) == nivel else { continue }
+                let ps = r.walls.map(enPies)
+                otras += ps
+                contornos.append(FloorPlanEncoder.contornoYHuecos(wallsFt: ps).poly)
             }
-            func aPies(_ p: SIMD2<Float>) -> CGPoint {
-                let q = rot(SIMD2(Double(p.x), Double(p.y))) + tr
-                return CGPoint(x: q.x * f, y: q.y * f)
-            }
-            func enPies(_ p: SIMD2<Float>) -> CGPoint { CGPoint(x: Double(p.x) * f, y: Double(p.y) * f) }
-            let propias: [(CGPoint, CGPoint)] = dest.walls.map { w in
-                let (a, b) = FloorPlanEncoder.wallEndpoints(w); return (enPies(a), enPies(b))
-            }
+            var propias: [(CGPoint, CGPoint)] = dest.walls.map(enPies)
             var conId: [(id: String, a: CGPoint, b: CGPoint)] = dest.walls.map { w in
-                let (a, b) = FloorPlanEncoder.wallEndpoints(w); return (w.identifier.uuidString, enPies(a), enPies(b))
+                let (a, b) = enPies(w); return (w.identifier.uuidString, a, b)
             }
             var paredes: [[String: Any]] = []
             var aberturas: [String: [[String: Any]]] = ["doors": [], "windows": [], "openings": []]
-            func centro(_ s: CapturedRoom.Surface) -> SIMD2<Float> { SIMD2(s.transform.columns.3.x, s.transform.columns.3.z) }
             for p in parches(de: g) where p < capturedRooms.count {
+                guard let a = alineacionParche[p] else { continue }
+                let t = a.luego(mg)
                 let r = capturedRooms[p]
+                var piezasDeEste: [(CGPoint, CGPoint)] = []
                 for w in r.walls {
-                    let (a, b) = FloorPlanEncoder.wallEndpoints(w)
-                    for (u, v) in Self.loQueNoCubren(aPies(a), aPies(b), propias) {
+                    let l = moverLinea(enPies(w), t)
+                    let piezas = FloorPlanEncoder.piezasDeParche(parcheFt: [l], propiasFt: propias, otrasFt: otras, otrosContornos: contornos)
+                    for (u, v) in piezas {
                         let largo = hypot(v.x - u.x, v.y - u.y)
-                        guard largo >= 1.0 else { continue }
                         let id = w.identifier.uuidString + "-p\(paredes.count)"
                         paredes.append(["id": id, "start": ["x": u.x, "y": u.y], "end": ["x": v.x, "y": v.y],
                                         "lengthFt": largo, "heightFt": Double(w.dimensions.y) * f,
                                         "confidence": conf(w.confidence), "_parche": true])
                         conId.append((id, u, v))
                     }
+                    piezasDeEste += piezas
+                    propias += piezas
                 }
                 let tipos: [(String, [CapturedRoom.Surface], [CapturedRoom.Surface])] = [
                     ("doors", r.doors, dest.doors), ("windows", r.windows, dest.windows), ("openings", r.openings, dest.openings)
                 ]
                 for (clave, nuevas, viejas) in tipos {
                     for o in nuevas {
-                        let c = aPies(centro(o))
+                        let c = t.aplicarPies(centroPies(o), f: f)
+                        // Solo junto a un pedazo que el parche sí agregó.
+                        guard piezasDeEste.contains(where: { Self.distSegmento(c, $0.0, $0.1) <= 1.0 }) else { continue }
                         // Ya la tenía el cuarto: no se repite.
-                        let repetida = viejas.contains { v in let q = enPies(centro(v)); return hypot(q.x - c.x, q.y - c.y) < 1.5 }
+                        let repetida = viejas.contains { v in let q = centroPies(v); return hypot(q.x - c.x, q.y - c.y) < 1.5 }
                             || (aberturas[clave] ?? []).contains { d in
                                 let pos = d["position"] as? [String: Double] ?? [:]
                                 return hypot((pos["x"] ?? 0) - c.x, (pos["y"] ?? 0) - c.y) < 1.5 }
@@ -3134,10 +3571,11 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
                     }
                 }
             }
+            guard !paredes.isEmpty || aberturas.values.contains(where: { !$0.isEmpty }) else { continue }
             var entrada: [String: Any] = ["walls": paredes]
             for (clave, lista) in aberturas where !lista.isEmpty { entrada[clave] = lista }
             out[String(k)] = entrada
-            NSLog("[RoomScan] parche unido al cuarto %d: %d tramos de pared, giro %.1f°", k, paredes.count, th * 180 / .pi)
+            NSLog("[RoomScan] parche unido al cuarto %d: %d tramos de pared", k, paredes.count)
         }
         return out
     }
@@ -3214,7 +3652,10 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
             mergeGeneration += 1
             liveStructureRooms = []
             liveMerged = true
+            marcoVivo = [:]
+            liveStructure = nil
             floorPlanPanelView.update(rooms: [], merged: true)
+            alTerminarMergeEnVivo()
             return
         }
         guard visibleRooms.count > 1 else {
@@ -3223,12 +3664,17 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
             let name = voiceNames.indices.contains(idx) ? voiceNames[idx] : nil
             liveStructureRooms = [roomSketch(for: visibleRooms[0], name: name)]
             liveMerged = true
+            // Un solo cuarto: su propio marco ES el plano.
+            marcoVivo = [idx: .identidad]
+            liveStructure = nil
             floorPlanPanelView.update(rooms: liveStructureRooms, merged: true)
+            alTerminarMergeEnVivo()
             return
         }
         guard #available(iOS 17.0, *) else {
             mergeGeneration += 1
             applyTiledFallback(visibleRooms: visibleRooms, visibleIndices: visibleIndices)
+            alTerminarMergeEnVivo()
             return
         }
         guard !mergeInFlight else {
@@ -3256,7 +3702,29 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
                         }
                         self.liveStructureRooms = sketches
                         self.liveMerged = true
+                        // Dónde quedó cada cuarto en el plano: el movimiento
+                        // de sus MISMAS paredes (mismo identificador) antes y
+                        // después del merge.
+                        var marcos: [Int: FloorPlanEncoder.Rigido2D] = [:]
+                        for room in structure.rooms {
+                            guard let idx = self.originalRoomIndex(for: room), idx < self.capturedRooms.count else { continue }
+                            let antes = self.capturedRooms[idx]
+                            if let t = FloorPlanEncoder.rigidoEntre(antes.walls + antes.doors + antes.windows + antes.openings,
+                                                                    room.walls + room.doors + room.windows + room.openings) {
+                                marcos[idx] = t
+                            }
+                        }
+                        self.marcoVivo = marcos
+                        self.liveStructure = structure
                         self.floorPlanPanelView.update(rooms: sketches, merged: true)
+                        self.revisarPuertasSinPareja(structure.rooms)
+                        // Con los vecinos ya en su lugar, los huecos de cada
+                        // cuarto se vuelven a revisar (una pared del cuarto de
+                        // al lado que RoomPlan metió en este ya no cuenta). No
+                        // mientras hay un aviso abierto: ese pinta lo suyo.
+                        if self.aviso == nil { for g in self.gruposDelNivel(nil) { self.revisarGrupo(g) } }
+                        self.marcarEsquinasEnPanel(self.gruposDelNivel(nil).last)
+                        self.refrescarMinimapa()
                     }
                     if self.pendingFinishSession {
                         self.pendingFinishSession = false
@@ -3264,6 +3732,7 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
                         return
                     }
                     self.drainQueuedMergeIfNeeded()
+                    self.alTerminarMergeEnVivo()
                 }
             } catch {
                 // Honest fallback for the live panel too, same as
@@ -3280,6 +3749,7 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
                         return
                     }
                     self.drainQueuedMergeIfNeeded()
+                    self.alTerminarMergeEnVivo()
                 }
             }
         }
@@ -3289,6 +3759,210 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         guard mergeQueued else { return }
         mergeQueued = false
         refreshLiveStructure()
+    }
+
+    // ===== EL PARCHE, ACOMODADO EN SU CUARTO (14-oct) =====
+    //
+    // "Completar escaneo" es otra captura: arranca con su propio origen. Para
+    // saber dónde cae lo que se escaneó, se le pide a Apple que junte SOLO el
+    // cuarto y su parche (StructureBuilder con esos dos); el movimiento sale
+    // de las mismas paredes antes y después. Si Apple no puede, o si lo que
+    // propone no vuelve a ver nada de lo que el cuarto ya tenía, el parche NO
+    // se pega: el cuarto se queda como estaba y se dice. Una vez, la casa de
+    // Harold recibió una caja de paredes encima de la cocina por pegar un
+    // parche sin acomodarlo; eso no vuelve a pasar.
+    private var parchesPorAlinear: [Int] {
+        indicesParche.filter { p in
+            alineacionParche[p] == nil && !parcheSinAlinear.contains(p)
+                && (parcheDe[p].map { !deletedRoomIndices.contains($0) && $0 < capturedRooms.count } ?? false)
+                && p < capturedRooms.count
+        }.sorted()
+    }
+
+    private func alinearParchesPendientes() {
+        let pendientes = parchesPorAlinear
+        guard !pendientes.isEmpty else { drenarEsperas(); return }
+        // Una cosa a la vez con Apple: si hay un merge en vivo, este espera
+        // a que termine (alTerminarMergeEnVivo lo vuelve a llamar).
+        guard !mergeInFlight, !alineandoParches else { return }
+        guard #available(iOS 17.0, *) else {
+            guardarAlineaciones(hechos: [:], fallidos: pendientes)
+            drenarEsperas()
+            return
+        }
+        mergeInFlight = true
+        alineandoParches = true
+        let pares = pendientes.compactMap { p -> (Int, CapturedRoom, CapturedRoom)? in
+            guard let g = parcheDe[p] else { return nil }
+            return (p, capturedRooms[g], capturedRooms[p])
+        }
+        Task { [weak self] in
+            var hechos: [Int: ParAlineado] = [:]
+            for (p, base, parche) in pares {
+                if let t = await Self.alinearPar(base: base, parche: parche) { hechos[p] = t }
+            }
+            await MainActor.run {
+                guard let self = self else { return }
+                self.mergeInFlight = false
+                self.alineandoParches = false
+                self.guardarAlineaciones(hechos: hechos, fallidos: pendientes.filter { hechos[$0] == nil })
+                if self.pendingFinishSession {
+                    self.pendingFinishSession = false
+                    self.finishSession()
+                    return
+                }
+                self.drainQueuedMergeIfNeeded()
+                self.alTerminarMergeEnVivo()
+            }
+        }
+    }
+
+    @available(iOS 17.0, *)
+    private static func alinearPar(base: CapturedRoom, parche: CapturedRoom) async -> ParAlineado? {
+        guard let s = try? await StructureBuilder(options: []).capturedStructure(from: [base, parche]) else {
+            NSLog("[RoomScan] parche: Apple no pudo juntarlo con su cuarto")
+            return nil
+        }
+        let salida = s.rooms.flatMap { $0.walls + $0.doors + $0.windows + $0.openings }
+        guard let tb = FloorPlanEncoder.rigidoEntre(base.walls + base.doors + base.windows + base.openings, salida),
+              let tp = FloorPlanEncoder.rigidoEntre(parche.walls + parche.doors + parche.windows + parche.openings, salida) else {
+            NSLog("[RoomScan] parche: no se pudo saber cómo se movió")
+            return nil
+        }
+        let t = tp.luego(tb.inverso)
+        // ¿De verdad cuadra? Un parche bien acomodado vuelve a ver parte de
+        // lo que el cuarto ya tenía (las paredes junto al hueco).
+        let f = FloorPlanEncoder.metersToFeet
+        func pies(_ w: CapturedRoom.Surface) -> (CGPoint, CGPoint) {
+            let (a, b) = FloorPlanEncoder.wallEndpoints(w)
+            return (CGPoint(x: Double(a.x) * f, y: Double(a.y) * f), CGPoint(x: Double(b.x) * f, y: Double(b.y) * f))
+        }
+        let movidas = parche.walls.map { w -> (CGPoint, CGPoint) in let (a, b) = pies(w); return (t.aplicarPies(a, f: f), t.aplicarPies(b, f: f)) }
+        let propias = base.walls.map(pies)
+        let c = FloorPlanEncoder.largoCubierto(movidas, por: propias)
+        guard c.cubierto >= max(3.0, 0.2 * c.total) else {
+            NSLog("[RoomScan] parche: no vuelve a ver nada del cuarto (%.1f de %.1f ft) - no se pega", c.cubierto, c.total)
+            return nil
+        }
+        NSLog("[RoomScan] parche acomodado: giro %.1f°, %.1f de %.1f ft sobre el cuarto", t.th * 180 / .pi, c.cubierto, c.total)
+        // ¿Lo traído es el MISMO cuarto? Cada pared traída tiene que caer dentro
+        // del cuarto o en su borde (un clóset o baño pegado por fuera comparte
+        // paredes pero cae afuera; una cocina en L tiene su centro afuera, por
+        // eso se mira pared por pared). Y cuánto cae encima cuenta también lo
+        // que llena los huecos de su contorno (la pared que antes no vio).
+        let cy = FloorPlanEncoder.contornoYHuecos(wallsFt: propias)
+        let dentro = !movidas.isEmpty && movidas.allSatisfy { w in
+            let m = CGPoint(x: (w.0.x + w.1.x) / 2, y: (w.0.y + w.1.y) / 2)
+            // Una pared que el cuarto ya tenía (aunque sea la ajena que RoomPlan
+            // le metió) no prueba que lo traído sea otro cuarto.
+            let ya = FloorPlanEncoder.largoCubierto([w], por: propias)
+            return FloorPlanEncoder.enPoligono(m, cy.poly) || FloorPlanEncoder.distAlBorde(m, cy.poly) <= 1.0
+                || (ya.total > 0 && ya.cubierto >= 0.7 * ya.total)
+        }
+        let cd = FloorPlanEncoder.largoCubierto(movidas, por: propias + cy.gaps.map { ($0.a, $0.b) })
+        return ParAlineado(t: t, frac: cd.total > 0 ? cd.cubierto / cd.total : 0, dentro: dentro)
+    }
+
+    private func guardarAlineaciones(hechos: [Int: ParAlineado], fallidos: [Int]) {
+        let grupos = Set((Array(hechos.keys) + fallidos).compactMap { parcheDe[$0] })
+        var parchesFallidos: [Int] = [], absorbidos: [Int] = [], sonCuartos: [Int] = []
+        for (p, par) in hechos {
+            if posiblesDuplicados.contains(p) {
+                // Lo que trajo después de "Terminar": si casi todo cae sobre el
+                // cuarto donde estaba, ES ese cuarto; si no, es otro cuarto.
+                if par.dentro && par.frac >= 0.8 { alineacionParche[p] = par.t; absorbidos.append(p) } else { sonCuartos.append(p) }
+            } else {
+                alineacionParche[p] = par.t
+            }
+        }
+        for p in fallidos {
+            if posiblesDuplicados.contains(p) { sonCuartos.append(p) } else { parcheSinAlinear.insert(p); parchesFallidos.append(p) }
+        }
+        for p in absorbidos + sonCuartos { posiblesDuplicados.remove(p) }
+        // Lo que se dijo de equipo durante esa captura es del cuarto donde estaba.
+        for p in absorbidos {
+            guard let g = parcheDe[p], g < roomEquipment.count, p < roomEquipment.count, !roomEquipment[p].isEmpty else { continue }
+            for (k, v) in roomEquipment[p] { roomEquipment[g][k] = v }
+            roomEquipment[p] = [:]
+        }
+        for p in sonCuartos {
+            indicesParche.remove(p)
+            parcheDe[p] = nil
+            revisarGrupo(p)
+        }
+        if aviso == nil { for g in grupos { revisarGrupo(g) } }
+        if !sonCuartos.isEmpty { refreshLiveStructure() }
+        marcarEsquinasEnPanel(grupos.max())
+        refrescarMinimapa()
+        if !absorbidos.isEmpty, state != .finishingSession, !sessionDelivered {
+            showVoiceCaption("Era el mismo cuarto: no se guardó aparte")
+        }
+        // Si la revisión del final ya se hizo (o se está haciendo) sin este
+        // acomodo, se repite: el aviso viejo podía pedir completar algo que el
+        // parche ya cerró.
+        if state == .roomDonePrompt, !sessionDelivered, revisandoTodo || enRevisionFinal || aviso?.terminar == true {
+            // Si ya lo había dejado como incompleto ("Continuar de todos modos"),
+            // el parche que acaba de pegarse puede haberlo cerrado: se vuelve a
+            // revisar desde cero (si el hueco sigue, se le vuelve a avisar).
+            for (p, _) in hechos where alineacionParche[p] != nil { if let g = parcheDe[p] { incompletos.remove(g) } }
+            enRevisionFinal = false
+            validarAlTerminar()
+        }
+        let fallidos = parchesFallidos
+        if !fallidos.isEmpty, state != .finishingSession, !sessionDelivered {
+            let nombres = Set(fallidos.compactMap { parcheDe[$0] }).map { nombreDelGrupo($0) }.sorted()
+            showVoiceCaption("No se pudo unir lo nuevo a \(nombres.joined(separator: ", "))")
+            speak("No pude acomodar lo que escaneaste en \(nombres.joined(separator: " y ")). Ese cuarto se queda como estaba.") {}
+        }
+        updateUI()
+    }
+
+    // Después de cada merge en vivo (o cuando no hubo que hacer uno): si hay
+    // parches esperando, se acomodan; si ya no queda nada pendiente, sigue lo
+    // que estaba esperando los marcos (la revisión del final).
+    private func alTerminarMergeEnVivo() {
+        guard !mergeInFlight else { return }
+        if !parchesPorAlinear.isEmpty, state != .finishingSession {
+            alinearParchesPendientes()
+            return
+        }
+        drenarEsperas()
+    }
+
+    private func drenarEsperas() {
+        guard !mergeInFlight, !mergeQueued, parchesPorAlinear.isEmpty || state == .finishingSession else { return }
+        let w = alListosLosMarcos
+        alListosLosMarcos = []
+        w.forEach { $0() }
+    }
+
+    // Lo que necesita los cuartos juntos (la revisión del final) espera a que
+    // el merge en vivo y los parches terminen; nunca más de unos segundos:
+    // lo que no esté listo se revisa solo, sin compararlo con los demás.
+    private func esperarMarcos(maximo: TimeInterval = 8, _ listo: @escaping () -> Void) {
+        var hecho = false
+        let una: () -> Void = { if !hecho { hecho = true; listo() } }
+        if !mergeInFlight && !mergeQueued && parchesPorAlinear.isEmpty { una(); return }
+        alListosLosMarcos.append(una)
+        if !mergeInFlight { alTerminarMergeEnVivo() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + maximo) { una() }
+    }
+
+    // UNA PUERTA QUE UN CUARTO MODELÓ Y SU VECINO NO, sobre el plano juntado
+    // (los cuartos de Apple ya en un mismo espacio). Los índices se regresan
+    // a los de capturedRooms, que es lo que usa la tarjeta.
+    private func revisarPuertasSinPareja(_ juntados: [CapturedRoom]) {
+        let niveles = juntados.map { levelForMergedRoom($0) }
+        let lista = ScanInspector.mirroredPortCheck(rooms: juntados, deletedIndices: [],
+                                                    levels: niveles, alreadyReported: reportedMirroredPorts)
+        guard let m = lista.first,
+              let dueno = originalRoomIndex(for: juntados[m.ownerRoomIndex]),
+              let otro = originalRoomIndex(for: juntados[m.otherRoomIndex]) else { return }
+        reportedMirroredPorts.insert(m.portId)
+        pendingMirroredPort = ScanInspector.MirroredPort(portId: m.portId, isDoor: m.isDoor, widthFt: m.widthFt,
+                                                         ownerRoomIndex: dueno, otherRoomIndex: otro, distFt: m.distFt)
+        NSLog("[RoomScan] mirrored port: %@ %.2fft room %d not in room %d (%.4f ft)",
+              m.isDoor ? "door" : "opening", m.widthFt, dueno, otro, m.distFt)
     }
 
     // iOS 16 (no StructureBuilder) or a failed merge attempt - each room
@@ -3315,6 +3989,10 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         }
         liveStructureRooms = sketches
         liveMerged = false
+        // Sin merge no se sabe cómo se juntan: ningún cuarto se compara con
+        // otro ni se dibuja junto a otro.
+        marcoVivo = [:]
+        liveStructure = nil
         floorPlanPanelView.update(rooms: sketches, merged: false)
     }
 
@@ -3374,20 +4052,39 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
                 return
             }
         }
-        if descartarCapturaActual && processedResult.walls.count >= 3 { descartarCapturaActual = false }
+        // "Terminar" con la captura siguiente ya andando: con 3 paredes o más
+        // ya no se tira, pero tampoco se guarda a ciegas como otro cuarto
+        // (sería el mismo cuarto donde estaba, encima del anterior): se junta
+        // con el cuarto anterior y Apple dice si es el mismo (ver
+        // guardarAlineaciones).
+        var posibleDuplicado = false
+        if descartarCapturaActual && processedResult.walls.count >= 3 { descartarCapturaActual = false; posibleDuplicado = true }
         if descartarCapturaActual {
             // "Terminar" sin nombre, sin equipo y casi sin paredes: lo que se
             // empezó después del último cuarto no es un cuarto. No se guarda.
             descartarCapturaActual = false
             terminarAlAcabarCuarto = false
             pendingCurrentRoomName = nil
+            // El equipo que dijo mientras se procesaba es del cuarto donde
+            // estaba (el último guardado de este nivel), no se tira.
+            if !pendingCurrentEquipment.isEmpty,
+               let previo = (0..<capturedRooms.count).last(where: { !excluidosDelMerge.contains($0) && ($0 < roomLevels.count ? roomLevels[$0] : 1) == currentLevel }),
+               previo < roomEquipment.count {
+                for (k, v) in pendingCurrentEquipment { roomEquipment[previo][k] = v }
+            }
             pendingCurrentEquipment = [:]
+            if completandoIndice != nil {
+                completandoIndice = nil
+                if let n = nivelAntesDeCompletar { currentLevel = n }
+                nivelAntesDeCompletar = nil
+            }
             state = .roomDonePrompt
             updateUI()
             validarAlTerminar()
             return
         }
         capturedRooms.append(processedResult)
+        capturaDeCuarto[capturedRooms.count - 1] = capturaActual
         roomLevels.append(currentLevel)
         voiceNames.append(pendingCurrentRoomName)
         pendingCurrentRoomName = nil
@@ -3400,6 +4097,10 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
             indicesParche.insert(nuevo)
             parcheDe[nuevo] = g
             completandoIndice = nil
+            // El parche lleva el nivel de su cuarto; lo que sigue, el nivel
+            // en que iba antes de completar.
+            if let n = nivelAntesDeCompletar { currentLevel = n }
+            nivelAntesDeCompletar = nil
             if g < roomEquipment.count, nuevo < roomEquipment.count, !roomEquipment[nuevo].isEmpty {
                 for (k, v) in roomEquipment[nuevo] { roomEquipment[g][k] = v }
                 roomEquipment[nuevo] = [:]
@@ -3407,6 +4108,12 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
             if g < voiceNames.count, nuevo < voiceNames.count, let nm = voiceNames[nuevo], nm != voiceNames[g] {
                 voiceNames[g] = nm
             }
+        }
+        if posibleDuplicado, parcheDe[nuevo] == nil,
+           let previo = (0..<nuevo).last(where: { !excluidosDelMerge.contains($0) && ($0 < roomLevels.count ? roomLevels[$0] : 1) == currentLevel }) {
+            indicesParche.insert(nuevo)
+            parcheDe[nuevo] = previo
+            posiblesDuplicados.insert(nuevo)
         }
         let grupo = grupoDe(nuevo)
         let miembros = [grupo] + parches(de: grupo)
@@ -3424,51 +4131,22 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         // A gap another wall already covers is not a gap. Own-room walls
         // are enough: pre-merge there is nothing else, and on the real
         // house own-room recovery reproduces the post-merge answer.
-        // Con un parche, se revisa el cuarto UNIDO (lo de antes + lo nuevo):
-        // las dos capturas vienen en las mismas coordenadas de la cámara.
-        let sketchWalls = miembros.flatMap { roomSketch(for: capturedRooms[$0], name: nil).walls }
-        let openGaps = FloorPlanEncoder.outlineGaps(wallsFt: sketchWalls)
-            .filter { $0.ft > FloorPlanEncoder.outlineGapWarnFt
-                      && !FloorPlanEncoder.gapCoveredByWalls($0, walls: sketchWalls) }
-        roomGapsByIndex[grupo] = openGaps.map { $0.ft }
-        if grupo != nuevo { roomGapsByIndex[nuevo] = [] }
-        huecosPorGrupo[grupo] = openGaps.map { ($0.a, $0.b) }
-        // LAS ESQUINAS QUE NO CERRARON: misma aritmética que el chequeo de
-        // huecos, con las puertas, ventanas y aberturas de este cuarto para
-        // no confundir un paso con una esquina. Solo se avisa; el plano
-        // propone cerrarla (o la cierra sola si es chica) - ver
-        // fpCornerFindings en www/index.html.
-        let f = FloorPlanEncoder.metersToFeet
-        let todosLosPasos = miembros.flatMap { capturedRooms[$0].doors + capturedRooms[$0].windows + capturedRooms[$0].openings }
-        let portsFt: [(center: CGPoint, widthFt: Double)] = todosLosPasos.map { p in
-            let t = p.transform
-            return (center: CGPoint(x: Double(t.columns.3.x) * f, y: Double(t.columns.3.z) * f),
-                    widthFt: Double(p.dimensions.x) * f)
-        }
-        let esquinas = FloorPlanEncoder.cornerFindings(wallsFt: sketchWalls, portsFt: portsFt)
-        roomCornersByIndex[grupo] = esquinas
-        if grupo != nuevo { roomCornersByIndex[nuevo] = [] }
-        // Lo que falta, para pintarlo ámbar en el minimapa: los huecos y las
-        // dos patas de cada esquina grande que no cerró.
-        huecosPorGrupo[grupo, default: []] += esquinas.filter { $0.d >= 2 }.flatMap { [($0.a, $0.vertex), ($0.vertex, $0.b)] }
-        floorPlanPanelView.marcarEsquinas(esquinas.map { $0.vertex })
+        // Con un parche, el cuarto se revisa con lo que el parche SÍ agregó,
+        // ya acomodado en el marco del cuarto. El parche recién escaneado
+        // todavía no está acomodado (eso lo hace Apple juntando los dos, en
+        // seguida): mientras tanto se revisa el cuarto como estaba, nunca
+        // las dos capturas revueltas en coordenadas distintas.
+        let (openGaps, esquinas) = revisarGrupo(grupo)
+        _ = miembros
+        marcarEsquinasEnPanel(grupo)
         if !esquinas.isEmpty {
             NSLog("[RoomScan] open corners in room %d: %@", capturedRooms.count - 1,
                   esquinas.map { String(format: "%.1fft (legs %.1f/%.1f)", $0.d, $0.legA, $0.legB) }.joined(separator: ", "))
         }
-        // Una puerta que ESTE cuarto (o uno anterior) modelo y su vecino no.
-        // Misma clase de arithmetic que el chequeo de contorno: sobre la
-        // geometria ya en la mano, en main, en microsegundos, sin poses.
-        let mirrored = ScanInspector.mirroredPortCheck(rooms: capturedRooms,
-                                                       deletedIndices: excluidosDelMerge,
-                                                       levels: roomLevels,
-                                                       alreadyReported: reportedMirroredPorts)
-        if let m = mirrored.first {
-            reportedMirroredPorts.insert(m.portId)
-            pendingMirroredPort = m
-            NSLog("[RoomScan] mirrored port: %@ %.2fft room %d not in room %d (%.4f ft)",
-                  m.isDoor ? "door" : "opening", m.widthFt, m.ownerRoomIndex, m.otherRoomIndex, m.distFt)
-        }
+        // Una puerta que un cuarto modeló y su vecino no: se revisa sobre el
+        // plano JUNTADO, cuando el merge en vivo termina (refreshLiveStructure).
+        // Aquí, con los cuartos cada uno en su propio marco, comparar una
+        // puerta de un cuarto con las paredes de otro no significa nada.
         if !openGaps.isEmpty {
             NSLog("[RoomScan] outline gaps in room %d: %@", capturedRooms.count - 1,
                   openGaps.map { String(format: "%.1fft", $0.ft) }.joined(separator: ", "))
@@ -3478,9 +4156,11 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         // a live percentage on the room-done card, with a spoken rescan
         // hint when coverage is thin. Background math, main-thread UI.
         let coverageRoomIndex = capturedRooms.count - 1
+        let coverageCaptura = capturaDeCuarto[coverageRoomIndex] ?? -1
         keyframeRecorder?.snapshotPoses { [weak self] poses in
+            // Solo las poses de ESTA captura: las de otras están en otro marco.
             let result = ScanInspector.quickRoomCoverage(room: processedResult,
-                                                         roomIndex: coverageRoomIndex,
+                                                         captura: coverageCaptura,
                                                          poses: poses)
             DispatchQueue.main.async {
                 guard let self = self else { return }
@@ -4465,6 +5145,26 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         }
         return .ignored
     }
+    // Una frase que trae una orden (listo, terminar, siguiente, otro cuarto…)
+    // no es un nombre de cuarto: no se aprende ni sale como botón. En builds
+    // viejos se aprendieron "Nuevo cuarto" y "Sí en la cocina"; tocarlos le
+    // ponía ese nombre al cuarto.
+    static func traeOrden(_ nombre: String) -> Bool {
+        let k = " " + normalizedName(nombre) + " "
+        if isMoveOnPhrase(normalizedName(nombre)) { return true }
+        let ordenes = ["listo", "lista", "terminar", "terminamos", "termine", "siguiente", "completar", "continuar", "guardar", "cancelar"]
+        if ordenes.contains(where: { k.contains(" " + $0 + " ") }) { return true }
+        let muletillas = ["si", "no", "ok", "okay", "este", "esta", "eh", "ah", "todo", "ya", "quedo", "bueno", "eso"]
+        let partes = normalizedName(nombre).split(separator: " ").map(String.init)
+        if let primera = partes.first, muletillas.contains(primera) { return true }
+        // Una sola palabra que no es nombre ("El", "Pues", "Estoy").
+        if partes.count == 1, ["el", "la", "los", "las", "mi", "su", "ese", "esa", "pues", "estoy", "estas", "estamos"].contains(partes[0]) { return true }
+        // "Cocina está", "Baño ya quedó": una frase que termina en relleno no es un nombre.
+        let rellenoFinal = ["esta", "ya", "quedo", "estuvo", "todo", "bien", "listo", "lista"]
+        if partes.count > 1, let u = partes.last, rellenoFinal.contains(u) { return true }
+        return false
+    }
+
     static func isMoveOnPhrase(_ lower: String) -> Bool {
         let key = normalizedName(lower)
         let frases = ["nuevo cuarto", "cuarto nuevo", "otro cuarto", "siguiente cuarto", "otro nivel", "es nuevo", "el siguiente", "el que sigue"]
@@ -4552,7 +5252,11 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
     // y el vocabulario de quien lo trae en la mano, no de la compania.
     private func loadVoiceLearning() {
         let d = UserDefaults.standard
-        learnedRoomNames = Set(d.stringArray(forKey: Self.learnedNamesKey) ?? [])
+        // Lo aprendido que en realidad era una orden se tira (y se guarda la
+        // lista limpia), para que no vuelva a salir como botón.
+        let todos = d.stringArray(forKey: Self.learnedNamesKey) ?? []
+        learnedRoomNames = Set(todos.filter { !Self.traeOrden($0) })
+        if learnedRoomNames.count != Set(todos).count { d.set(Array(learnedRoomNames), forKey: Self.learnedNamesKey) }
         ownSpeechLevel = d.float(forKey: Self.ownLevelKey)
         ownSpeechSamples = d.integer(forKey: Self.ownLevelKey + ":n")
     }
@@ -4562,7 +5266,7 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
     // nuestra y empieza a ser su vocabulario.
     private func learnRoomName(_ name: String) {
         let key = Self.normalizedName(name)
-        guard !key.isEmpty, !Self.knownRoomWords.contains(key), !learnedRoomNames.contains(key) else { return }
+        guard !key.isEmpty, !Self.knownRoomWords.contains(key), !learnedRoomNames.contains(key), !Self.traeOrden(key) else { return }
         learnedRoomNames.insert(key)
         // Tope sano: 200 palabras es mucho mas de lo que un tecnico usa, y
         // evita que un mal dia de reconocimiento llene el telefono de basura.
@@ -4620,6 +5324,13 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         if learned.contains(key) { return true }
         // Sin acentos de los dos lados: el reconocedor a veces escribe "bano".
         if knownRoomWords.contains(where: { normalizedName($0) == key }) { return true }
+        // Los de la tabla de inglés (habitación, dormitorio, gimnasio…) también,
+        // dichos en español o en inglés ("kitchen", "bedroom"), con número o con
+        // "principal" al final ("dormitorio 2", "habitación principal").
+        var sinCola = key.replacingOccurrences(of: #"\s+(\d+|uno|dos|tres|cuatro|principal|grande|chico|chica)$"#, with: "", options: .regularExpression)
+        sinCola = sinCola.trimmingCharacters(in: .whitespaces)
+        if cuartosEnIngles[key] != nil || cuartosEnIngles[sinCola] != nil { return true }
+        if cuartosEnIngles.values.contains(where: { normalizedName($0) == key || normalizedName($0) == sinCola }) { return true }
         // "Cuarto de lavado" cuando la lista trae "lavado", o al reves. Y
         // "cuarto de Chucho": en español bautizar asi un cuarto es normal y
         // hay que dejarlo pasar.
@@ -4714,7 +5425,7 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
             let micReciente = micTocadoEn.map { Date().timeIntervalSince($0) < 12 } ?? false
             func esNombreCreible(_ nombre: String, pidiendo: Bool) -> Bool {
                 let k = nombre.split(separator: " ").count
-                guard k <= 4, !esGeneral, !esSiNo, !esControl, !Self.isMoveOnPhrase(nombre.lowercased()) else { return false }
+                guard k <= 4, !esGeneral, !esSiNo, !esControl, !Self.isMoveOnPhrase(nombre.lowercased()), !Self.traeOrden(nombre) else { return false }
                 return isKnownRoomWord(nombre) || micReciente || (pidiendo && k <= 3)
             }
             if !esGeneral {
@@ -4732,7 +5443,17 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
                 if revisandoTodo { return }
                 // Entre un cuarto y el siguiente: un nombre ahí es del que SIGUE.
                 if state == .processingRoom || (state == .roomDonePrompt && aviso == nil && !enRevisionFinal) {
-                    if case .roomName(let nombre) = classifyVoiceCommand(raw), esNombreCreible(nombre, pidiendo: false) {
+                    // El equipo dicho justo después de "listo" es del cuarto que
+                    // se acaba de cerrar (antes se tiraba sin avisar).
+                    if case .logEquipment(let items) = classifyVoiceCommand(raw) {
+                        applyEquipmentLog(items, rawHeard: raw)
+                        return
+                    }
+                    if case .removeEquipment(let type, let count) = classifyVoiceCommand(raw) {
+                        applyEquipmentRemoval(type: type, count: count)
+                        return
+                    }
+                    if case .roomName(let nombre) = classifyVoiceCommand(raw), !Self.traeOrden(nombre), esNombreCreible(nombre, pidiendo: false) {
                         learnRoomName(nombre)
                         pendingRoomNameAfterGap = nombre
                         speak("Entendido, el siguiente es \(Self.enIngles(nombre)).") {}
@@ -4742,6 +5463,78 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
                 if state == .scanningRoom && !eligiendoNivel {
                     if n <= 3, dice(["siguiente", "otro cuarto", "cuarto nuevo", "nuevo cuarto", "cuarto listo"]) || l == "listo" {
                         noteOwnSpeechLevel(level)
+                        siguienteTapped()
+                        return
+                    }
+                    // El nombre y "listo" de corrido ("sala listo", "listo, la
+                    // cocina"): se separan, el nombre se pone (si de verdad es un
+                    // nombre de cuarto) y el cuarto se cierra, como con "listo".
+                    // Antes el cuarto se llamaba "Sala listo". Una frase con duda o
+                    // negación ("no está listo", "casi lista", "¿estás listo?")
+                    // NUNCA cierra el cuarto.
+                    var palabras = l.split(separator: " ").map { $0.trimmingCharacters(in: CharacterSet(charactersIn: ",.;:¡!¿?")) }.filter { !$0.isEmpty }
+                    while palabras.count > 1, let p0 = palabras.first, ["si", "sí", "bueno", "ok", "okay", "pues", "ya", "ahora", "eh", "y"].contains(p0) { palabras.removeFirst() }
+                    // "ya listo", "pues listo", "ok listo": es "listo".
+                    if palabras.count == 1, ["listo", "lista"].contains(palabras[0]), n <= 3 {
+                        noteOwnSpeechLevel(level)
+                        siguienteTapped()
+                        return
+                    }
+                    if palabras.count >= 2, palabras.count <= 8,
+                       let pos = [0, palabras.count - 1].first(where: { ["listo", "lista"].contains(palabras[$0]) }) {
+                        var resto = palabras
+                        resto.remove(at: pos)
+                        let duda: Set<String> = ["no", "todavia", "aun", "casi", "falta", "estas", "estan", "esta?"]
+                        if resto.contains(where: { duda.contains(Self.sinAcentos($0)) }) { return }
+                        // "listo, otro nivel": aquí no se cierra nada (mientras se escanea
+                        // no hay orden de otro nivel; se pide al terminar el cuarto).
+                        if resto.joined(separator: " ").contains("otro nivel") { return }
+                        // "listo, terminamos": se termina el plano, como siempre. ("ya
+                        // terminé" quiere decir este cuarto, como en el resto del
+                        // asistente: eso es "listo".)
+                        if dice(["terminar", "terminamos", "termina el plano"]) {
+                            noteOwnSpeechLevel(level)
+                            terminarTapped()
+                            return
+                        }
+                        // "la cocina está lista", "el baño ya quedó listo", "estoy listo":
+                        // el relleno y los artículos no son parte del nombre.
+                        let relleno: Set<String> = ["esta", "ya", "quedo", "estuvo", "todo", "bien", "estoy", "estamos"]
+                        let articulos: Set<String> = ["el", "la", "los", "las", "mi", "su", "ese", "esa", "este", "esta"]
+                        var cambio = true
+                        while cambio, let u = resto.last {
+                            cambio = false
+                            let k = Self.sinAcentos(u)
+                            if relleno.contains(k) || articulos.contains(k) || k == "cuarto" { resto.removeLast(); cambio = true }
+                        }
+                        let dichoNombre = resto.joined(separator: " ")
+                        noteOwnSpeechLevel(level)
+                        // "dos ventiladores listo": el equipo se guarda con el cuarto
+                        // antes de cerrarlo. Si no dijo cuántos, no se cierra: se
+                        // le pregunta como siempre.
+                        let queEs = dichoNombre.isEmpty ? VoiceIntent.ignored : classifyVoiceCommand(dichoNombre)
+                        if case .logEquipment(let items) = queEs {
+                            applyEquipmentLog(items, rawHeard: raw)
+                            if items.allSatisfy({ $0.count != nil }) { siguienteTapped() }
+                            return
+                        }
+                        if case .removeEquipment(let type, let count) = queEs {
+                            applyEquipmentRemoval(type: type, count: count)
+                            siguienteTapped()
+                            return
+                        }
+                        // El resto es nombre solo si es nombre de cuarto (o se lo
+                        // estaban pidiendo y son pocas palabras), y nunca cambia en
+                        // silencio un nombre que ya tenía.
+                        let pidiendoNombre = pendingCurrentRoomName == nil && completandoIndice == nil && !bandejaRecogida
+                        if !dichoNombre.isEmpty, case .roomName(let nombre) = queEs,
+                           !Self.traeOrden(nombre),
+                           isKnownRoomWord(nombre) || (pidiendoNombre && (micReciente || nombre.split(separator: " ").count <= 3)),
+                           pendingCurrentRoomName == nil || Self.sinAcentos(pendingCurrentRoomName!) == Self.sinAcentos(nombre) {
+                            learnRoomName(nombre)
+                            pendingCurrentRoomName = nombre
+                            if !campo.isEditing { campo.text = Self.enIngles(nombre) }
+                        }
                         siguienteTapped()
                         return
                     }
@@ -4936,7 +5729,9 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
     private func applyEquipmentLog(_ items: [(type: String, count: Int?)], rawHeard: String) {
         guard !items.isEmpty else { return }
         switch state {
-        case .scanningRoom:
+        case .scanningRoom, .processingRoom:
+            // Procesando: el cuarto que se acaba de cerrar todavía no se
+            // guardó; lo pendiente se le pone al guardarse (didPresent).
             for item in items {
                 let vocab = Self.equipmentVocabulary.first { $0.type == item.type }
                 pendingCurrentEquipment[item.type] = EquipmentEntry(
@@ -4945,7 +5740,10 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
                 )
             }
         case .roomDonePrompt:
-            guard let index = capturedRooms.indices.last else { return }
+            // Un parche no es un cuarto: lo dicho es de su cuarto.
+            guard let ultimo = capturedRooms.indices.last else { return }
+            let index = grupoDe(ultimo)
+            guard roomEquipment.indices.contains(index) else { return }
             for item in items {
                 let vocab = Self.equipmentVocabulary.first { $0.type == item.type }
                 roomEquipment[index][item.type] = EquipmentEntry(
@@ -4977,12 +5775,15 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         let name = equipmentDisplayName(type)
         let removed = count ?? 1
         switch state {
-        case .scanningRoom:
+        case .scanningRoom, .processingRoom:
             guard var existing = pendingCurrentEquipment[type], let existingCount = existing.count else { return }
             existing.count = max(0, existingCount - removed)
             pendingCurrentEquipment[type] = existing
         case .roomDonePrompt:
-            guard let index = capturedRooms.indices.last,
+            // Un parche no es un cuarto: lo de su cuarto.
+            guard let ultimo = capturedRooms.indices.last else { return }
+            let index = grupoDe(ultimo)
+            guard roomEquipment.indices.contains(index),
                   var existing = roomEquipment[index][type], let existingCount = existing.count else { return }
             existing.count = max(0, existingCount - removed)
             roomEquipment[index][type] = existing
@@ -5068,8 +5869,9 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
 }
 
 // EL MINIMAPA de la cámara: los cuartos YA guardados de este nivel en gris y
-// dónde está parado ahora en azul. Formas en las mismas coordenadas que la
-// cámara (las de RoomPlan antes del merge), así que el punto cae donde es.
+// dónde está parado ahora en azul. Lo que se le pasa ya viene en UN marco (el
+// plano, o el de la captura en curso): mezclar marcos de capturas distintas
+// es lo que encimaba cuartos.
 // Un cuarto del minimapa: sus paredes y sus aberturas (puerta, ventana o
 // paso sin puerta), en pies, en las coordenadas de la cámara.
 struct MiniCuarto {

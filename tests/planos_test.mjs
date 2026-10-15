@@ -8,7 +8,9 @@ const ok = (l, c) => { if(c){ pass++; console.log('  ok  ' + l); } else { fail++
 const raw = JSON.parse(fs.readFileSync(new URL('./fixtures/plano_real.json', import.meta.url), 'utf8')); const data = raw.data || raw;
 const r = PL.resumenPlano(data);
 ok('Plan Details del plano real: 674 sq ft, 5 cuartos (lo mismo que dice Field Reports)', Math.round(r.area) === 674 && r.cuartos === 5);
-ok('paredes exteriores y altura del techo salen del escaneo (164 lf, 8.25 ft)', r.murosExt === 164 && r.techo === 8.25);
+// 14-oct: 141 lf, no 164. Las paredes exteriores que dos cuartos tienen copiadas (la del sur que comparten la sala y
+// el pasillo, 11.6 ft; el tramo de 2.35 ft repetido; la de y=-2.0) se contaban dos veces.
+ok('paredes exteriores (sin contar dos veces las copias) y altura del techo salen del escaneo (141 lf, 8.25 ft)', r.murosExt === 141 && r.techo === 8.25);
 ok('plano vacío no inventa medidas', JSON.stringify(PL.resumenPlano({ rooms: [] })) === JSON.stringify({ area: 0, cuartos: 0, murosExt: 0, techo: 0 }));
 const svg = PL.svgDelPlano(data, { cliente: 'Lauren <Harris>', direccion: '9 Oak Ln' });
 ok('dibuja el plano (SVG con paredes y cotas)', /^<svg[\s>]/.test(svg) && svg.length > 30000 && /LIVING ROOM/.test(svg));
@@ -19,7 +21,7 @@ const limpia = PL.svgDelPlano(data, { cliente: 'Lauren Harris', direccion: '9 Oa
 const hoja = PL.svgDelPlano(data, { cliente: 'Lauren Harris', direccion: '9 Oak Ln' });
 ok('14-oct: la imagen que se exporta es la MISMA hoja que la pantalla (sin el sello viejo FLOOR PLAN)', !/>FLOOR PLAN</.test(limpia) && !/>FLOOR PLAN</.test(hoja) && /Scanova<tspan fill="#2563eb">360<\/tspan>/.test(hoja) && !/DRAFT/.test(hoja));
 // Su diseño del 14-oct: la vista es una hoja limpia — cadenas de medidas por fuera, nombre + sq ft, marco.
-ok('vista y exportar: medidas por fuera en cadenas, y el total en el encabezado', /class="fp-cadenas"/.test(limpia) && /class="fp-cadenas"/.test(hoja) && /8' 7"/.test(limpia) && /Total Area: [\d.]+ sq ft/.test(hoja));
+ok('vista y exportar: medidas por fuera en cadenas, y el total en el encabezado', /class="fp-cadenas"/.test(limpia) && /class="fp-cadenas"/.test(hoja) && /8' 7"/.test(limpia) && /Total Area: [\d.]+\u2021? sq ft/.test(hoja));
 ok('vista: nombre + sq ft de cada cuarto (sin las medidas del cuarto)', /LIVING ROOM/.test(limpia) && /303\.7 sq ft/.test(limpia) && !/27'-11" x 18'-8"/.test(limpia));
 ok('vista: marco con encabezado y pie (Units, Scale, Page)',  /Not to scale/.test(limpia) && /ft \/ in/.test(limpia) && /Page/.test(limpia));
 ok('vista: piso blanco y sin el sello viejo de abajo', !/#fbfbfa/.test(limpia) && !/TOTAL AREA/.test(limpia));
@@ -46,7 +48,7 @@ ok('exportar lleva abajo la tabla de medidas (como Field Reports); la pantalla n
   ok('enderezar no toca lo guardado (trabaja sobre una copia)', chueco(crudo) > 30);
   ok('el dibujo usa el plano enderezado', PL.svgDelPlano(crudo, {}, true) === PL.svgDelPlano(listo, {}, true) || /LIVING ROOM/.test(PL.svgDelPlano(crudo, {}, true)));
   const src = fs.readFileSync(new URL('../docs/planos.js', import.meta.url), 'utf8');
-  ok('el escaneo nuevo se guarda ya derecho', /const d = prepararPlano\(r\)/.test(src) && /data: d, area_sqft/.test(src));
+  ok('el escaneo nuevo se guarda ya derecho (y partido por nivel)', /const d = prepararPlano\(L == null \? r : Object\.assign\(\{\}, r, \{ _nivel: L \}\)\)/.test(src) && /data: x\.d, area_sqft/.test(src));
   ok('teléfono: la página del plano queda quieta si todo cabe (pl-fijo)', /classList\.add\('pl-fijo'\)/.test(src) && /pl-fijo/.test(fs.readFileSync(new URL('../docs/app.js', import.meta.url), 'utf8')));
 }
 // Su pedido del 14-oct: el nombre que el personal dice al escanear (voiceName) es el que sale en el plano.
@@ -60,10 +62,16 @@ ok('exportar lleva abajo la tabla de medidas (como Field Reports); la pantalla n
   ok('las muletillas no entran al nombre ("Sí, en la cocina" -> Kitchen)', PL.prepararPlano(w).rooms[1].roomName === 'Kitchen');
   const ord = JSON.parse(JSON.stringify(v)); ord.rooms[0].voiceName = 'Nuevo cuarto'; ord.rooms[1].voiceName = 'cuarto nuevo';
   const lo = PL.svgDelPlano(ord, {}, true);
-  ok('"Nuevo cuarto" es la orden de pasar, no un nombre: sale Room N', !/NUEVO CUARTO/i.test(lo) && /ROOM 1/.test(lo) && /ROOM 2/.test(lo));
+  // 14-oct: ya no sale "ROOM 1/2" cuando los muebles dicen qué es (sofá + tele = sala, estufa + fregadero = cocina),
+  // como en Field Reports; la orden nunca es el nombre, y el nombre sale marcado como sugerido.
+  const pro = PL.prepararPlano(ord);
+  ok('"Nuevo cuarto" es la orden de pasar, no un nombre (el nombre sale de sus muebles, marcado como sugerido)', !/NUEVO CUARTO/i.test(lo) && pro.rooms[0].roomName === 'Living Room' && !!pro.rooms[0]._suggestedConfidence && pro.rooms[1].roomName === 'Kitchen');
   ok('un nombre de verdad con "cuarto" sí pasa', !PL.esOrdenDeCuarto('Cuarto de lavado') && !PL.esOrdenDeCuarto('Cuarto de Chucho') && PL.esOrdenDeCuarto('Otro cuarto'));
   const sin = JSON.parse(JSON.stringify(v)); sin.rooms.forEach(r => { delete r.roomName; delete r.voiceName; });
-  ok('sin nombre dicho sigue saliendo Room N (no inventa)', /ROOM 1/.test(PL.svgDelPlano(sin, {}, true))); }
+  // Sin una pista de verdad no se inventa: el pasillo (solo un sofá, que se ve por la abertura de la sala) sigue
+  // saliendo Room N.
+  const ps = PL.prepararPlano(sin);
+  ok('sin nombre dicho: solo se nombra con una pista de verdad (el pasillo con un sofá sigue Room N)', !ps.rooms[2].roomName && /ROOM 3/.test(PL.svgDelPlano(sin, {}, true)) && ps.rooms[3].roomName === 'Bedroom' && ps.rooms[4].roomName === 'Bathroom'); }
 // Su pedido (14-oct): bloque único nombre / largo x ancho / sq ft, flechitas sin líneas, closet, sin repetidos.
 { const lv = PL.svgDelPlano(data, {}, true);
   ok('bloque del cuarto: nombre, luego largo x ancho en pies y pulgadas, y el área debajo', /LIVING ROOM<\/text><text[^>]*>\d+' \d+" x \d+' \d+"<\/text><text[^>]*>303\.7 sq ft/.test(lv));

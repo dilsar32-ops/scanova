@@ -1,6 +1,6 @@
 // Scanova · personas: quién pide entrar (aprobar / rechazar) y el equipo. Solo el manager.
-import { $, $$, authFetch, esManager } from './app.js?v=2026-10-14-49';
-import { esc, fechaCorta, iniciales } from './trabajos.js?v=2026-10-14-49';
+import { $, $$, authFetch, esManager } from './app.js?v=2026-10-14-52';
+import { esc, fechaCorta, iniciales } from './trabajos.js?v=2026-10-14-52';
 
 let SOLICITUDES = [], EQUIPO = [], INVITACIONES = [], INV_LISTA = true, EMPRESAS = [], DUENO = false;
 export const estadoTxt = (st) => ({ active:'activo', paused:'en espera / pausado', removed:'sacado' }[st] || st || 'activo');

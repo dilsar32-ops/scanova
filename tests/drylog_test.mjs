@@ -91,7 +91,13 @@ ok('OK de la rueda: el material del centro; con la lectura guardada vuelve la c�
   ok('See all days y el último cuarto abren la lista arriba', /\['dia', 'registro', 'lista'\]\.includes\(PANTALLA\)\) m\.scrollTop = 0/.test(js) && /if\(m && \(PANTALLA === 'dia' \|\| PANTALLA === 'lista'\)\) m\.scrollTop = 0;/.test(js));
   ok('lo abierto/cerrado: solo lo que la persona toca, y se olvida al cambiar de proyecto', /ABIERTO_LI\.clear\(\)/.test(js) && /details\[data-li\] > summary'\); if\(s\) ABIERTO_LI\.set/.test(js) && !/addEventListener\('toggle'/.test(js));
   ok('teléfono tomando lecturas = vuelta abierta (nunca sin la barra que guarda)', /if\(!web && \['cam', 'lectura', 'guardado', 'equipo'\]\.includes\(PANTALLA\)\) SESION = true;/.test(js));
-  ok('equipo de la lista: cuántos caben según el ancho, y ningún nombre se sale de su cuadro', /\.dl-li-eq-g\{[^}]*repeat\(auto-fill, minmax\(112px, 1fr\)\)[^}]*overflow:hidden/.test(css) && /\.dl-li-eq-i small\{ display:block; overflow:hidden; text-overflow:ellipsis; \}/.test(css) && !/nth-child\(3n\+1\)/.test(css));
-  ok('computadora: un cuarto nunca más ancho que su nivel; los botones a la derecha; la flecha y el número juntos', /minmax\(min\(420px, 100%\), 1fr\)/.test(css) && /#panel-secado \.dl-lista-cab \.dl-lista-t\{ margin-right:auto; \}/.test(css) && /\.dl-tend\{[^}]*white-space:nowrap/.test(css)); }
+  ok('equipo de la lista: cuántos caben según el ancho, y ningún nombre se sale de su cuadro', /\.dl-li-eq-g\{[^}]*repeat\(auto-fill, minmax\(104px, 1fr\)\)[^}]*overflow:hidden/.test(css) && /\.dl-li-eq-i small\{[^}]*overflow:hidden; text-overflow:ellipsis; \}/.test(css) && !/nth-child\(3n\+1\)/.test(css));
+  ok('computadora: View Report y New Reading a la derecha; lecturas en columnas sin salirse; la flecha y el número juntos', /\.dl-lista-cab\{[^}]*justify-content:flex-end/.test(css) && /minmax\(min\(300px, 100%\), 1fr\)/.test(css) && /\.dl-tend\{[^}]*white-space:nowrap/.test(css)); }
+// Su pedido del 14-oct (2a versión de la lista): sin el título, sin escalera, fotos y letras más chicas.
+{ const css = fs.readFileSync(new URL('../docs/estilo.css', import.meta.url), 'utf8');
+  ok('lista: sin el título "Dry Logs" (la pestaña ya lo dice)', !/class="dl-lista-t"/.test(js));
+  ok('lista: sin escalera — nivel y cuarto sin borde propio ni sangría, todo al mismo borde', /\.dl-li-niv, \.dl-li-cu\{ border:0; border-radius:0; background:none; \}/.test(css) && /\.dl-li-cu > summary\{ padding:10px 14px; border-top:1px solid var\(--line\); \}/.test(css) && /#panel-secado \.dl-lista > \.card\.dl-li-dia\{ margin:0; padding:0;/.test(css));
+  ok('lista: fotos más chicas (lectura 60, tira 52) y la fecha en negritas pero más chica (17)', /\.dl-li-mini\{[^}]*width:60px; height:60px/.test(css) && /\.dl-li-foto\{[^}]*width:52px; height:52px/.test(css) && /\.dl-li-fecha\{ font-size:17px; font-weight:800/.test(css));
+  ok('lista: material y lugar en un solo renglón', /\[f\.material, f\.ubicacion\]\.filter\(Boolean\)\.join\(' · '\)/.test(js)) }
 console.log(`\ndrylog: ${pass} ok, ${fail} fallas`);
 if(fail) process.exit(1);

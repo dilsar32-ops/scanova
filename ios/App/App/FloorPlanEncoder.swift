@@ -85,10 +85,14 @@ enum FloorPlanEncoder {
     // expensive direction to be wrong in.
     static let outlineGapWarnFt = 5.0
 
-    static func outlineGaps(wallsFt: [(CGPoint, CGPoint)]) -> [OutlineGap] {
+    static func outlineGaps(wallsFt: [(CGPoint, CGPoint)]) -> [OutlineGap] { contornoYHuecos(wallsFt: wallsFt).gaps }
+
+    // El mismo encadenado de outlineGaps, devolviendo también el contorno
+    // (para saber si un punto cae dentro de un cuarto).
+    static func contornoYHuecos(wallsFt: [(CGPoint, CGPoint)]) -> (poly: [CGPoint], gaps: [OutlineGap]) {
         func dist(_ p: CGPoint, _ q: CGPoint) -> Double { hypot(q.x - p.x, q.y - p.y) }
         let walls = wallsFt.filter { dist($0.0, $0.1) > 0.05 }
-        if walls.count < 3 { return [] }
+        if walls.count < 3 { return (walls.map { $0.0 }, []) }
         let tol = 1.0
         var used = [Bool](repeating: false, count: walls.count)
         var chains: [[CGPoint]] = []
@@ -127,7 +131,7 @@ enum FloorPlanEncoder {
         var kept = chains.filter { chainLen($0) >= 2.5 }
         if kept.isEmpty { kept = chains }
         kept.sort { chainLen($0) > chainLen($1) }
-        guard var poly = kept.first else { return [] }
+        guard var poly = kept.first else { return ([], []) }
         var rest = Array(kept.dropFirst())
         var gaps: [OutlineGap] = []
         while !rest.isEmpty {
@@ -154,7 +158,7 @@ enum FloorPlanEncoder {
         }
         let closeDist = dist(poly[0], poly[poly.count - 1])
         if closeDist > tol { gaps.append(OutlineGap(a: poly[poly.count - 1], b: poly[0], ft: closeDist)) }
-        return gaps
+        return (poly, gaps)
     }
 
     // A "gap" that another wall already runs along is not a gap - the
@@ -187,6 +191,290 @@ enum FloorPlanEncoder {
             cursor = max(cursor, hi)
         }
         return covered >= L * 0.7
+    }
+
+    // ============ LOS MARCOS DE CADA CAPTURA Y EL PARCHE (14-oct) ============
+    //
+    // La casa de Harold: "puso un cuarto encima de la cocina". Cada captura
+    // de RoomPlan arranca con SU propio origen (ARKit pone el 0,0 donde está
+    // el teléfono al empezar). Apple junta los cuartos con StructureBuilder,
+    // pero el parche de "Completar escaneo" se pegaba a su cuarto como si
+    // estuviera en las mismas coordenadas, y las poses y fotos de la
+    // caminata se dibujaban sobre el plano unido sin moverlas. Aquí está la
+    // geometría PURA para pasar cada cosa a su lugar y para decidir qué
+    // pedazo del parche de verdad cierra lo que faltaba. Sin tipos de
+    // RoomPlan: se prueba en la Mac (tests/marcos/correr.sh copia lo
+    // que está entre BEGIN PURO y END PURO).
+    // BEGIN PURO
+    /// Un movimiento rígido en el piso (x, z del mundo): girar `th` y mover (tx, ty).
+    struct Rigido2D {
+        var th: Double, tx: Double, ty: Double
+        static let identidad = Rigido2D(th: 0, tx: 0, ty: 0)
+        func aplicar(_ p: CGPoint) -> CGPoint {
+            let c = cos(th), s = sin(th)
+            return CGPoint(x: c * p.x - s * p.y + tx, y: s * p.x + c * p.y + ty)
+        }
+        var inverso: Rigido2D {
+            let c = cos(-th), s = sin(-th)
+            return Rigido2D(th: -th, tx: -(c * tx - s * ty), ty: -(s * tx + c * ty))
+        }
+        /// Primero self, después `b`.
+        func luego(_ b: Rigido2D) -> Rigido2D {
+            let o = b.aplicar(aplicar(.zero))
+            return Rigido2D(th: th + b.th, tx: o.x, ty: o.y)
+        }
+        /// Un punto en pies (el movimiento está en metros).
+        func aplicarPies(_ p: CGPoint, f: Double) -> CGPoint {
+            let q = aplicar(CGPoint(x: p.x / f, y: p.y / f))
+            return CGPoint(x: q.x * f, y: q.y * f)
+        }
+    }
+
+    /// El movimiento que lleva cada pared de "antes" a la misma pared "después"
+    /// (mismo identificador). El giro sale del eje de las paredes (una pared
+    /// puede volver al revés). El movimiento se saca de lo que una pared SÍ
+    /// dice con certeza: dónde está de lado a lado (su perpendicular); a lo
+    /// largo casi no pesa, porque al juntar cuartos Apple alarga o recorta
+    /// paredes para que se toquen. El sentido bueno del giro (θ o θ+180°) es
+    /// el que deja menos error. Pide al menos dos paredes que no sean
+    /// paralelas, y que el error que queda sea chico: si no, nil (mejor no
+    /// mover nada que moverlo mal).
+    /// `tambienLargo`: el respaldo para una captura con puras superficies
+    /// paralelas (un pasillo abierto por las dos puntas): se pesa también lo
+    /// largo de cada pared, como antes, en vez de no dar nada.
+    static func ajusteRigido(_ pares: [(a0: CGPoint, b0: CGPoint, a1: CGPoint, b1: CGPoint, peso: Double)],
+                             errorMaximo: Double = 0.25, tambienLargo: Bool = false, pesosLargo: [Double]? = nil) -> Rigido2D? {
+        guard pares.count >= 2 else { return nil }
+        func medio(_ a: CGPoint, _ b: CGPoint) -> CGPoint { CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2) }
+        var s2 = 0.0, c2 = 0.0
+        for p in pares {
+            let d = atan2(Double(p.b1.y - p.a1.y), Double(p.b1.x - p.a1.x)) - atan2(Double(p.b0.y - p.a0.y), Double(p.b0.x - p.a0.x))
+            s2 += sin(2 * d) * p.peso; c2 += cos(2 * d) * p.peso
+        }
+        guard s2 * s2 + c2 * c2 > 1e-12 else { return nil }
+        let eje = atan2(s2, c2) / 2
+        var mejor: (r: Rigido2D, err: Double)? = nil, segundo: Double = .infinity
+        for th in [eje, eje + Double.pi] {
+            let c = cos(th), s = sin(th)
+            // Mínimos cuadrados con la perpendicular de cada pared (y un
+            // poquito de su largo, para que el sistema nunca quede suelto).
+            var a11 = 0.0, a12 = 0.0, a22 = 0.0, b1 = 0.0, b2 = 0.0
+            var n11 = 0.0, n12 = 0.0, n22 = 0.0
+            for (k, p) in pares.enumerated() {
+                let m0 = medio(p.a0, p.b0), m1 = medio(p.a1, p.b1)
+                let dx = Double(p.b1.x - p.a1.x), dy = Double(p.b1.y - p.a1.y), L = hypot(dx, dy)
+                guard L > 1e-6 else { continue }
+                let ux = dx / L, uy = dy / L, nx = -uy, ny = ux
+                let rx = Double(m1.x) - (c * Double(m0.x) - s * Double(m0.y))
+                let ry = Double(m1.y) - (s * Double(m0.x) + c * Double(m0.y))
+                // Lo largo de una pared casi no cuenta (Apple las estira al
+                // juntar); en el respaldo pesa lo largo de puertas y ventanas.
+                let w = p.peso, e = tambienLargo ? (pesosLargo.map { k < $0.count ? $0[k] : 1.0 } ?? 1.0) : 0.02
+                a11 += w * (nx * nx + e * ux * ux); a12 += w * (nx * ny + e * ux * uy); a22 += w * (ny * ny + e * uy * uy)
+                n11 += w * nx * nx; n12 += w * nx * ny; n22 += w * ny * ny
+                let rn = nx * rx + ny * ry, ru = ux * rx + uy * ry
+                b1 += w * (nx * rn + e * ux * ru); b2 += w * (ny * rn + e * uy * ru)
+            }
+            // Todas paralelas: el movimiento de lado a lado de una sola
+            // dirección no alcanza para saber dónde va el cuarto.
+            let trazaN = n11 + n22
+            guard trazaN > 0, tambienLargo || (n11 * n22 - n12 * n12) / (trazaN * trazaN) > 0.02 else { return nil }
+            let det = a11 * a22 - a12 * a12
+            guard abs(det) > 1e-12 else { return nil }
+            let tx = (b1 * a22 - b2 * a12) / det, ty = (a11 * b2 - a12 * b1) / det
+            let r = Rigido2D(th: th, tx: tx, ty: ty)
+            var err = 0.0, w = 0.0
+            for (k, p) in pares.enumerated() {
+                let q = r.aplicar(medio(p.a0, p.b0)), m1 = medio(p.a1, p.b1)
+                let dx = Double(p.b1.x - p.a1.x), dy = Double(p.b1.y - p.a1.y), L = hypot(dx, dy)
+                guard L > 1e-6 else { continue }
+                let rn = Double(q.x - m1.x) * (-dy / L) + Double(q.y - m1.y) * (dx / L)
+                let ru = Double(q.x - m1.x) * (dx / L) + Double(q.y - m1.y) * (dy / L)
+                // Lo largo se cobra con el mismo peso con que se ajustó (una pared
+                // que Apple estiró no puede tumbar un ajuste bueno).
+                let e = pesosLargo.map { k < $0.count ? $0[k] : 1.0 } ?? 1.0
+                err += (tambienLargo ? sqrt(rn * rn + e * ru * ru) : abs(rn)) * p.peso
+                w += p.peso
+            }
+            guard w > 0 else { return nil }
+            err /= w
+            if mejor == nil || err < mejor!.err { if let m = mejor { segundo = m.err }; mejor = (r, err) } else { segundo = min(segundo, err) }
+        }
+        guard let m = mejor, m.err <= errorMaximo else { return nil }
+        // En el respaldo, si los dos sentidos dan casi lo mismo, no se adivina.
+        if tambienLargo && segundo < m.err + 0.1 { return nil }
+        return m.r
+    }
+
+    /// Cuántos pies de las paredes `parche` caen sobre paredes de `base` (casi
+    /// paralelas, a menos de 0.7 ft). Un parche bien acomodado vuelve a ver
+    /// parte de lo que el cuarto ya tenía; uno que no toca nada no se pega.
+    static func largoCubierto(_ parche: [(CGPoint, CGPoint)], por base: [(CGPoint, CGPoint)]) -> (cubierto: Double, total: Double) {
+        var cub = 0.0, tot = 0.0
+        for (a, b) in parche {
+            let l = hypot(b.x - a.x, b.y - a.y)
+            tot += l
+            let libre = tramosSinCubrir(a, b, base).reduce(0.0) { $0 + hypot($1.1.x - $1.0.x, $1.1.y - $1.0.y) }
+            cub += max(0, l - libre)
+        }
+        return (cub, tot)
+    }
+
+    static func distSegmento(_ p: CGPoint, _ a: CGPoint, _ b: CGPoint) -> Double {
+        let dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy
+        guard l2 > 0.0001 else { return hypot(p.x - a.x, p.y - a.y) }
+        let t = max(0, min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2))
+        return hypot(p.x - (a.x + dx * t), p.y - (a.y + dy * t))
+    }
+    static func enPoligono(_ p: CGPoint, _ poly: [CGPoint]) -> Bool {
+        guard poly.count >= 3 else { return false }
+        var dentro = false
+        var j = poly.count - 1
+        for i in poly.indices {
+            let a = poly[i], b = poly[j]
+            if (a.y > p.y) != (b.y > p.y), p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x { dentro.toggle() }
+            j = i
+        }
+        return dentro
+    }
+    static func distAlBorde(_ p: CGPoint, _ poly: [CGPoint]) -> Double {
+        guard poly.count >= 2 else { return .infinity }
+        var m = Double.infinity
+        for i in poly.indices { m = min(m, distSegmento(p, poly[i], poly[(i + 1) % poly.count])) }
+        return m
+    }
+    /// Lo que queda de la pared AB que ninguna pared de `refs` ya cubre (casi
+    /// paralela, a menos de 0.7 ft de su línea). El mismo de antes, aquí para
+    /// poderlo probar.
+    static func tramosSinCubrir(_ a: CGPoint, _ b: CGPoint, _ refs: [(CGPoint, CGPoint)]) -> [(CGPoint, CGPoint)] {
+        let dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy
+        guard l2 > 0.01 else { return [] }
+        let l = sqrt(l2)
+        var cortes: [(Double, Double)] = []
+        for (c, d) in refs {
+            let ex = d.x - c.x, ey = d.y - c.y, m = hypot(ex, ey)
+            guard m > 0.1, abs((dx * ex + dy * ey) / (l * m)) > 0.978 else { continue }
+            let dist = { (p: CGPoint) -> Double in abs((p.x - a.x) * dy - (p.y - a.y) * dx) / l }
+            guard dist(c) < 0.7, dist(d) < 0.7 else { continue }
+            let tc = ((c.x - a.x) * dx + (c.y - a.y) * dy) / l2
+            let td = ((d.x - a.x) * dx + (d.y - a.y) * dy) / l2
+            let lo = max(0, min(tc, td)), hi = min(1, max(tc, td))
+            if hi > lo { cortes.append((lo, hi)) }
+        }
+        cortes.sort { $0.0 < $1.0 }
+        var tramos: [(CGPoint, CGPoint)] = []
+        var t0 = 0.0
+        func punto(_ t: Double) -> CGPoint { CGPoint(x: a.x + dx * t, y: a.y + dy * t) }
+        for (lo, hi) in cortes {
+            if lo > t0 { tramos.append((punto(t0), punto(lo))) }
+            t0 = max(t0, hi)
+        }
+        if t0 < 1 { tramos.append((punto(t0), punto(1))) }
+        return tramos
+    }
+    /// LO QUE EL PARCHE SÍ AGREGA. De cada pared del parche (ya en el marco
+    /// del cuarto) se quita lo que ya está (paredes del cuarto y de los
+    /// otros cuartos); de lo que sobra se queda solo el pedazo que cae en un
+    /// hueco del contorno del cuarto (cerca de la línea que lo cierra) y que
+    /// no se mete en el piso de otro cuarto. Un parche que vio otro espacio
+    /// no agrega nada: el cuarto se queda como estaba (incompleto), nunca
+    /// con paredes inventadas encima de los vecinos.
+    static func piezasDeParche(parcheFt: [(CGPoint, CGPoint)], propiasFt: [(CGPoint, CGPoint)],
+                               otrasFt: [(CGPoint, CGPoint)], otrosContornos: [[CGPoint]]) -> [(CGPoint, CGPoint)] {
+        // Los huecos se buscan con las mismas paredes con que se avisan: sin
+        // las del cuarto de al lado que RoomPlan metió en este (si no, salen
+        // diagonales que no existen y el pedazo bueno no cae en ninguna).
+        let ajenas = paredesAjenas(propias: propiasFt, otras: otrasFt)
+        let base = propiasFt.enumerated().filter { !ajenas.contains($0.offset) }.map { $0.element }
+        let huecos = outlineGaps(wallsFt: base).filter { $0.ft >= 1.0 && !gapCoveredByWalls($0, walls: base) }
+        guard !huecos.isEmpty else { return [] }
+        var out: [(CGPoint, CGPoint)] = []
+        for (a, b) in parcheFt {
+            for (u, v) in tramosSinCubrir(a, b, propiasFt + otrasFt) {
+                let largo = hypot(v.x - u.x, v.y - u.y)
+                guard largo >= 1.0 else { continue }
+                let n = max(4, Int(ceil(largo / 0.5)))
+                let muestras = (0...n).map { k -> CGPoint in
+                    let t = Double(k) / Double(n)
+                    return CGPoint(x: u.x + (v.x - u.x) * t, y: u.y + (v.y - u.y) * t)
+                }
+                let cerca = huecos.contains { h in muestras.allSatisfy { distSegmento($0, h.a, h.b) <= max(1.5, 0.55 * h.ft) } }
+                guard cerca else { continue }
+                let dentroDeOtro = muestras.filter { m in otrosContornos.contains { enPoligono(m, $0) && distAlBorde(m, $0) >= 0.75 } }.count
+                guard Double(dentroDeOtro) / Double(muestras.count) < 0.3 else { continue }
+                out.append((u, v))
+            }
+        }
+        return out
+    }
+    /// PAREDES AJENAS: RoomPlan a veces mete en un cuarto una pared del
+    /// cuarto de al lado (la casa de Harold: la pared del Hallway dentro de
+    /// la sala, colgando). Al buscar huecos, el contorno se encadena por esa
+    /// punta suelta y sale un "lado faltante" en diagonal que no existe y que
+    /// ningún "Completar" puede cerrar. Candidata: una pared que otra pared de
+    /// OTRO cuarto cubre en un 70% o más. Se ignora (solo para buscar huecos;
+    /// nunca se borra nada del plano) si al quitarla los huecos que se avisan
+    /// se achican de verdad - una pared del cuarto que sí es suya, al
+    /// quitarla, abre un hueco: esa nunca se quita. Devuelve qué paredes se
+    /// ignoraron.
+    static func paredesAjenas(propias: [(CGPoint, CGPoint)], otras: [(CGPoint, CGPoint)]) -> Set<Int> {
+        guard !otras.isEmpty, propias.count > 3 else { return [] }
+        func faltante(_ fuera: Set<Int>, _ perdonan: [(CGPoint, CGPoint)]) -> Double {
+            let w = propias.enumerated().filter { !fuera.contains($0.offset) }.map { $0.element }
+            return outlineGaps(wallsFt: w)
+                .filter { $0.ft > outlineGapWarnFt && !gapCoveredByWalls($0, walls: w) && !gapCoveredByWalls($0, walls: perdonan) }
+                .reduce(0) { $0 + $1.ft }
+        }
+        let candidatas = propias.indices.filter { i in
+            let c = largoCubierto([propias[i]], por: otras)
+            return c.total > 0.5 && c.cubierto >= 0.7 * c.total
+        }
+        var fuera = Set<Int>()
+        var actual = faltante(fuera, otras)
+        var mejoro = true
+        while mejoro && actual > 0 {
+            mejoro = false
+            var mejor: (i: Int, f: Double)? = nil
+            for i in candidatas where !fuera.contains(i) {
+                // Si al quitarla el contorno se cierra con un puente que corre
+                // justo por donde estaba ella, ES pared del contorno (la
+                // compartida con el vecino): quitarla solo dejaría que la
+                // pared del vecino tape un hueco de verdad en la misma línea.
+                let sin = propias.enumerated().filter { !fuera.union([i]).contains($0.offset) }.map { $0.element }
+                let puentes = outlineGaps(wallsFt: sin).map { ($0.a, $0.b) }
+                let porAhi = largoCubierto([propias[i]], por: puentes)
+                if porAhi.total > 0, porAhi.cubierto >= 0.5 * porAhi.total { continue }
+                // El hueco que se abre al quitarla no lo puede perdonar la MISMA
+                // pared del vecino que la tapa a ella (si no, una pared real
+                // compartida "desaparece" y su vecino tapa el hueco de al lado).
+                let perdonan = otras.filter { largoCubierto([propias[i]], por: [$0]).cubierto < 0.5 }
+                let f = faltante(fuera.union([i]), perdonan)
+                if f <= actual - 1.0, mejor == nil || f < mejor!.f { mejor = (i, f) }
+            }
+            if let m = mejor { fuera.insert(m.i); actual = m.f; mejoro = true }
+        }
+        return fuera
+    }
+    // END PURO
+
+    /// El movimiento de las paredes de un cuarto ANTES a las mismas paredes
+    /// DESPUÉS (por identificador), en metros, en el piso (x, z).
+    static func rigidoEntre(_ antes: [CapturedRoom.Surface], _ despues: [CapturedRoom.Surface]) -> Rigido2D? {
+        var porId: [UUID: CapturedRoom.Surface] = [:]
+        for w in despues { porId[w.identifier] = w }
+        var pares: [(a0: CGPoint, b0: CGPoint, a1: CGPoint, b1: CGPoint, peso: Double)] = []
+        var esAbertura: [Bool] = []
+        for w in antes {
+            guard let d = porId[w.identifier] else { continue }
+            if case .wall = w.category { esAbertura.append(false) } else { esAbertura.append(true) }
+            let (a0, b0) = wallEndpoints(w), (a1, b1) = wallEndpoints(d)
+            pares.append((CGPoint(x: Double(a0.x), y: Double(a0.y)), CGPoint(x: Double(b0.x), y: Double(b0.y)),
+                          CGPoint(x: Double(a1.x), y: Double(a1.y)), CGPoint(x: Double(b1.x), y: Double(b1.y)),
+                          max(Double(w.dimensions.x), 0.1)))
+        }
+        let hayAberturas = esAbertura.contains(true)
+        let largo = esAbertura.map { $0 ? 1.0 : (hayAberturas ? 0.02 : 1.0) }
+        return ajusteRigido(pares) ?? ajusteRigido(pares, errorMaximo: 0.35, tambienLargo: true, pesosLargo: largo)
     }
 
     // ============ EL ASISTENTE DE ESQUINAS, EN EL TELÉFONO ============
@@ -389,11 +677,12 @@ enum FloorPlanEncoder {
             out["floorAreasSqFt"] = room.floors.map { f -> Double in
                 let pts = f.polygonCorners
                 guard pts.count >= 3 else { return 0 }
-                // shoelace in the floor surface's own plane, then to feet
+                // shoelace in the floor surface's own LOCAL plane (x, y; z = 0
+                // there), then to feet. With x/z it came back 0 every time.
                 var a = 0.0
                 for i in 0..<pts.count {
                     let p = pts[i], q = pts[(i + 1) % pts.count]
-                    a += Double(p.x * q.z - q.x * p.z)
+                    a += Double(p.x * q.y - q.x * p.y)
                 }
                 return abs(a / 2) * metersToFeet * metersToFeet
             }

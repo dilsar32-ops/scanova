@@ -2,8 +2,8 @@
 // por día y ver en grande. La página nunca ve las claves de R2: pide URLs firmadas a la función
 // fotos-subir, sube DIRECTO a R2 y luego confirma; la fila en fotos_fotos la escribe la función
 // solo cuando R2 ya tiene la foto completa (HEAD y tamaño).
-import { $, $$, authFetch, PERFIL, esManager } from './app.js?v=2026-10-14-49';
-import { esc, iniciales } from './trabajos.js?v=2026-10-14-49';
+import { $, $$, authFetch, PERFIL, esManager } from './app.js?v=2026-10-14-52';
+import { esc, iniciales } from './trabajos.js?v=2026-10-14-52';
 
 const FUNCION = '/functions/v1/fotos-subir';
 export const MAX_WEB = 1600, MAX_MINI = 320;
@@ -87,12 +87,21 @@ export async function preparar(file){
 }
 export async function sha256Hex(blob){ return hexDe(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer())); }
 
+// "Load failed" (Safari) o "Failed to fetch": se cayó la señal a media subida, o el teléfono se bloqueó o se
+// cambió de app y iOS cortó la conexión (14-oct, una tanda de 8 en 5G con dos "Load failed"). No es la foto.
+export const esErrorDeRed = (e) => !!e && (e.name === 'TypeError' || /load failed|failed to fetch|network ?error|internet|offline|timed out|cancelled|abort/i.test(String(e.message || e)));
+const esperar = (ms) => new Promise(r => setTimeout(r, ms));
+// Si no hay señal, espera a que vuelva (o hasta `max` ms).
+function esperarSenal(max){
+  if(typeof navigator === 'undefined' || navigator.onLine !== false || typeof window === 'undefined') return Promise.resolve();
+  return new Promise(res => { const fin = () => { window.removeEventListener('online', fin); clearTimeout(t); res(); }; const t = setTimeout(fin, max); window.addEventListener('online', fin); });
+}
 async function putR2(url, blob){
   let ultimo = null;
-  for(let i = 0; i < 3; i++){
-    try{ const r = await fetch(url, { method:'PUT', body: blob, headers:{ 'Content-Type':'image/jpeg' } }); if(r.ok) return; ultimo = new Error('R2 contestó ' + r.status); }
+  for(let i = 0; i < 4; i++){
+    if(i){ await esperarSenal(30000); await esperar([0, 1000, 3000, 6000][i]); }
+    try{ const r = await fetch(url, { method:'PUT', body: blob, headers:{ 'Content-Type':'image/jpeg' } }); if(r.ok) return; ultimo = new Error('R2 contestó ' + r.status); if(r.status === 403) break; }   // 403 = la firma venció: se vuelve a pedir arriba
     catch(e){ ultimo = e; }
-    await new Promise(r => setTimeout(r, 700 * (i + 1)));
   }
   throw ultimo || new Error('upload failed');
 }
@@ -119,7 +128,8 @@ let FOTOS = [];                // sus fotos (activas)
 let NOMBRES = {};              // user_id -> nombre (lo que la cuenta alcanza a ver)
 const URLS = { mini:{}, web:{} };   // foto_id -> { url, vence }
 let TANDA = [];                // lo que se está subiendo ahora
-export const hayFotosSubiendo = () => subiendo || TANDA.some(i => i.estado !== 'lista' && i.estado !== 'fallo' && i.estado !== 'repetida');
+// Subiendo, o esperando la señal para volver a intentar (mientras tanto la app no se recarga sola: se perderían).
+export const hayFotosSubiendo = () => activos > 0 || TANDA.some(i => (i.estado !== 'lista' && i.estado !== 'fallo' && i.estado !== 'repetida') || (i.estado === 'fallo' && i.red));
 let VISOR_I = -1;
 
 async function nombres(){
@@ -148,7 +158,8 @@ export async function urlsFirmadas(ids, variante){
 const MEDIDOR = new Set();
 export function marcarMedidor(id){ if(id) MEDIDOR.add(id); }
 export async function cargar(trabajo){
-  TRABAJO = trabajo; FOTOS = []; TANDA = [];
+  // Lo que todavía se está subiendo (de este u otro proyecto) sigue subiendo por detrás; lo ya subido se olvida.
+  TRABAJO = trabajo; FOTOS = []; TANDA = TANDA.filter(i => i.estado !== 'lista' && i.estado !== 'repetida');
   const caja = $('#fotosPanel'); if(!caja) return;
   caja.innerHTML = '<p class="vacio">Cargando fotos…</p>';
   const [r] = await Promise.all([
@@ -188,11 +199,14 @@ export function botonesSubir(){
   if(tactil) return '<button type="button" class="btn btn-accent btn-chico subir-btn" data-subir-menu><svg class="ic"><use href="#i-camara"/></svg>Upload Photos</button><input type="file" accept="image/*" multiple hidden data-subir>';
   return '<label class="btn btn-accent btn-chico subir-btn"><svg class="ic"><use href="#i-camara"/></svg>Upload Photos<input type="file" accept="image/*" multiple hidden data-subir></label>';
 }
+// Lo que se está subiendo NO se enseña con letreros (su pedido del 14-oct: "eso debería pasar detrás, no
+// mostrarlo"). Solo aparecen las fotos mismas, en una fila, con una marquita mientras suben; al quedar, pasan a
+// su lugar con las demás. Si una de verdad no se pudo (no es la señal: eso se reintenta solo), sale con un "!" y
+// tocándola se vuelve a intentar.
 export function tandaHtml(){
-  if(!TANDA.length) return '';
-  const r = resumenTanda(TANDA);
-  const filas = TANDA.filter(i => i.estado !== 'lista' && i.estado !== 'repetida').map(i => `<div class="ftanda-fila ${esc(i.estado)}"><span>${esc(i.nombre)}</span><span>${i.estado === 'fallo' ? '✕ ' + esc(i.error || 'could not upload') : (i.estado === 'cola' ? 'waiting' : ({ preparando:'preparing', subiendo:'uploading', anotando:'saving' }[i.estado] || i.estado) + '…')}</span></div>`).join('');
-  return `<div class="ftanda"><div class="ftanda-cab"><b>${esc(textoAvance(r))}</b>${r.enCurso ? '' : '<button type="button" class="enlace-editar" data-tanda-cerrar>Close</button>'}</div>${filas}${(!r.enCurso && r.fallidas) ? '<div class="ftanda-pie"><button type="button" class="btn btn-outline" data-tanda-reintentar>Retry failed photos</button></div>' : ''}</div>`;
+  const pend = TANDA.filter(i => TRABAJO && i.trabajoId === TRABAJO.id && i.estado !== 'lista' && i.estado !== 'repetida');
+  if(!pend.length) return '';
+  return '<div class="fsube">' + pend.map(i => `<button type="button" class="fsube-f${i.estado === 'fallo' && !i.red ? ' mal' : ''}" data-tanda-item="${esc(i.clave)}" aria-label="${i.estado === 'fallo' && !i.red ? 'Could not upload: tap to try again' : 'Uploading'}"${i.estado === 'fallo' && i.error ? ' title="' + esc(i.error) + '"' : ''}>${i.vista ? '<img src="' + esc(i.vista) + '" alt="">' : ''}<i></i></button>`).join('') + '</div>';
 }
 export function pintar(urls){
   if(!TRABAJO) return;
@@ -226,29 +240,46 @@ export async function papeleraFotos(ids){
   return fuera.size;
 }
 
-// ---------- subir una tanda (una a la vez: así una foto pesada no tumba a las demás) ----------
-let subiendo = false;
-async function procesarTanda(){
-  if(subiendo) return; subiendo = true;
+// ---------- subir una tanda: TRES fotos a la vez (antes una por una: una tanda de 8 en 5G tardaba demasiado) ----------
+// Cada foto sigue sola si se cae la señal (espera a que vuelva y lo intenta otra vez). Si se cambia de proyecto,
+// sigue subiendo al proyecto donde se tomó.
+const A_LA_VEZ = 3;
+let activos = 0;
+function procesarTanda(){
+  while(activos < A_LA_VEZ){
+    const item = TANDA.find(i => i.estado === 'cola');
+    if(!item) break;
+    activos++; item.estado = 'preparando';
+    subirItem(item).finally(() => {
+      activos--;
+      if(TANDA.some(i => i.estado === 'cola')) procesarTanda();
+      else if(!activos && TRABAJO) urlsFirmadas(FOTOS.map(f => f.id), 'mini').then(pintar).catch(() => {});
+    });
+  }
+}
+async function subirItem(item){
   try{
-    for(const item of TANDA){
-      if(item.estado !== 'cola') continue;
-      if(!TRABAJO || item.trabajoId !== TRABAJO.id) { item.estado = 'fallo'; item.error = 'project changed'; continue; }
-      try{
-        const { foto, repetida } = await subirUna(item.trabajoId, item.file, (e) => { item.estado = e; pintar(); });
-        // La foto queda en el nivel/cuarto escogido (la fila la escribe la función; el cuarto se le pone aquí).
-        if(foto && !repetida && item.destino && (item.destino.nivel_id || item.destino.cuarto_id)){
-          try{ const r = await authFetch('/rest/v1/fotos_fotos?id=eq.' + encodeURIComponent(foto.id), { method:'PATCH', headers:{ Prefer:'return=representation' }, body: JSON.stringify({ nivel_id: item.destino.nivel_id || null, cuarto_id: item.destino.cuarto_id || null }) });
-            if(r.ok){ const x = (await r.json())[0]; if(x){ foto.nivel_id = x.nivel_id; foto.cuarto_id = x.cuarto_id; } } }catch{}
-        }
-        item.estado = repetida ? 'repetida' : 'lista';
-        if(!repetida && foto && TRABAJO && foto.trabajo_id === TRABAJO.id && !FOTOS.some(f => f.id === foto.id)) FOTOS.unshift(foto);
-      }catch(e){ item.estado = 'fallo'; item.error = String(e && e.message || e); }
-      pintar();
+    let res = null;
+    for(let intento = 0; ; intento++){
+      try{ res = await subirUna(item.trabajoId, item.file, (e) => { item.estado = e; }); break; }
+      catch(e){
+        if(!esErrorDeRed(e) || intento >= 3) throw e;
+        item.estado = 'reintento';
+        await esperarSenal(60000); await esperar([3000, 8000, 20000][intento]);
+      }
     }
-    // Las miniaturas nuevas: una sola llamada para todas las que faltan.
-    const urls = await urlsFirmadas(FOTOS.map(f => f.id), 'mini'); pintar(urls);
-  } finally { subiendo = false; }
+    const { foto, repetida } = res;
+    // La foto queda en el nivel/cuarto escogido (la fila la escribe la función; el cuarto se le pone aquí).
+    if(foto && !repetida && item.destino && (item.destino.nivel_id || item.destino.cuarto_id)){
+      try{ const r = await authFetch('/rest/v1/fotos_fotos?id=eq.' + encodeURIComponent(foto.id), { method:'PATCH', headers:{ Prefer:'return=representation' }, body: JSON.stringify({ nivel_id: item.destino.nivel_id || null, cuarto_id: item.destino.cuarto_id || null }) });
+        if(r.ok){ const x = (await r.json())[0]; if(x){ foto.nivel_id = x.nivel_id; foto.cuarto_id = x.cuarto_id; } } }catch{}
+    }
+    item.estado = repetida ? 'repetida' : 'lista';
+    // Su miniatura es la foto misma que ya está en el teléfono: pasa a su lugar al instante, sin esperar la descarga.
+    if(foto && item.vista) URLS.mini[foto.id] = { url: item.vista, vence: Date.now() + 50 * 60 * 1000 };
+    if(!repetida && foto && TRABAJO && foto.trabajo_id === TRABAJO.id && !FOTOS.some(f => f.id === foto.id)) FOTOS.unshift(foto);
+  }catch(e){ item.estado = 'fallo'; item.red = esErrorDeRed(e); item.error = item.red ? 'no signal' : String(e && e.message || e); }
+  if(TRABAJO && item.trabajoId === TRABAJO.id) pintar();
 }
 // Subir UNA foto ya hecha (la copia editada) y esperar a que quede: devuelve la foto nueva. La original no se toca.
 export async function subirCopia(file, destino, opts){
@@ -263,11 +294,22 @@ export async function subirCopia(file, destino, opts){
   const urls = await urlsFirmadas(FOTOS.map(f => f.id), 'mini'); pintar(urls);
   return { foto, repetida };
 }
+function reintentarSinSenal(){
+  if(!TANDA.some(i => i.estado === 'fallo' && i.red)) return;
+  TANDA.forEach(i => { if(i.estado === 'fallo' && i.red){ i.estado = 'cola'; i.error = ''; i.red = false; } });
+  pintar(); procesarTanda();
+}
+if(typeof window !== 'undefined'){
+  window.addEventListener('online', reintentarSinSenal);
+  setInterval(() => { if(!activos) reintentarSinSenal(); }, 30000);   // con señal floja el teléfono a veces no avisa que volvió
+  document.addEventListener('visibilitychange', () => { if(!document.hidden) setTimeout(reintentarSinSenal, 1500); });
+}
+let CLAVES = 0;
 export function encolar(files, destino){
   const lista = Array.from(files || []).filter(esImagen);
   if(!lista.length || !TRABAJO) return;
   const d = destino || DESTINO_FN() || {};
-  lista.forEach(f => TANDA.push({ file: f, nombre: f.name || 'foto', trabajoId: TRABAJO.id, estado:'cola', error:'', destino: d }));
+  lista.forEach(f => { let vista = ''; try{ vista = URL.createObjectURL(f); }catch{} TANDA.push({ clave: 't' + (++CLAVES), file: f, vista, nombre: f.name || 'foto', trabajoId: TRABAJO.id, estado:'cola', error:'', destino: d }); });
   pintar(); procesarTanda();
 }
 
@@ -351,6 +393,7 @@ export function conectar(){
   });
   document.addEventListener('click', (e) => {
     const foto = e.target.closest('[data-foto]'); if(foto){ if(AL_CLIC_FN && AL_CLIC_FN(foto.dataset.foto)) return; abrirVisor(foto.dataset.foto); return; }
+    { const t = e.target.closest('[data-tanda-item]'); if(t){ const it = TANDA.find(i => i.clave === t.dataset.tandaItem); if(it && it.estado === 'fallo'){ it.estado = 'cola'; it.error = ''; it.red = false; pintar(); procesarTanda(); } return; } }
     if(e.target.closest('[data-tanda-cerrar]')){ TANDA = TANDA.filter(i => i.estado !== 'lista' && i.estado !== 'repetida' && i.estado !== 'fallo'); pintar(); return; }
     if(e.target.closest('[data-tanda-reintentar]')){ TANDA.forEach(i => { if(i.estado === 'fallo'){ i.estado = 'cola'; i.error = ''; } }); pintar(); procesarTanda(); return; }
   });

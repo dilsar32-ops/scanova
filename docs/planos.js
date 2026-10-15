@@ -2,30 +2,59 @@
 // (el mismo escáner de Field Reports, que ya viene dentro de la app: plugin RoomScan) y se dibuja con el
 // mismo código de Field Reports (plano.js, copiado por tools/extraer_plano.py). Un escaneo por piso;
 // un escaneo nuevo no borra el anterior (queda de historial), se ve el más reciente.
-import * as plano from './plano.js?v=2026-10-14-49';
-import { authFetch, esAparato } from './app.js?v=2026-10-14-49';
+import * as plano from './plano.js?v=2026-10-14-52';
+import { authFetch, esAparato } from './app.js?v=2026-10-14-52';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
 const SIN_NIVEL = 'sin';
+const PLANTAS = ['Basement', '1st Floor', '2nd Floor', '3rd Floor', 'Attic'];
 
 let T = null, NIVELES = [], PLANOS = [], NIV_SEL = null, VISTA = '2d', REJILLA = true, ZOOM = 1, CARGADO = '', AVISO = '', AVISO_OK = false, OCUPADO = false, AL_NIVEL = null, MENU = false;
 const PZ = { s: 1, x: 0, y: 0 }, PZ_GRANDE = { s: 1, x: 0, y: 0 };   // acercamiento con los dedos (teléfono)
 
 // ---------- puras (para las pruebas) ----------
 export const fmtPies = (n) => (Math.round(Number(n) || 0)).toLocaleString('en-US');
+// El nivel que se dibuja de este plano: el que trae marcado (un escaneo con dos niveles se guarda partido, una
+// fila por nivel) o el primero. El resumen cuenta SOLO ese nivel: antes el dibujo enseñaba el primero y el total
+// sumaba todos.
+export function nivelDelPlano(data){
+  if(data && data._nivel != null) return data._nivel;
+  const lv = plano.floorplanLevels(data); return lv && lv.length ? lv[0] : 1;
+}
 export function resumenPlano(data){
   data = prepararPlano(data);
-  const rooms = ((data && data.rooms) || []).filter(r => !r.deleted && (r.walls || []).length);
+  const nivel = nivelDelPlano(data), enNivel = r => (r.level || 1) === nivel;
+  const rooms = ((data && data.rooms) || []).filter(r => !r.deleted && (r.walls || []).length && enNivel(r));
   if(!rooms.length) return { area: 0, cuartos: 0, murosExt: 0, techo: 0 };
-  const m = plano.fpPlanMeasurements(data);
-  let ext = 0;
-  rooms.forEach(r => (r.walls || []).forEach(w => { if(w && w.start && w.end && plano.floorplanIsExteriorWall(w, r, data.merged === false ? null : rooms)) ext += Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y); }));
-  // La altura que más área cubre (no el promedio: una pared bajita no baja todo el piso).
-  const peso = {}; rooms.forEach(r => { const x = plano.fpRoomMeasurements(r); const h = Math.round((x.wallHeightFt || 0) * 4) / 4; if(h > 0) peso[h] = (peso[h] || 0) + (x.floorSqFt || 1); });
+  const m = plano.fpPlanMeasurements(data, enNivel);
+  // Paredes exteriores: los tramos que caen en la misma línea se juntan (dos cuartos con copia de la misma pared
+  // exterior la contaban dos veces) y las paredes ajenas no cuentan.
+  const tramos = [];
+  rooms.forEach(r => (r.walls || []).forEach(w => { if(w && w.start && w.end && !w._ajena && plano.floorplanIsExteriorWall(w, r, data.merged === false ? null : rooms)) tramos.push(w); }));
+  const ext = data.merged === false ? tramos.reduce((t, w) => t + Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y), 0) : largoSinRepetir(tramos);
+  // La altura que más área cubre (no el promedio: una pared bajita no baja todo el piso), a la pulgada, igual que
+  // la hoja (antes se redondeaba a cuartos de pie y Plan Details decía otra cosa que la hoja).
+  const peso = {}; rooms.forEach(r => { const x = plano.fpRoomMeasurements(r); const h = Math.round((x.wallHeightFt || 0) * 12) / 12; if(h > 0) peso[h] = (peso[h] || 0) + (x.floorSqFt || 1); });
   const techo = Number(Object.keys(peso).sort((a, b) => peso[b] - peso[a])[0] || 0);
-  return { area: Math.round((plano.fpDisplayTotalAreaSqFt(data) || m.floorSqFt || 0) * 10) / 10, cuartos: m.rooms, murosExt: Math.round(ext), techo };
+  return { area: Math.round((m.floorSqFt || 0) * 10) / 10, cuartos: m.rooms, murosExt: Math.round(ext), techo };
+}
+// El largo de varias paredes contando una sola vez lo que se repite en la misma línea (0.5 ft de tolerancia).
+export function largoSinRepetir(paredes){
+  const grupos = [];
+  paredes.forEach(w => {
+    const dx = w.end.x - w.start.x, dy = w.end.y - w.start.y, L = Math.hypot(dx, dy);
+    if(L < 0.05) return;
+    const ux = dx / L, uy = dy / L;
+    let g = grupos.find(G => Math.abs(G.ux * ux + G.uy * uy) > 0.996 && Math.abs((w.start.x - G.x0) * -G.uy + (w.start.y - G.y0) * G.ux) < 0.5 && Math.abs((w.end.x - G.x0) * -G.uy + (w.end.y - G.y0) * G.ux) < 0.5);
+    if(!g){ g = { ux, uy, x0: w.start.x, y0: w.start.y, tr: [] }; grupos.push(g); }
+    const t0 = (w.start.x - g.x0) * g.ux + (w.start.y - g.y0) * g.uy, t1 = (w.end.x - g.x0) * g.ux + (w.end.y - g.y0) * g.uy;
+    g.tr.push([Math.min(t0, t1), Math.max(t0, t1)]);
+  });
+  let total = 0;
+  grupos.forEach(g => { g.tr.sort((a, b) => a[0] - b[0]); let [a, b] = g.tr[0]; for(let i = 1; i < g.tr.length; i++){ const [c, d] = g.tr[i]; if(c <= b + 0.5) b = Math.max(b, d); else { total += b - a; a = c; b = d; } } total += b - a; });
+  return total;
 }
 // El plano que se ve de cada piso: el más reciente (la lista viene ordenada del más nuevo al más viejo).
 export const planoDe = (planos, nivelId) => (planos || []).find(p => (p.nivel_id || SIN_NIVEL) === (nivelId || SIN_NIVEL)) || null;
@@ -51,7 +80,10 @@ export function prepararPlano(data){
   // Clósets, baños chicos y lavandería: los nombra fpReconocerClosets (el mismo código de Field Reports), más abajo.
   try{
     plano.floorplanAlignRooms(d);
-    if(!d._handEdited){ plano.floorplanRectifyWalls(d); plano.floorplanRefineGeometry(d); plano.floorplanCloseCorners(d); }
+    // "Completar escaneo" pega al cuarto lo que se escaneó aparte. En la casa de Harold (14-oct) esa captura
+    // vio otro espacio y dejó una caja de 13 x 14 ft encima de la cocina: lo que cae fuera de lo que le
+    // faltaba al cuarto se aparta (no se borra), antes de enderezar nada. Mismo código que Field Reports.
+    if(!d._handEdited){ plano.fpValidarParches(d); plano.floorplanRectifyWalls(d); plano.floorplanRefineGeometry(d); plano.floorplanCloseCorners(d); }
   }catch(e){ console.warn('enderezar plano', e); }
   // Los cuartos sin acceso que las paredes ya dibujan (clóset del master, laundry): la app los deduce sola y
   // los nombra por su puerta (13-oct, el plano de Harold). Mismo código que Field Reports.
@@ -61,7 +93,36 @@ export function prepararPlano(data){
   try{ if(!d._handEdited) plano.fpAutoCompletarEspacios(d); }catch(e){ console.warn('autocompletar', e); }
   // Clósets y rincones (su pedido, 14-oct): la app los reconoce y los nombra igual que Field Reports.
   try{ plano.floorplanDetectSubAreas(d); }catch(e){ console.warn('closets', e); }
+  // Un cuarto que sigue sin nombre (nadie lo dijo ni lo tocó, y no es clóset/baño/lavandería por su lugar) no
+  // sale "ROOM 1": toma el que el teléfono le enseñaba (nombresSugeridos, por los muebles), o la sugerencia de
+  // Field Reports por sus muebles, o lo que RoomPlan dijo que era. Siempre marcado como sugerido; un nombre dicho o
+  // escrito nunca se toca. Sin ninguna pista se queda Room N: no se inventa.
+  try{ nombrarSinNombre(d); }catch(e){ console.warn('nombres', e); }
+  // Cada fila de Scanova es UNA hoja de UN nivel (la que se dibuja).
+  if(d._nivel == null){ const lv = plano.floorplanLevels(d); d._nivel = lv && lv.length ? lv[0] : 1; }
   LISTOS.set(data, d); return d;
+}
+const DEBILES = ['sofa', 'chair', 'table', 'television', 'storage', 'unknown'];
+const SECCIONES_EN = { livingRoom: 'Living Room', kitchen: 'Kitchen', bedroom: 'Bedroom', bathroom: 'Bathroom', diningRoom: 'Dining Room' };
+export function nombrarSinNombre(d){
+  const sug = (d && d.inspection && d.inspection.nombresSugeridos) || {};
+  (d.rooms || []).forEach((r, i) => {
+    if(!r || r.deleted || String(r.roomName || '').trim()) return;
+    const v = String(r.voiceName || '').trim();
+    if(v && !esOrdenDeCuarto(v)) return;
+    let nombre = String(sug[String(i)] || '').trim(), conf = 'Medium';
+    // La sugerencia por muebles solo si hay un mueble que de verdad dice qué es el cuarto (cama, inodoro, estufa,
+    // lavadora…) o dos que coinciden. Un sillón solo no hace sala: se ve por una abertura o se mueve (el Hallway
+    // de la casa real tiene un sofá y salía "Living Room").
+    if(!nombre){
+      const s = plano.suggestFloorplanRoomName(r.objects, r);
+      const cats = (r.objects || []).filter(o => o && !o._hidden).map(o => o.category);
+      const fuerte = cats.some(c => !DEBILES.includes(c));
+      if(s && (s.confidence === 'High' || (fuerte && s.name !== 'Closet'))){ nombre = s.name; conf = s.confidence; }
+    }
+    if(!nombre){ const lab = ((r._apiProbe && r._apiProbe.sectionLabels) || []).find(x => SECCIONES_EN[x]); if(lab){ nombre = SECCIONES_EN[lab]; conf = 'Low'; } }
+    if(nombre){ r.roomName = nombre; r._suggestedConfidence = conf; }
+  });
 }
 // limpia = la vista de la pantalla (solo el plano, su pedido del 13-oct); sin limpia = la hoja completa del PDF/exportar.
 export function svgDelPlano(data, trabajo, limpia){
@@ -71,7 +132,7 @@ export function svgDelPlano(data, trabajo, limpia){
   // El cliente que sale en la hoja es el del PROYECTO (nombre, teléfono, dirección al día), no la copia que se
   // guardó dentro del escaneo el día que se escaneó (esa no trae teléfono y no se entera si lo corrigen).
   if(data && trabajo && (trabajo.cliente || trabajo.direccion)) data.job = Object.assign({}, data.job || {}, { client: trabajo.cliente || '', phone: trabajo.telefono || '', address: trabajo.direccion || '' });
-  const lv = plano.floorplanLevels(data); const nivel = lv && lv.length ? lv[0] : undefined;
+  const nivel = data ? nivelDelPlano(data) : undefined;
   return data && data.merged === false ? plano.buildFloorplanSvgUnmerged(data, nivel) : plano.buildFloorplanSvg(data, nivel);
 }
 const fechaEn = (iso) => { const d = new Date(iso); return isNaN(d) ? '' : d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }); };
@@ -129,7 +190,7 @@ export function pintar(){
   const niv = nivelElegido(); const p = planoDe(PLANOS, niv.id); const res = p ? resumenPlano(p.data) : null;
   const lista = nivelesConPlanos();
   const filasNiv = lista.map(n => { const q = planoDe(PLANOS, n.id);
-    return `<button type="button" class="pl-nivel${n.id === niv.id ? ' on' : ''}" data-pl-nivel="${esc(n.id)}"><b>${esc(n.nombre)}</b><small>${q ? fmtPies(q.area_sqft != null ? q.area_sqft : resumenPlano(q.data).area) + ' sq ft' : 'No plan'}</small></button>`; }).join('');
+    return `<button type="button" class="pl-nivel${n.id === niv.id ? ' on' : ''}" data-pl-nivel="${esc(n.id)}"><b>${esc(n.nombre)}</b><small>${q ? fmtPies(q.data ? resumenPlano(q.data).area : (q.area_sqft || 0)) + ' sq ft' : 'No plan'}</small></button>`; }).join('');
   // Teléfono (su pedido, 13-oct): sin la tarjeta de resumen ni la fila de pisos debajo de los botones, para que el
   // plano tenga más espacio. El piso se escoge arriba (la lista); "Add Level" vive en el menú •••.
   const opciones = lista.map(n => `<option value="${esc(n.id)}"${n.id === niv.id ? ' selected' : ''}>${esc(n.nombre)}</option>`).join('');
@@ -290,16 +351,34 @@ async function escanear(){
     const r = await RS.scan({ nivelBase: niv && niv.id !== SIN_NIVEL ? niv.nombre : '', niveles: NIVELES.map(n => n.nombre) });
     if(!r || r.cancelled){ OCUPADO = false; if(r && r.error) avisar(r.error); return; }
     if(r.nivelBase){ const m = NIVELES.find(n => n.nombre === r.nivelBase); if(m) niv = m; }
+    // La planta estándar que se escogió en la cámara (sótano, 1st Floor…) le da nombre al nivel en la hoja, igual
+    // que en Field Reports; los niveles con nombre propio ya vienen en inspection.nombresDeNivel.
+    if(r.nivelBase && !r._nivelBase && PLANTAS.includes(r.nivelBase)) r._nivelBase = r.nivelBase;
     r.job = { client: T.cliente || '', address: T.direccion || '', date: new Date().toISOString().slice(0, 10) };
-    const d = prepararPlano(r);   // se guarda ya derecho
-    const res = resumenPlano(d);
-    if(!res.cuartos){ OCUPADO = false; avisar('The scan came back without any room. Nothing was saved - try again walking slowly along the walls.'); return; }
-    const fila = { trabajo_id: T.id, nivel_id: niv && niv.id !== SIN_NIVEL ? niv.id : null, data: d, area_sqft: res.area, cuartos: res.cuartos, muros_ext_ft: res.murosExt, techo_ft: res.techo || null };
-    const g = await authFetch('/rest/v1/fotos_planos', { method:'POST', headers:{ Prefer:'return=representation' }, body: JSON.stringify(fila) });
-    const guardada = g.ok ? (await g.json())[0] : null;
-    if(!guardada || !guardada.id) throw new Error(g.status === 404 ? 'falta correr sql/fotos-07-planos.sql' : 'HTTP ' + g.status);
-    PLANOS = [guardada].concat(PLANOS); NIV_SEL = niv.id; OCUPADO = false; pintarConteo(pisosConPlano(PLANOS));
-    avisar('Floor plan saved for ' + niv.nombre + ' (' + fmtPies(res.area) + ' sq ft, ' + res.cuartos + ' rooms).', true);
+    // UN ESCANEO CON DOS NIVELES ("Otro nivel" a medio escaneo) se guarda partido: una fila por nivel, cada una en
+    // SU piso del proyecto. Antes se guardaba todo bajo el primero, se dibujaba solo el primero y el área los sumaba.
+    const niveles = plano.floorplanLevels(prepararPlano(r));
+    const nombres = (r.inspection && r.inspection.nombresDeNivel) || {};
+    const partes = (niveles.length > 1 ? niveles : [null]).map(L => {
+      const d = prepararPlano(L == null ? r : Object.assign({}, r, { _nivel: L }));   // se guarda ya derecho
+      const nombre = L == null ? '' : String(nombres[String(L)] || (L === niveles[0] ? (r.nivelBase || '') : ''));
+      const n = L == null || L === niveles[0] ? (NIVELES.find(x => x.nombre === nombre) || niv) : (NIVELES.find(x => x.nombre === nombre) || null);
+      return { d, n, res: resumenPlano(d) };
+    }).filter(x => x.res.cuartos);
+    if(!partes.length){ OCUPADO = false; avisar('The scan came back without any room. Nothing was saved - try again walking slowly along the walls.'); return; }
+    const guardadas = [];
+    for(const x of partes){
+      const fila = { trabajo_id: T.id, nivel_id: x.n && x.n.id !== SIN_NIVEL ? x.n.id : null, data: x.d, area_sqft: x.res.area, cuartos: x.res.cuartos, muros_ext_ft: x.res.murosExt, techo_ft: x.res.techo || null };
+      const g = await authFetch('/rest/v1/fotos_planos', { method:'POST', headers:{ Prefer:'return=representation' }, body: JSON.stringify(fila) });
+      const guardada = g.ok ? (await g.json())[0] : null;
+      if(!guardada || !guardada.id) throw new Error(g.status === 404 ? 'falta correr sql/fotos-07-planos.sql' : 'HTTP ' + g.status);
+      guardadas.push(guardada);
+    }
+    PLANOS = guardadas.slice().reverse().concat(PLANOS); NIV_SEL = (partes[0].n || niv).id; OCUPADO = false; pintarConteo(pisosConPlano(PLANOS));
+    const res = partes[0].res;
+    avisar(partes.length > 1
+      ? 'Floor plans saved: ' + partes.map(x => (x.n ? x.n.nombre : 'No level') + ' (' + fmtPies(x.res.area) + ' sq ft)').join(', ') + '.'
+      : 'Floor plan saved for ' + niv.nombre + ' (' + fmtPies(res.area) + ' sq ft, ' + res.cuartos + ' rooms).', true);
   }catch(e){ OCUPADO = false; avisar('Could not save the floor plan. ' + String(e && e.message || e)); }
 }
 

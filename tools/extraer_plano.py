@@ -17,7 +17,11 @@ ROOTS = ['buildFloorplanSvg', 'buildFloorplanSvgUnmerged', 'floorplanLevels', 'f
          # los cuartos sin acceso, deducidos por sus paredes y su puerta (13-oct)
          'fpAutoCompletarEspacios',
          # las paredes del cuarto de al lado que se vieron por una abertura vuelven a su dueño (13-oct)
-         'fpResolverParedesAjenas']
+         'fpResolverParedesAjenas',
+         # el parche de "Completar escaneo" que cayó fuera de lo que faltaba se aparta (14-oct, Harold)
+         'fpValidarParches',
+         # el nombre por los muebles para el cuarto que nadie nombró (14-oct: Scanova dejaba 'ROOM 1')
+         'suggestFloorplanRoomName']
 ROOTS += [r for r in (sys.argv[2].split(',') if len(sys.argv) > 2 else []) if r]
 defs = {}   # nombre -> (orden, texto)
 SIG = re.compile(r'\n  (?=[A-Za-z_$/])')
@@ -46,6 +50,8 @@ REEMPLAZOS = {
   'esc': "  function esc(str){ return String(str == null ? '' : str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;').replace(/'/g, '&#39;'); }\n",
   '$': "  const $ = (sel, el) => { const d = el || (typeof document !== 'undefined' ? document : null); return d && d.querySelector ? d.querySelector(sel) : null; };\n",
   'fpLoadLabelLearning': "  function fpLoadLabelLearning(){ return []; }\n",
+  # lo que el teléfono de Field Reports aprendió de sus nombres vive en su almacén; Scanova no lo tiene
+  'fpMemSuggestRoom': "  function fpMemSuggestRoom(){ return null; }\n",
   'fpJobInfo': "  function fpJobInfo(){ return FP_JOB_SCANOVA; }\n  let FP_JOB_SCANOVA = { client:'', address:'', date:'', claim:'', tech:'', phone:'' };\n  export function ponerTrabajo(j){ FP_JOB_SCANOVA = Object.assign({ client:'', address:'', date:'', claim:'', tech:'', phone:'' }, j || {}); }\n",
 }
 for n, t in REEMPLAZOS.items():

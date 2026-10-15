@@ -23,6 +23,14 @@ final class ScanKeyframeRecorder {
     struct PoseRecord {
         let t: TimeInterval
         let roomIndex: Int
+        // EN QUÉ CAPTURA (14-oct, la casa de Harold). Cada captura de RoomPlan
+        // arranca con su propio origen: ARKit pone el (0,0) donde está el
+        // teléfono al empezar. Una pose solo se puede comparar con la
+        // geometría de SU captura (o pasarse al plano con el movimiento de esa
+        // captura). Antes se marcaba solo con el cuarto, y la caminata entre
+        // un cuarto y otro quedaba con el número del siguiente estando todavía
+        // en el marco del anterior.
+        let captura: Int
         let level: Int
         let transform: simd_float4x4
         let fx: Float, fy: Float, cx: Float, cy: Float
@@ -33,6 +41,7 @@ final class ScanKeyframeRecorder {
         let id: String
         let file: URL
         let roomIndex: Int
+        var captura: Int = 0
         let level: Int
         let t: TimeInterval
         let w: Int, h: Int
@@ -103,6 +112,10 @@ final class ScanKeyframeRecorder {
     private var poses: [PoseRecord] = []
     private var keyframes: [KeyframeMeta] = []
     private var roomIndex = 0
+    private var captura = 0
+    // Al empezar otra captura ARKit reinicia el origen, pero no en el mismo
+    // instante: lo que llega en el primer segundo puede ser del marco viejo.
+    private var descartarHasta: TimeInterval = 0
     private var level = 1
     private var scanning = false
     private var lastPhotoTime: TimeInterval = 0
@@ -191,9 +204,13 @@ final class ScanKeyframeRecorder {
         }
     }
 
-    func update(roomIndex: Int, level: Int, scanning: Bool) {
+    func update(roomIndex: Int, level: Int, scanning: Bool, captura: Int) {
         queue.async { [weak self] in
             guard let self = self else { return }
+            if captura != self.captura {
+                self.captura = captura
+                self.descartarHasta = ProcessInfo.processInfo.systemUptime + 1.0
+            }
             if roomIndex != self.roomIndex {
                 self.photosThisRoom = 0
                 // Hysteresis: after .critical suppressed photos, resume
@@ -307,9 +324,12 @@ final class ScanKeyframeRecorder {
         let thermal = ProcessInfo.processInfo.thermalState
         if thermal.rawValue > maxThermal.rawValue { maxThermal = thermal }
 
+        // Lo que llegó justo al empezar otra captura puede estar en el marco
+        // de la anterior: no se guarda (ni pose ni foto).
+        if frame.timestamp < descartarHasta { noteActivity("tick.capturaNueva"); return }
         let cam = frame.camera
         let record = PoseRecord(
-            t: frame.timestamp, roomIndex: roomIndex, level: level,
+            t: frame.timestamp, roomIndex: roomIndex, captura: captura, level: level,
             transform: cam.transform,
             fx: cam.intrinsics[0][0], fy: cam.intrinsics[1][1],
             cx: cam.intrinsics[2][0], cy: cam.intrinsics[2][1],
@@ -344,6 +364,7 @@ final class ScanKeyframeRecorder {
             let img = CIImage(cvPixelBuffer: copied)
             let ts = frame.timestamp
             let room = roomIndex
+            let cap = captura
             let lvl = level
             // A qué le apuntaba la cámara, leído del MISMO cuadro que la
             // foto (el LiDAR, o los puntos de rastreo): se resuelve aquí,
@@ -355,6 +376,7 @@ final class ScanKeyframeRecorder {
                 self.noteActivity("encode.start")
                 let started = Date()
                 var meta = self.encodeKeyframe(image: img, timestamp: ts, roomIndex: room, level: lvl, thermal: thermal)
+                meta?.captura = cap
                 // Self-backoff: a slow encode is a heat/starvation proxy -
                 // permanently widen the interval for the rest of the session.
                 let slow = Date().timeIntervalSince(started) > 0.5

@@ -1,5 +1,5 @@
 // GENERADO por tools/extraer_plano.py desde Field Reports (no editar a mano: se vuelve a generar).
-// Dibuja el plano igual que Field Reports. 137 piezas.
+// Dibuja el plano igual que Field Reports. 150 piezas.
 /* eslint-disable */
 const document = (typeof globalThis !== "undefined" && globalThis.document) || undefined;
   const $ = (sel, el) => { const d = el || (typeof document !== 'undefined' ? document : null); return d && d.querySelector ? d.querySelector(sel) : null; };
@@ -107,6 +107,11 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
   const FP_PLANTAS = ['Basement', '1st Floor', '2nd Floor', '3rd Floor', 'Attic'];
   function fpPlantaDeNivel(data, lvl){
     const n = Math.max(1, +lvl || 1);
+    // El nombre del nivel que el personal escogió en la cámara (Scanova: los
+    // niveles del proyecto, p. ej. "Third Floor") manda. Field Reports no
+    // llena nombresDeNivel en sus plantas estándar, así que ahí no cambia.
+    const nom = data && data.inspection && data.inspection.nombresDeNivel;
+    if(nom && nom[String(n)]) return String(nom[String(n)]);
     const base = (data && data._nivelBase) || '';
     const i0 = FP_PLANTAS.indexOf(base);
     // SIN PLANTA DE PARTIDA NO SE INVENTA NINGUNA (18 sep 2026).
@@ -347,8 +352,15 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
       });
     });
     ((data && data.rooms) || []).forEach(room => {
-      const poly = fpOrderedRoomPolygon(room);
+      const giSub = {};
+      const poly = fpOrderedRoomPolygon(room, giSub);
       const found = [];
+      // Un lado que es el PUENTE con que la app cerró el contorno (línea
+      // punteada) no es pared: un rincón con un lado así no es un clóset
+      // (14-oct, el Hallway de harold_otros salía con 'CLOSET').
+      const esPuente = (P, Q) => (giSub.bridgeSegs || []).some(b => b && b.d > 0.5 &&
+        ((Math.hypot(b.a.x-P.x, b.a.y-P.y) < 0.3 && Math.hypot(b.b.x-Q.x, b.b.y-Q.y) < 0.3) ||
+         (Math.hypot(b.a.x-Q.x, b.a.y-Q.y) < 0.3 && Math.hypot(b.b.x-P.x, b.b.y-P.y) < 0.3)));
       if(poly && poly.length >= 5){
         const roomArea = fpPolygonAreaSqFt(poly) || 1;
         const n = poly.length;
@@ -357,6 +369,7 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
           const ab = {x: B.x-A.x, y: B.y-A.y}, bc = {x: C.x-B.x, y: C.y-B.y}, cd = {x: D.x-C.x, y: D.y-C.y};
           const lab = Math.hypot(ab.x, ab.y), lbc = Math.hypot(bc.x, bc.y), lcd = Math.hypot(cd.x, cd.y);
           if(lab < 1.2 || lbc < 1.8 || lcd < 1.2) continue;
+          if(esPuente(A, B) || esPuente(B, C) || esPuente(C, D)) continue;
           // AB perpendicular to BC, CD perpendicular to BC, AB opposite CD.
           const dotAbBc = (ab.x*bc.x + ab.y*bc.y)/(lab*lbc);
           const dotAbCd = (ab.x*cd.x + ab.y*cd.y)/(lab*lcd);
@@ -518,6 +531,43 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
   };
   function floorplanCategoryLabel(cat){
     return FLOORPLAN_CATEGORY_ES[cat] || cat || 'Unknown';
+  }
+  const FLOORPLAN_ROOM_RULES = [
+    { name: 'Kitchen', cats: ['stove','oven','refrigerator','dishwasher','sink'] },
+    { name: 'Bathroom', cats: ['toilet','bathtub'] },
+    { name: 'Bedroom', cats: ['bed'] },
+    { name: 'Laundry Room', cats: ['washerDryer'] },
+    { name: 'Living Room', cats: ['sofa','television','fireplace'] },
+    { name: 'Dining Room', cats: ['table','chair'] }
+  ];
+  function suggestFloorplanRoomName(objects, room){
+    const cats = (objects||[]).filter(o => !o._hidden).map(o => o.category);
+    let best = null;
+    FLOORPLAN_ROOM_RULES.forEach(rule => {
+      const matches = rule.cats.filter(c => cats.includes(c)).length;
+      if(matches > 0 && (!best || matches > best.matches)) best = { name: rule.name, matches };
+    });
+    // SUS palabras antes que las nuestras. Si el ya bautizo DOS veces un
+    // cuarto con estos mismos muebles, esa es mejor evidencia que nuestra
+    // tabla generica: el escribio "londry room", no "Laundry Room" - esa
+    // es su palabra. Solo cambia lo que la app SUGIERE; jamas una medida,
+    // jamas un aviso, y siempre se puede escribir encima.
+    const learned = fpMemSuggestRoom(room, objects);
+    if(learned && learned.via === 'sig')
+      return { name: learned.name, confidence: learned.count >= 3 ? 'High' : 'Medium', learned: true };
+    if(best) return { name: best.name, confidence: best.matches >= 2 ? 'High' : 'Medium' };
+    // Sin muebles que digan nada, un cuarto que mide parecido a otros que
+    // el ya nombro es evidencia debil - pero es mejor que dejarlo en blanco.
+    if(learned) return { name: learned.name, confidence: 'Low', learned: true };
+    // No fixture evidence: a very small enclosed space is almost always
+    // a closet (per the field request: "small areas like closets... the
+    // app should know"). Suggested, never certain - the name stays fully
+    // editable in the room list, same as every suggestion.
+    if(room && (room.walls||[]).length){
+      const area = fpRoomDisplayAreaSqFt(room);
+      if(area > 0 && area <= 30) return { name: 'Closet', confidence: area <= 18 ? 'Medium' : 'Low' };
+    }
+    return null;
   }
   function floorplanLevels(data){
     // Deleted rooms don't create level tabs - a level whose only room
@@ -901,6 +951,19 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
               if(partes.length !== 2) continue;
               if(Math.abs(partes[0].area + partes[1].area - h.area) > h.area * 0.3) continue;
               if(partes.some(v => !puertasDe(v).length)) continue;
+              // Partir solo si las dos partes se abren a cuartos DISTINTOS: dos
+              // entradas del mismo pasillo son UN espacio, no dos (Hamilton:
+              // una pared inventada de 3'8" y dos "Laundry Room").
+              // (Solo cuentan las puertas que caen EN el borde de la parte, no
+              // las de un cuarto vecino que quedan cerca de una esquina.)
+              const enBorde = (pt, v) => {
+                const dx = Math.max(Math.abs(pt.x - v.cx) - v.w/2, 0), dy = Math.max(Math.abs(pt.y - v.cy) - v.d/2, 0);
+                const fuera = Math.hypot(dx, dy), adentro = Math.min(v.w/2 - Math.abs(pt.x - v.cx), v.d/2 - Math.abs(pt.y - v.cy));
+                return fuera > 0 ? fuera <= 0.75 : adentro <= 0.75;
+              };
+              const duenos = partes.map(v => new Set(puertasDe(v).filter(d => enBorde(d.p, v)).map(d => d.r)));
+              const todos = new Set([...duenos[0], ...duenos[1]]);
+              if(todos.size === 1) continue;
               const relleno = Math.min(...partes.map(v => v.area / Math.max(0.1, (v.w - 0.9) * (v.d - 0.9))));
               if(!mejor || relleno > mejor.relleno) mejor = { partes, relleno, seg: { a: p, b: fin } };
             }
@@ -931,6 +994,9 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
             else if(deQuien.some(n => /kitchen|cocina/i.test(n))) nombre = 'Pantry';
             else if(deQuien.some(n => FP_ES_PASILLO.test(n)) && junto(/kitchen|cocina/i)) nombre = 'Laundry Room';
             else nombre = 'Closet';
+            // Un nombre deducido no se repite en el mismo nivel: la segunda
+            // lavandería de un piso es otra cosa (un clóset o una bodega).
+            if(nombre !== 'Closet' && data.rooms.some(r => r && r._inferido && (r.level || 1) === lvl && r.roomName === nombre)) nombre = 'Storage';
             // La altura no se inventa: la que el escáner midió en las paredes vecinas (la más común).
             const alturas = paredes.map(x => x.w.heightFt).filter(v => v > 0).map(v => Math.round(v * 10) / 10);
             const cuenta = {}; alturas.forEach(v => { cuenta[v] = (cuenta[v] || 0) + 1; });
@@ -938,9 +1004,16 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
             const pa = (a, b) => ({ id: fpNewId(), start: a, end: b, lengthFt: Math.round(dist(a, b)*100)/100,
                                     ...(altura ? { heightFt: altura } : {}), _added: true, _inferido: true });
             const c = [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }];
+            const paredesNuevas = [pa(c[0], c[1]), pa(c[1], c[2]), pa(c[2], c[3]), pa(c[3], c[0])];
+            // La puerta que lo nombró también es SUYA (en su borde): así su
+            // rodapié la descuenta. Es una copia; el dibujo junta las dos.
+            const suPuerta = puertasDe(v).filter(dp => paredesNuevas.some(w => distSeg(dp.p, w.start, w.end) <= 1.0)).map(dp => {
+              const cerca = paredesNuevas.reduce((m, w) => { const dd = distSeg(dp.p, w.start, w.end); return !m || dd < m.d ? { w, d: dd } : m; }, null);
+              return { id: fpNewId(), wallId: cerca.w.id, position: { x: dp.p.x, y: dp.p.y }, widthFt: dp.w, heightFt: 6.8, _inferido: true };
+            });
             data.rooms.push({ roomName: nombre, level: lvl, _inferido: true, _auto: true,
-              walls: [pa(c[0], c[1]), pa(c[1], c[2]), pa(c[2], c[3]), pa(c[3], c[0])],
-              doors: [], windows: [], openings: [], objects: [] });
+              walls: paredesNuevas,
+              doors: suPuerta, windows: [], openings: [], objects: [] });
             hecho.push(nombre + ' ' + fpFeetInches(x1 - x0) + ' x ' + fpFeetInches(y1 - y0) + ' (no escaneado: deducido)');
           }
         }
@@ -978,103 +1051,138 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
     return inside;
   }
   function fpOrderedRoomPolygon(room, gapInfo){
-    // Una pared de solo studs DIBUJADA Y NO PARTIDA (sin pareja) no es borde:
-    // si entrara, el encadenado la cosería al anillo y la hoja imprimiría un
-    // cuarto en ocho con piso y pared falsos - sin que nadie partiera nada.
-    // Las particiones ya partidas (con _studPairId) sí son borde de su mitad.
-    // _ajena: una pared que este cuarto solo VIO por una abertura (es del
-    // cuarto de al lado) no es su borde. _recorte: de una pared juntada de
-    // dos cuartos, solo el tramo que es de este. Ver fpResolverParedesAjenas.
-    const walls = (room.walls||[]).map(w => (w && w._recorte && w._recorte.start && w._recorte.end) ? Object.assign({}, w, { start: w._recorte.start, end: w._recorte.end }) : w).filter(w => w.start && w.end && !w._ajena && !(w._studWall && !w._studPairId)
-      && Math.hypot(w.end.x-w.start.x, w.end.y-w.start.y) > 0.05);
-    // Dos paredes ya forman un cuarto SOLO cuando lo demás eran paredes
-    // ajenas: un pasillo abierto en las dos puntas, al devolverle a la sala
-    // y al foyer lo que vio de ellos, se queda con sus dos paredes largas.
-    if(walls.length < 3 && !(walls.length === 2 && (room._sinAjenas || (room.walls||[]).some(w => w && w._ajena))))
-      return walls.map(w => w.start);
-    const tol = 1.0;
-    const used = new Array(walls.length).fill(false);
-    const chains = [];
-    for(let s=0; s<walls.length; s++){
-      if(used[s]) continue;
-      used[s] = true;
-      const chain = [{x:walls[s].start.x,y:walls[s].start.y},{x:walls[s].end.x,y:walls[s].end.y}];
-      let extended = true;
-      while(extended){
-        extended = false;
-        const head = chain[0], tail = chain[chain.length-1];
-        let best = null;
-        for(let i=0; i<walls.length; i++){
-          if(used[i]) continue;
-          const cands = [
-            {d:Math.hypot(walls[i].start.x-tail.x,walls[i].start.y-tail.y), far:walls[i].end, atTail:true, i},
-            {d:Math.hypot(walls[i].end.x-tail.x,walls[i].end.y-tail.y), far:walls[i].start, atTail:true, i},
-            {d:Math.hypot(walls[i].start.x-head.x,walls[i].start.y-head.y), far:walls[i].end, atTail:false, i},
-            {d:Math.hypot(walls[i].end.x-head.x,walls[i].end.y-head.y), far:walls[i].start, atTail:false, i},
-          ];
-          for(const c of cands) if(!best || c.d < best.d) best = c;
+    const cadena = (room, gapInfo) => {
+      // Una pared de solo studs DIBUJADA Y NO PARTIDA (sin pareja) no es borde:
+      // si entrara, el encadenado la cosería al anillo y la hoja imprimiría un
+      // cuarto en ocho con piso y pared falsos - sin que nadie partiera nada.
+      // Las particiones ya partidas (con _studPairId) sí son borde de su mitad.
+      // _ajena: una pared que este cuarto solo VIO por una abertura (es del
+      // cuarto de al lado) no es su borde. _recorte: de una pared juntada de
+      // dos cuartos, solo el tramo que es de este. Ver fpResolverParedesAjenas.
+      const walls = (room.walls||[]).map(w => (w && w._recorte && w._recorte.start && w._recorte.end) ? Object.assign({}, w, { start: w._recorte.start, end: w._recorte.end }) : w).filter(w => w.start && w.end && !w._ajena && !(w._studWall && !w._studPairId)
+        && Math.hypot(w.end.x-w.start.x, w.end.y-w.start.y) > 0.05);
+      // Dos paredes ya forman un cuarto SOLO cuando lo demás eran paredes
+      // ajenas: un pasillo abierto en las dos puntas, al devolverle a la sala
+      // y al foyer lo que vio de ellos, se queda con sus dos paredes largas.
+      if(walls.length < 3 && !(walls.length === 2 && (room._sinAjenas || (room.walls||[]).some(w => w && w._ajena))))
+        return walls.map(w => w.start);
+      const tol = 1.0;
+      const used = new Array(walls.length).fill(false);
+      const chains = [];
+      for(let s=0; s<walls.length; s++){
+        if(used[s]) continue;
+        used[s] = true;
+        const chain = [{x:walls[s].start.x,y:walls[s].start.y},{x:walls[s].end.x,y:walls[s].end.y}];
+        let extended = true;
+        while(extended){
+          extended = false;
+          const head = chain[0], tail = chain[chain.length-1];
+          let best = null;
+          for(let i=0; i<walls.length; i++){
+            if(used[i]) continue;
+            const cands = [
+              {d:Math.hypot(walls[i].start.x-tail.x,walls[i].start.y-tail.y), far:walls[i].end, atTail:true, i},
+              {d:Math.hypot(walls[i].end.x-tail.x,walls[i].end.y-tail.y), far:walls[i].start, atTail:true, i},
+              {d:Math.hypot(walls[i].start.x-head.x,walls[i].start.y-head.y), far:walls[i].end, atTail:false, i},
+              {d:Math.hypot(walls[i].end.x-head.x,walls[i].end.y-head.y), far:walls[i].start, atTail:false, i},
+            ];
+            for(const c of cands) if(!best || c.d < best.d) best = c;
+          }
+          if(best && best.d <= tol){
+            used[best.i] = true;
+            if(best.atTail) chain.push({x:best.far.x,y:best.far.y});
+            else chain.unshift({x:best.far.x,y:best.far.y});
+            extended = true;
+          }
         }
-        if(best && best.d <= tol){
-          used[best.i] = true;
-          if(best.atTail) chain.push({x:best.far.x,y:best.far.y});
-          else chain.unshift({x:best.far.x,y:best.far.y});
-          extended = true;
+        chains.push(chain);
+      }
+      const chainLen = c => c.reduce((a,p,i)=> i ? a+Math.hypot(p.x-c[i-1].x,p.y-c[i-1].y) : 0, 0);
+      let kept = chains.filter(c => chainLen(c) >= 2.5);
+      if(!kept.length) kept = chains;
+      kept.sort((a,b) => chainLen(b)-chainLen(a));
+      const poly = kept[0].map(p => ({x:p.x,y:p.y}));
+      const rest = kept.slice(1);
+      while(rest.length){
+        // THE root cause of the "grey shadows" and of the app asking the
+        // tech to name his own bedroom. If what has been chained so far
+        // ALREADY closes, it is the room's outline - full stop. Whatever
+        // chain is left over is an INTERIOR wall of that room, not a piece
+        // of its boundary, and bridging back out to it draws a figure
+        // eight across the room's own floor. On the real Master Bedroom the
+        // ring closed cleanly at 8 walls and the loop then bridged 15.5 ft
+        // back to the closet's mouth wall and 19.2 ft home again, which
+        // made an even-odd point test answer "outside" for most of the
+        // bedroom. A leftover is NOT a gap - it is reported separately so
+        // AI Fix never proposes a wall to close something that is closed.
+        if(poly.length >= 3 &&
+           Math.hypot(poly[0].x-poly[poly.length-1].x, poly[0].y-poly[poly.length-1].y) <= tol){
+          if(gapInfo) gapInfo.leftovers = rest.map(c => c.map(pt => ({x:pt.x, y:pt.y})));
+          break;
         }
+        const tail = poly[poly.length-1];
+        let bi=-1, bflip=false, bd=Infinity;
+        rest.forEach((c,i) => {
+          const dS = Math.hypot(c[0].x-tail.x, c[0].y-tail.y);
+          const dE = Math.hypot(c[c.length-1].x-tail.x, c[c.length-1].y-tail.y);
+          if(dS < bd){ bd=dS; bi=i; bflip=false; }
+          if(dE < bd){ bd=dE; bi=i; bflip=true; }
+        });
+        const c = rest.splice(bi,1)[0];
+        const seg = bflip ? c.slice().reverse() : c;
+        // Bridged distances are reported to the caller (validation uses
+        // them: a doorway-sized bridge is normal, a huge one means a wall
+        // the scan probably missed). The bridge's actual endpoints ride
+        // along so the review panel can OFFER the missing wall instead of
+        // only describing it.
+        if(gapInfo && bd > tol){
+          gapInfo.bridges = (gapInfo.bridges||[]).concat(bd);
+          (gapInfo.bridgeSegs = gapInfo.bridgeSegs||[]).push({ a:{x:tail.x,y:tail.y}, b:{x:seg[0].x,y:seg[0].y}, d:bd });
+        }
+        seg.forEach((p,i) => { if(i===0 && bd<=tol) return; poly.push({x:p.x,y:p.y}); });
       }
-      chains.push(chain);
-    }
-    const chainLen = c => c.reduce((a,p,i)=> i ? a+Math.hypot(p.x-c[i-1].x,p.y-c[i-1].y) : 0, 0);
-    let kept = chains.filter(c => chainLen(c) >= 2.5);
-    if(!kept.length) kept = chains;
-    kept.sort((a,b) => chainLen(b)-chainLen(a));
-    const poly = kept[0].map(p => ({x:p.x,y:p.y}));
-    const rest = kept.slice(1);
-    while(rest.length){
-      // THE root cause of the "grey shadows" and of the app asking the
-      // tech to name his own bedroom. If what has been chained so far
-      // ALREADY closes, it is the room's outline - full stop. Whatever
-      // chain is left over is an INTERIOR wall of that room, not a piece
-      // of its boundary, and bridging back out to it draws a figure
-      // eight across the room's own floor. On the real Master Bedroom the
-      // ring closed cleanly at 8 walls and the loop then bridged 15.5 ft
-      // back to the closet's mouth wall and 19.2 ft home again, which
-      // made an even-odd point test answer "outside" for most of the
-      // bedroom. A leftover is NOT a gap - it is reported separately so
-      // AI Fix never proposes a wall to close something that is closed.
-      if(poly.length >= 3 &&
-         Math.hypot(poly[0].x-poly[poly.length-1].x, poly[0].y-poly[poly.length-1].y) <= tol){
-        if(gapInfo) gapInfo.leftovers = rest.map(c => c.map(pt => ({x:pt.x, y:pt.y})));
-        break;
+      const closeDist = Math.hypot(poly[0].x-poly[poly.length-1].x, poly[0].y-poly[poly.length-1].y);
+      if(gapInfo && closeDist > tol){
+        gapInfo.bridges = (gapInfo.bridges||[]).concat(closeDist);
+        (gapInfo.bridgeSegs = gapInfo.bridgeSegs||[]).push({ a:{x:poly[poly.length-1].x,y:poly[poly.length-1].y}, b:{x:poly[0].x,y:poly[0].y}, d:closeDist });
       }
-      const tail = poly[poly.length-1];
-      let bi=-1, bflip=false, bd=Infinity;
-      rest.forEach((c,i) => {
-        const dS = Math.hypot(c[0].x-tail.x, c[0].y-tail.y);
-        const dE = Math.hypot(c[c.length-1].x-tail.x, c[c.length-1].y-tail.y);
-        if(dS < bd){ bd=dS; bi=i; bflip=false; }
-        if(dE < bd){ bd=dE; bi=i; bflip=true; }
-      });
-      const c = rest.splice(bi,1)[0];
-      const seg = bflip ? c.slice().reverse() : c;
-      // Bridged distances are reported to the caller (validation uses
-      // them: a doorway-sized bridge is normal, a huge one means a wall
-      // the scan probably missed). The bridge's actual endpoints ride
-      // along so the review panel can OFFER the missing wall instead of
-      // only describing it.
-      if(gapInfo && bd > tol){
-        gapInfo.bridges = (gapInfo.bridges||[]).concat(bd);
-        (gapInfo.bridgeSegs = gapInfo.bridgeSegs||[]).push({ a:{x:tail.x,y:tail.y}, b:{x:seg[0].x,y:seg[0].y}, d:bd });
+      if(poly.length>3 && closeDist <= tol) poly.pop();
+      if(poly.length>=3) return fpPruneOutlineSpikes(poly);
+      return walls.map(w=>w.start);
+    };
+    const repetido = poly => {
+      if(!poly || poly.length < 3) return false;
+      for(let i = 0; i < poly.length; i++) for(let j = i + 1; j < poly.length; j++)
+        if(Math.hypot(poly[i].x - poly[j].x, poly[i].y - poly[j].y) < 0.05) return true;
+      return false;
+    };
+    const cruces = poly => {
+      const n = poly ? poly.length : 0; let k = 0;
+      const o = (a, b, q) => (b.x - a.x) * (q.y - a.y) - (b.y - a.y) * (q.x - a.x);
+      for(let i = 0; i < n; i++) for(let j = i + 2; j < n; j++){
+        if(i === 0 && j === n - 1) continue;
+        const a = poly[i], b = poly[(i + 1) % n], c = poly[j], d = poly[(j + 1) % n];
+        if(o(c, d, a) * o(c, d, b) < -1e-9 && o(a, b, c) * o(a, b, d) < -1e-9) k++;
       }
-      seg.forEach((p,i) => { if(i===0 && bd<=tol) return; poly.push({x:p.x,y:p.y}); });
-    }
-    const closeDist = Math.hypot(poly[0].x-poly[poly.length-1].x, poly[0].y-poly[poly.length-1].y);
-    if(gapInfo && closeDist > tol){
-      gapInfo.bridges = (gapInfo.bridges||[]).concat(closeDist);
-      (gapInfo.bridgeSegs = gapInfo.bridgeSegs||[]).push({ a:{x:poly[poly.length-1].x,y:poly[poly.length-1].y}, b:{x:poly[0].x,y:poly[0].y}, d:closeDist });
-    }
-    if(poly.length>3 && closeDist <= tol) poly.pop();
-    if(poly.length>=3) return fpPruneOutlineSpikes(poly);
-    return walls.map(w=>w.start);
+      return k;
+    };
+    const area = poly => { let t = 0; for(let i = 0, j = poly.length - 1; i < poly.length; j = i++) t += poly[j].x * poly[i].y - poly[i].x * poly[j].y; return Math.abs(t) / 2; };
+    const roto = poly => !poly || poly.length < 3 || repetido(poly) || cruces(poly) > 0;
+    const gi = gapInfo ? {} : null;
+    const p0 = cadena(room, gi);
+    const pasar = (g, p) => { if(gapInfo){ if(g) Object.assign(gapInfo, g); if(roto(p)) gapInfo.roto = true; } };
+    if(!repetido(p0) || !room || !Array.isArray(room.walls)) { pasar(gi, p0); return p0; }
+    let mejor = null;
+    room.walls.forEach(w => {
+      if(!w || !w.start || !w.end || Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y) >= 3) return;
+      const g2 = gapInfo ? {} : null;
+      const p2 = cadena(Object.assign({}, room, { walls: room.walls.filter(x => x !== w) }), g2);
+      if(roto(p2)) return;
+      const a = area(p2);
+      if(!mejor || a > mejor.a) mejor = { p: p2, g: g2, a };
+    });
+    if(mejor){ pasar(mejor.g, mejor.p); return mejor.p; }
+    pasar(gi, p0); return p0;
   }
   function fpTramoPropio(w){ return (w && w._recorte && w._recorte.start && w._recorte.end) ? w._recorte : w; }
   function fpParedAjenaPar(a0, b0){
@@ -1153,6 +1261,83 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
       if(fpDistAlBorde(o.position, poly) > 0.75) n++;
     }
     return n;
+  }
+  function fpValidarParches(data){
+    const apartadas = [];
+    if(!data || !Array.isArray(data.rooms)) return apartadas;
+    // Sin merge (14-oct) los cuartos no comparten coordenadas: no se compara
+    // con los otros, pero el parche que cruza el piso de SU cuarto se aparta
+    // igual (el iPhone también los pega en ese caso).
+    const sinMerge = data.merged === false;
+    const vivos = data.rooms.filter(r => r && !r.deleted && Array.isArray(r.walls));
+    const sinParche = r => Object.assign({}, r, { walls: (r.walls||[]).filter(w => w && !w._parche) });
+    const nivel = r => r.level || 1;
+    const largo = w => Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y);
+    vivos.forEach(room => {
+      const parche = room.walls.filter(w => w && w._parche && w.start && w.end && largo(w) > 0.05);
+      if(!parche.length) return;
+      const propio = fpOrderedRoomPolygon(sinParche(room));
+      const otros = sinMerge ? [] : vivos.filter(r => r !== room && nivel(r) === nivel(room)).map(r => fpOrderedRoomPolygon(sinParche(r))).filter(p => p && p.length >= 3);
+      const dentro = (p, poly, m) => poly && poly.length >= 3 && fpPointInPolygon(p, poly) && fpDistAlBorde(p, poly) >= m;
+      let total = 0, malo = 0;
+      const malas = new Set();
+      parche.forEach(w => {
+        const L = largo(w), n = Math.max(4, Math.ceil(L / 0.5));
+        let mal = 0;
+        for(let k = 0; k <= n; k++){
+          const t = k / n, p = { x: w.start.x + (w.end.x - w.start.x) * t, y: w.start.y + (w.end.y - w.start.y) * t };
+          if(otros.some(o => dentro(p, o, 0.75)) || dentro(p, propio, 1.5)) mal++;
+        }
+        total += L;
+        if(mal / (n + 1) >= 0.3){ malas.add(w); malo += L; }
+      });
+      // EL PISO QUE EL PARCHE AGREGA (14-oct). Muestrear solo la pared no ve
+      // una pared que cae afuera de todo cuarto: el contorno del cuarto da la
+      // vuelta para alcanzarla y se mete en el piso de los vecinos. Se compara
+      // el contorno con y sin el parche: si el piso nuevo cae en otro cuarto
+      // más de max(3 sq ft, 10% de lo agregado), se aparta la pared que más
+      // encime agrega, y se repite.
+      if(otros.length){
+        const encimeCon = ws => {
+          const poly = fpOrderedRoomPolygon(Object.assign({}, room, { walls: ws }));
+          return { e: otros.reduce((t, o) => t + fpEncimeSqFt(poly, o), 0), a: poly && poly.length >= 3 ? fpPolygonAreaSqFt(poly) : 0 };
+        };
+        const base = encimeCon(room.walls.filter(w => w && !w._parche));
+        for(let vuelta = 0; vuelta < parche.length; vuelta++){
+          const quedan = parche.filter(w => !malas.has(w));
+          if(!quedan.length) break;
+          const con = encimeCon(room.walls.filter(w => w && (!w._parche || !malas.has(w))));
+          const agregado = Math.max(0, con.a - base.a);
+          if(con.e - base.e <= Math.max(3, 0.1 * agregado)) break;
+          let peor = null;
+          quedan.forEach(w => {
+            const sin = encimeCon(room.walls.filter(x => x && (!x._parche || (!malas.has(x) && x !== w))));
+            const baja = con.e - sin.e;
+            if(!peor || baja > peor.baja) peor = { w, baja };
+          });
+          if(!peor || peor.baja <= 0) break;
+          malas.add(peor.w); malo += largo(peor.w);
+        }
+      }
+      const todo = total > 0 && malo / total > 0.5;
+      const fuera = todo ? new Set(parche) : malas;
+      if(!fuera.size) return;
+      const ids = new Set([...fuera].map(w => w.id));
+      const ap = room._parcheApartado || (room._parcheApartado = { walls: [], doors: [], windows: [], openings: [] });
+      ap.motivo = todo ? 'el parche entero cae fuera de lo que faltaba' : 'paredes del parche fuera de lo que faltaba';
+      fuera.forEach(w => ap.walls.push(w));
+      room.walls = room.walls.filter(w => !fuera.has(w));
+      ['doors', 'windows', 'openings'].forEach(k => {
+        const lista = room[k] || [];
+        const se = lista.filter(o => o && o._parche && (todo || ids.has(o.wallId)));
+        if(!se.length) return;
+        se.forEach(o => ap[k].push(o));
+        room[k] = lista.filter(o => !se.includes(o));
+      });
+      apartadas.push({ room: room.roomName || room.voiceName || '', paredes: fuera.size, todo });
+    });
+    if(apartadas.length) data._parchesApartados = (data._parchesApartados || 0) + apartadas.reduce((s, a) => s + a.paredes, 0);
+    return apartadas;
   }
   const K_HUECO = 0.5;
   function fpResolverParedesAjenas(data){
@@ -1455,11 +1640,18 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
       const resto = minIntr.map((_, k) => minIntr.slice(k).reduce((a, b) => a + b, 0)).concat([0]);
       const recorrer = (k, suma) => {
         if(mejor && suma + resto[k] >= mejor.nota) return;
-        if(k === g.length){ const r = evaluar(idx); if(r && (!mejor || r.nota < mejor.nota)) mejor = r; return; }
+        if(k === g.length){
+          const r = evaluar(idx);
+          // Las rejas se aplican DENTRO de la búsqueda (14-oct, Hamilton): el
+          // mejor por nota a veces deja una puerta fuera de su cuarto, y antes
+          // se rendía aunque otra combinación cumpliera todo y quitara el encime.
+          if(r && (!inicial || (r.fuera <= inicial.fuera && r.cruces <= inicial.cruces)) && (!mejor || r.nota < mejor.nota)) mejor = r;
+          return;
+        }
         for(let a = 0; a < listas[k].length; a++){ idx[k] = a; recorrer(k+1, suma + listas[k][a].intr); }
       };
-      recorrer(0, 0);
       if(vacioIdx.every(v => v >= 0)) inicial = evaluar(vacioIdx);
+      recorrer(0, 0);
       if(!mejor || !inicial) continue;
       // Solo si de verdad arregla: el encime baja a la mitad o menos y
       // ninguna puerta se queda fuera de su cuarto por el cambio.
@@ -1545,8 +1737,10 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
     const poly = fpOrderedRoomPolygon(room, gi);
     // Con menos de 3 vertices no hay contorno: el lazo de abajo recorreria
     // los mismos 2 puntos de ida y vuelta y publicaria el DOBLE de una
-    // pared como si fuera el perimetro del cuarto.
-    const outlineOk = poly.length >= 3;
+    // pared como si fuera el perimetro del cuarto. Un contorno que se cruza
+    // consigo mismo (o pasa dos veces por un punto) tampoco es un borde: su
+    // perimetro y su pared serian numeros inventados (14-oct).
+    const outlineOk = poly.length >= 3 && !gi.roto;
     let perimeterFt = 0;
     for(let i = 0, j = poly.length - 1; i < poly.length; j = i++)
       perimeterFt += Math.hypot(poly[i].x - poly[j].x, poly[i].y - poly[j].y);
@@ -1610,7 +1804,10 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
       // Pies del borde que la app cerro sola. Todo lo que se calcula
       // sobre ese tramo -- perimetro, pared, rodapie -- hereda la duda,
       // asi que viaja con el resultado en vez de perderse.
-      guessedFt: (gi.bridgeSegs||[]).reduce((t, b) => t + (b && b.d > 1 ? b.d : 0), 0)
+      // Un cuarto DEDUCIDO (nunca escaneado, fpAutoCompletarEspacios) tiene
+      // TODO su borde puesto por la app: sale con la misma marca que un tramo
+      // cerrado por la app, nunca como medida exacta (14-oct).
+      guessedFt: room && room._inferido ? perimeterFt : (gi.bridgeSegs||[]).reduce((t, b) => t + (b && b.d > 1 ? b.d : 0), 0)
     };
   }
   function fpPlanMeasurements(data, onLevel){
@@ -1688,6 +1885,30 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
   }
   const FLOORPLAN_LABEL_LEARNING_KEY = 'floorplanLabelLearning';
   function fpLoadLabelLearning(){ return []; }
+  function fpMemKey(){ return 'fpMemory:v1'; }
+  function fpMemLoad(){
+    try{
+      const m = JSON.parse(localStorage.getItem(fpMemKey()) || '{}');
+      return { spaces: m.spaces||[], rooms: m.rooms||[], scans: m.scans||[], aiFix: m.aiFix||{applied:0, cancelled:0} };
+    }catch(e){ return { spaces:[], rooms:[], scans:[], aiFix:{applied:0, cancelled:0} }; }
+  }
+  function fpMemFixtureSig(room){
+    return [...new Set((room.objects||[]).filter(o => !o._hidden).map(o => o.category))].sort().join('|');
+  }
+  function fpMemTop(list){
+    const c = {};
+    list.forEach(s => { c[s.n] = (c[s.n]||0) + 1; });
+    let best = null;
+    Object.keys(c).forEach(k => { if(!best || c[k] > best.count) best = { name: k, count: c[k] }; });
+    return (best && best.count >= 2) ? best : null;
+  }
+  function fpMemSimilarArea(list, area){
+    return list.filter(s => {
+      const big = Math.max(area||0, s.a||0) || 1;
+      return Math.abs((s.a||0) - (area||0)) / big <= 0.45;
+    });
+  }
+  function fpMemSuggestRoom(){ return null; }
   function fpLearnedLabelBias(){
     const history = fpLoadLabelLearning();
     if(history.length < 3) return null;
@@ -2120,7 +2341,12 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
   }
   function fpGuessedBoundaryFt(room){
     const gi = {};
-    fpOrderedRoomPolygon(room, gi);
+    const poly = fpOrderedRoomPolygon(room, gi);
+    // Un cuarto deducido: todo su borde lo puso la app ("approx." en la hoja).
+    if(room && room._inferido && poly && poly.length >= 3){
+      let p = 0; for(let i = 0, j = poly.length - 1; i < poly.length; j = i++) p += Math.hypot(poly[i].x - poly[j].x, poly[i].y - poly[j].y);
+      return p;
+    }
     return (gi.bridgeSegs || []).reduce((t, b) => t + (b && b.d > 1 ? b.d : 0), 0);
   }
   function fpPlanHasGuessedBoundary(data, onLevel){
@@ -2308,7 +2534,7 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
     };
     // Lo que el teléfono avisó al cerrar ese cuarto ("flagged on site"):
     // viaja en la inspección, por índice del cuarto entregado.
-    const scan = ((data && data.inspection && data.inspection.scanCorners) || {})[String(ri)] || [];
+    const scan = fpInspeccionUbicada(data) ? (((data && data.inspection && data.inspection.scanCorners) || {})[String(ri)] || []) : [];
     const delEscaneo = c => scan.some(s => s && isFinite(s.x) && isFinite(s.y) && D(s, c) <= 0.5);
     const out = [];
 
@@ -2488,9 +2714,18 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
                       trimmed: antes.trimmed + cuenta.trimmed, maxMoveFt: Math.max(antes.maxMoveFt || 0, cuenta.maxMoveFt) };
     return cuenta;
   }
+  function fpInspeccionUbicada(data){
+    const insp = data && data.inspection;
+    if(!insp) return false;
+    if(insp.frame === 'plano') return data.merged !== false;
+    if(insp.frame) return false;
+    const rooms = (data.rooms || []).filter(Boolean);
+    const conParche = rooms.some(r => (r.walls || []).some(w => w && w._parche)) || !!(insp.parches && Object.keys(insp.parches).length);
+    return rooms.length <= 1 && !conParche;
+  }
   function fpWalkedPath(data, level){
     const raw = data && data.inspection && data.inspection.path;
-    if(!Array.isArray(raw)) return [];
+    if(!Array.isArray(raw) || !fpInspeccionUbicada(data)) return [];
     return raw.filter(q => q && isFinite(q.x) && isFinite(q.y) &&
                            (level == null || (q.l || 1) === level));
   }
@@ -2509,6 +2744,41 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
       if(fpSegmentsCross(p, q, seg.a, seg.b)) return true;
     }
     return false;
+  }
+  function fpRoomsOverlapSqFt(data, onLevel){
+    const rooms = ((data && data.rooms) || []).filter(r =>
+      !r.deleted && (r.walls||[]).length && (!onLevel || onLevel(r)));
+    if(rooms.length < 2) return { pairs: [], sqFt: 0 };
+    const polys = rooms.map(r => fpOrderedRoomPolygon(r));
+    const boxes = polys.map(p => {
+      if(!p || p.length < 3) return null;
+      const xs = p.map(q => q.x), ys = p.map(q => q.y);
+      return { x0:Math.min(...xs), x1:Math.max(...xs), y0:Math.min(...ys), y1:Math.max(...ys) };
+    });
+    const CELL = 0.5;
+    const pairs = [];
+    let total = 0;
+    for(let i=0; i<rooms.length; i++) for(let j=i+1; j<rooms.length; j++){
+      const A = polys[i], B = polys[j], ba = boxes[i], bb = boxes[j];
+      if(!A || !B || !ba || !bb) continue;
+      const x0 = Math.max(ba.x0, bb.x0), x1 = Math.min(ba.x1, bb.x1);
+      const y0 = Math.max(ba.y0, bb.y0), y1 = Math.min(ba.y1, bb.y1);
+      if(x1 - x0 < CELL || y1 - y0 < CELL) continue;      // ni se tocan
+      let n = 0;
+      for(let x = x0; x < x1; x += CELL) for(let y = y0; y < y1; y += CELL){
+        const pt = { x: x + CELL/2, y: y + CELL/2 };
+        if(fpPointInPolygon(pt, A) && fpPointInPolygon(pt, B)) n++;
+      }
+      const sq = n * CELL * CELL;
+      // Un pelo de traslape es el grosor de una pared compartida, no un
+      // error. 4 sq ft es mas o menos 2 ft de pared: por debajo de eso no
+      // vale la pena molestarlo.
+      if(sq >= 4){
+        pairs.push({ a: rooms[i].roomName || `Room ${i+1}`, b: rooms[j].roomName || `Room ${j+1}`, sqFt: Math.round(sq*10)/10 });
+        total += sq;
+      }
+    }
+    return { pairs, sqFt: Math.round(total*10)/10 };
   }
   function fpRoomFloorFill(room, X, Y){
     if(!room || (room.walls||[]).length < 3) return '';
@@ -2888,7 +3158,9 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
     const company = esc(($('#companyName') && $('#companyName').value) || 'Scanova360');
     const b = data.buildingSummary || {};
     const levels = floorplanLevels(data);
-    const roomCount = b.roomCount || (data.rooms||[]).length;
+    // Los cuartos que hay HOY (la web agrega deducidos y borra): el número
+    // que mandó el iPhone al escanear se queda viejo.
+    const roomCount = (data.rooms||[]).filter(r => r && !r.deleted).length;
     const job = (data && data.job) || fpJobInfo();
     const dateTxt = job.date
       ? new Date(job.date + 'T12:00:00').toLocaleDateString('en-US', {year:'numeric', month:'short', day:'numeric'})
@@ -3183,6 +3455,11 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
     return out + '</g>' + sueltas;
   }
   function fpAltoTablaMedidas(nCuartos, u){ return u * (2.4 + 2.0 + 1.75 * nCuartos + 2.0 + 2.0); }
+  function fpNombreDelNivelConocido(data, floorNum){
+    const nom = data && data.inspection && data.inspection.nombresDeNivel;
+    if((nom && nom[String(floorNum)]) || (data && data._nivelBase)) return fpPlantaDeNivel(data, floorNum) || null;
+    return null;
+  }
   function fpTablaMedidasSvg(data, floorNum, x0, y0, w, u){
     const enPiso = r => (r.level || 1) === floorNum;
     const cuartos = ((data && data.rooms) || []).map((r, i) => ({ r, i })).filter(x => !x.r.deleted && (x.r.walls || []).length && enPiso(x.r));
@@ -3197,8 +3474,13 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
       : `<text x="${xs[i] - u * 0.2}" y="${y}" font-size="${fs.toFixed(1)}" font-weight="${peso || 400}" fill="${color || '#3A4552'}" text-anchor="end">${txt}</text>`;
     let y = y0 + u * 1.7, o = `<g class="fp-tabla" font-family="'IBM Plex Sans',sans-serif" style="pointer-events:none;">`;
     o += `<line x1="${x0}" y1="${y0}" x2="${x0 + w}" y2="${y0}" stroke="#1C2530" stroke-width="2"/>`;
-    o += `<text x="${x0 + u * 0.2}" y="${y}" font-size="${(u * 1.25).toFixed(1)}" font-weight="700" fill="#1C2530">Total Area: ${n1(fpDisplayTotalAreaSqFt(data))} sq ft &#160;&#160; Rooms: ${cuartos.length}</text>`;
-    o += `<text x="${x0 + w - u * 0.2}" y="${y}" font-size="${fh.toFixed(1)}" font-weight="700" letter-spacing="1" fill="#1C2530" text-anchor="end">LEVEL ${floorNum}</text>`;
+    // El total del encabezado es el del MISMO nivel que la tabla (la fila
+    // TOTAL): con dos niveles, el de toda la casa no cuadraba con la fila.
+    const encima = fpRoomsOverlapSqFt(data, enPiso);
+    const marcaEnc = encima && encima.sqFt >= 4 ? '\u2021' : '';
+    o += `<text x="${x0 + u * 0.2}" y="${y}" font-size="${(u * 1.25).toFixed(1)}" font-weight="700" fill="#1C2530">Total Area: ${n1(t.floorSqFt)}${marcaEnc} sq ft &#160;&#160; Rooms: ${cuartos.length}</text>`;
+    const nomNivel = fpNombreDelNivelConocido(data, floorNum);
+    o += `<text x="${x0 + w - u * 0.2}" y="${y}" font-size="${fh.toFixed(1)}" font-weight="700" letter-spacing="1" fill="#1C2530" text-anchor="end">${nomNivel ? esc(nomNivel).toUpperCase() : 'LEVEL ' + floorNum}</text>`;
     y += u * 2.0;
     ['ROOM', 'FLOOR SF', 'WALL SF', 'CEILING SF', 'PERIMETER LF', 'BASEBOARD LF', 'CEILING HT'].forEach((h, i) => {
       o += i === 0 ? `<text x="${x0 + u * 0.2}" y="${y}" font-size="${fh.toFixed(1)}" font-weight="700" letter-spacing="0.8" fill="#5a6472">${h}</text>`
@@ -3220,13 +3502,17 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
     y += u * 0.7;
     o += `<line x1="${x0}" y1="${y}" x2="${x0 + w}" y2="${y}" stroke="#1C2530" stroke-width="1.6"/>`;
     y += u * 1.35;
-    o += celda(0, y, 'TOTAL', 700, '#1C2530') + celda(1, y, n1(t.floorSqFt), 700, '#1C2530')
+    o += celda(0, y, 'TOTAL', 700, '#1C2530') + celda(1, y, n1(t.floorSqFt) + marcaEnc, 700, '#1C2530')
       + celda(2, y, n1(t.netWallSqFt) + (t.noHeight.length ? '\u2020' : ''), 700, '#1C2530') + celda(3, y, n1(t.ceilingSqFt), 700, '#1C2530')
       + celda(4, y, n1(t.perimeterFt), 700, '#1C2530') + celda(5, y, n1(t.baseboardFt), 700, '#1C2530');
     const notas = [];
     if(t.guessedRooms) notas.push(`\u2020 part of the boundary was closed by the app, not measured (${n1(t.guessedFt)} ft in ${t.guessedRooms} room${t.guessedRooms > 1 ? 's' : ''})`);
     if(t.noHeight.length) notas.push(`\u2020 ${t.noHeight.length} room${t.noHeight.length > 1 ? 's have' : ' has'} no wall height, so ${t.noHeight.length > 1 ? 'they are' : 'it is'} left out of the Wall SF total`);
     if(t.noOutline.length) notas.push(`${t.noOutline.length} room${t.noOutline.length > 1 ? 's' : ''} could not be outlined`);
+    // Dos cuartos que reclaman el mismo piso: el total lo cuenta dos veces.
+    // No se resta en silencio (de ese número se factura y el defecto está en
+    // el contorno), pero la hoja que se entrega lo tiene que decir.
+    if(marcaEnc) notas.push(`\u2021 two rooms claim the same ${n1(encima.sqFt)} sq ft of floor; this total counts it twice`);
     if(notas.length) o += `<text x="${x0 + u * 0.2}" y="${y + u * 1.5}" font-size="${(u * 0.78).toFixed(1)}" fill="#5a6472">${notas.join(' \u00b7 ')}</text>`;
     return o + '</g>';
   }
@@ -3241,7 +3527,7 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
     const letra = esMarca360 ? "'Plus Jakarta Sans',-apple-system,'Helvetica Neue',Arial,sans-serif" : "'IBM Plex Sans',sans-serif";
     const lv = floorplanLevels(data);
     const iNivel = Math.max(0, lv.indexOf(floorNum));
-    const nombreNivel = (data && data._nivelBase) ? (fpPlantaDeNivel(data, floorNum) || ('Floor ' + floorNum)) : ('Floor ' + floorNum);
+    const nombreNivel = fpNombreDelNivelConocido(data, floorNum) || ('Floor ' + floorNum);
     const hayDudosas = (data.rooms || []).some(r => !r.deleted && (r.level || 1) === floorNum && (r.walls || []).some(w => w.confidence === 'low'));
     let o = `<g class="fp-marco" style="pointer-events:none;" font-family="${letra}">`;
     o += `<rect x="${m}" y="${m}" width="${svgW - 2*m}" height="${svgH - 2*m}" rx="${(u * 0.3).toFixed(1)}" fill="none" stroke="#d3dce8" stroke-width="1.4"/>`;
@@ -3280,7 +3566,11 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
       `<tspan fill="#4a5462">Units:</tspan> <tspan font-weight="700">ft / in</tspan>`,
       `<tspan fill="#4a5462">Scale:</tspan> <tspan font-weight="700">Not to scale</tspan>`,
       null,
-      `Page <tspan font-weight="700">${iNivel + 1}</tspan> of <tspan font-weight="700">${Math.max(1, lv.length)}</tspan>`,
+      // Un plano guardado por nivel (Scanova parte los escaneos de dos niveles
+      // en una hoja por nivel) es una hoja sola.
+      (data && data._nivel != null)
+        ? `Page <tspan font-weight="700">1</tspan> of <tspan font-weight="700">1</tspan>`
+        : `Page <tspan font-weight="700">${iNivel + 1}</tspan> of <tspan font-weight="700">${Math.max(1, lv.length)}</tspan>`,
     ];
     let x = m;
     cols.forEach((c, i) => {
@@ -3288,8 +3578,14 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
       if(i) o += `<line x1="${x}" y1="${yT + hF * 0.22}" x2="${x}" y2="${yT + hF * 0.82}" stroke="#d3dce8" stroke-width="1"/>`;
       if(celdas[i]) o += `<text x="${x + u * 0.9}" y="${yTxt}" font-size="${(u * 0.82).toFixed(1)}" fill="#1C2530">${celdas[i]}</text>`;
       else {
-        o += `<text x="${x + u * 0.7}" y="${yT + hF * 0.42}" font-size="${(u * 0.62).toFixed(1)}" fill="#3a4452">Measurements from the LiDAR scan; verify before final export.</text>`;
-        o += `<text x="${x + u * 0.7}" y="${yT + hF * 0.74}" font-size="${(u * 0.62).toFixed(1)}" fill="#3a4452">${hayDudosas ? 'Red dashed wall = verify measurement.' : 'Dimensions are wall-to-wall at the wall center.'}</text>`;
+        // La nota cabe en SU casilla: en un plano angosto se le baja la letra
+        // (antes se salía y se metía en "Page 1 of 1").
+        const t1 = 'Measurements from the LiDAR scan; verify before final export.';
+        const t2 = hayDudosas ? 'Red dashed wall = verify measurement.' : 'Dimensions are wall-to-wall at the wall center.';
+        const cabe = (w - u * 1.4) / (Math.max(t1.length, t2.length) * 0.56);
+        const fsN = Math.max(u * 0.3, Math.min(u * 0.62, cabe));
+        o += `<text x="${x + u * 0.7}" y="${yT + hF * 0.42}" font-size="${fsN.toFixed(1)}" fill="#3a4452">${t1}</text>`;
+        o += `<text x="${x + u * 0.7}" y="${yT + hF * 0.74}" font-size="${fsN.toFixed(1)}" fill="#3a4452">${t2}</text>`;
       }
       x += w;
     });
@@ -3393,8 +3689,12 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
       // "approx." after the unit, not inside the number - a room whose
       // boundary the app had to close for itself must not print a bare
       // figure on a document someone bills from.
-      const areaTxt = fpRoomDisplayAreaSqFt(room).toFixed(1) + ' sq ft'
-        + (fpGuessedBoundaryFt(room) > 1 ? ' approx.' : '');
+      // En un cuarto chico (un clóset deducido) la palabra no cabe junto a
+      // las medidas de adentro: ahí va "~" antes del número, que dice lo
+      // mismo sin chocar (14-oct).
+      const aprox = fpGuessedBoundaryFt(room) > 1, chico = fpRoomDisplayAreaSqFt(room) < 45;
+      const areaTxt = (aprox && chico ? '~' : '') + fpRoomDisplayAreaSqFt(room).toFixed(1) + ' sq ft'
+        + (aprox && !chico ? ' approx.' : '');
       // Overall room dimensions (width x depth), not just area - the
       // bounding box of its own walls, which is exactly the room's real
       // width/depth for a rectangular room now that the whole plan is
@@ -3635,5 +3935,6 @@ const document = (typeof globalThis !== "undefined" && globalThis.document) || u
   function buildFloorplanSvg(data, level){
     return data.merged ? buildFloorplanSvgMerged(data, level) : buildFloorplanSvgUnmerged(data, level);
   }
+  const two = n => String(n).padStart(2,'0');
   export function ponerVista(limpia){ fpEstiloVista = true; fpSheetExport = false; fpConTablaMedidas = !limpia; }
-export { buildFloorplanSvg, buildFloorplanSvgUnmerged, floorplanLevels, fpRoomDisplayAreaSqFt, fpDisplayTotalAreaSqFt, fpOrderedRoomPolygon, fpPolygonAreaSqFt, fpFeetInches, fpPlanMeasurements, fpRoomMeasurements, floorplanIsExteriorWall, floorplanAlignRooms, floorplanRectifyWalls, floorplanRefineGeometry, floorplanCloseCorners, floorplanDetectSubAreas, fpReconocerClosets, fpNombreDeCuartoEnIngles, fpAutoCompletarEspacios, fpResolverParedesAjenas };
+export { buildFloorplanSvg, buildFloorplanSvgUnmerged, floorplanLevels, fpRoomDisplayAreaSqFt, fpDisplayTotalAreaSqFt, fpOrderedRoomPolygon, fpPolygonAreaSqFt, fpFeetInches, fpPlanMeasurements, fpRoomMeasurements, floorplanIsExteriorWall, floorplanAlignRooms, floorplanRectifyWalls, floorplanRefineGeometry, floorplanCloseCorners, floorplanDetectSubAreas, fpReconocerClosets, fpNombreDeCuartoEnIngles, fpAutoCompletarEspacios, fpResolverParedesAjenas, fpValidarParches, suggestFloorplanRoomName };

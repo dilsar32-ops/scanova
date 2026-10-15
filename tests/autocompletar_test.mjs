@@ -23,7 +23,7 @@ t('segunda pasada no agrega nada', plano.fpAutoCompletarEspacios(otra).length ==
 const hecho = JSON.parse(JSON.stringify(raw)); hecho._handEdited = true;
 t('plano editado a mano: nada deducido', PL.prepararPlano(hecho).rooms.every(r => !r._inferido));
 // la puerta del master hacia el clóset sale corrediza
-const svg = PL.svgDelPlano(raw, { cliente: 'Harold gonzalez' }, true);
+const svg = PL.svgDelPlano(raw, { cliente: 'Cliente de prueba' }, true);
 t('el dibujo trae los dos nombres', /LAUNDRY ROOM/.test(svg) && /CLOSET/.test(svg));
 console.log('autocompletar:', ok, 'ok,', mal, 'fallas');
 if(mal) process.exit(1);

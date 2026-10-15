@@ -6,12 +6,12 @@
 // TELÉFONO (su diseño del 14-oct): Dry Logs abre con la cámara prendida. Arriba "Dry Logs" y en qué cuarto va
 // (Room 1 of 4), luego Level y Room para escoger dónde, y la cámara llena lo que sobra. El botón azul de cámara de
 // abajo (el de siempre) toma la foto directo. Lo que sigue después de la foto espera su siguiente diseño.
-import { $, $$, authFetch, registrarAtras, preguntar, alMostrar } from './app.js?v=2026-10-14-49';
-import { RESTRICCIONES, errorCamara, puedeCamaraPropia } from './camara.js?v=2026-10-14-49';
-import * as fotos from './fotos.js?v=2026-10-14-49';
-import { leerPantalla } from './lector.js?v=2026-10-14-49';
-import * as R from './registro.js?v=2026-10-14-49';
-import { APP_BUILD } from './config.js?v=2026-10-14-49';
+import { $, $$, authFetch, registrarAtras, preguntar, alMostrar } from './app.js?v=2026-10-14-52';
+import { RESTRICCIONES, errorCamara, puedeCamaraPropia } from './camara.js?v=2026-10-14-52';
+import * as fotos from './fotos.js?v=2026-10-14-52';
+import { leerPantalla } from './lector.js?v=2026-10-14-52';
+import * as R from './registro.js?v=2026-10-14-52';
+import { APP_BUILD } from './config.js?v=2026-10-14-52';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -678,7 +678,7 @@ function listaHtml(){
         const lecturas = ls.map(f => { const ant = R.lecturaAnterior(LECT, c.id, f.material, f.ubicacion, dia), t = ant && R.tendencia(ant.valor, Number(f.valor));
           return `<button type="button" class="dl-li-lec"${f.foto_id ? ` data-dl-foto="${esc(f.foto_id)}"` : ' disabled'}>
           <span class="dl-li-mini">${f.foto_id ? mini(f.foto_id) : IC('camara')}</span>
-          <span class="dl-li-dat"><b>${esc(Number(f.valor).toFixed(1))}%${t && t.tipo !== 'igual' ? ` <em class="dl-tend ${t.tipo}">${esc(t.texto)}</em>` : ''}</b>${f.material ? `<span>${esc(f.material)}</span>` : ''}${f.ubicacion ? `<span>${esc(f.ubicacion)}</span>` : ''}<small>${esc(R.fechaLarga(dia))}</small></span>${IC('chev-der', 'dl-li-chev')}</button>`; }).join('');
+          <span class="dl-li-dat"><b>${esc(Number(f.valor).toFixed(1))}%${t && t.tipo !== 'igual' ? ` <em class="dl-tend ${t.tipo}">${esc(t.texto)}</em>` : ''}</b>${f.material || f.ubicacion ? `<span>${esc([f.material, f.ubicacion].filter(Boolean).join(' · '))}</span>` : ''}<small>${esc(R.fechaLarga(dia))}</small></span>${IC('chev-der', 'dl-li-chev')}</button>`; }).join('');
         const fotosHtml = fs.length ? `<div class="dl-li-fotos"><small>Photos <b>${fs.length}</b></small><div class="dl-li-tira">${fs.map(f => `<button type="button" class="dl-li-foto" data-dl-foto="${esc(f.id)}" aria-label="Open photo">${mini(f.id)}</button>`).join('')}</div></div>` : '';
         // Todo el equipo que había ese día (lo último contado ese día o antes), cada uno con su dibujo y su cantidad.
         const items = e ? Object.entries(e.cuentas).filter(([, k]) => k > 0) : [];
@@ -698,10 +698,11 @@ function listaHtml(){
     `<div class="dl-li-in"><p class="dl-li-nada">${esc(cuartosDeNivel(CUARTOS, n.id).map(c => c.nombre).join(' · '))}</p></div>`)).join('');
   const proxima = det('card dl-li-dia', 'prox', ab('prox', true), `<b class="dl-li-fecha">${esc(R.fechaLarga(prox))}</b><span class="dl-li-est prox">Upcoming</span>`,
     `<div class="dl-li-in">${proxNiv}<div class="dl-li-vacio">${IC('info')}<span><b>No readings yet</b><small>Take readings to see them listed here.</small></span></div></div>`);
-  // En la computadora (su pedido: "con este mismo estilo haz el de la web"): arriba View Report y + New Reading.
+  // Sin el título "Dry Logs" (su pedido del 14-oct: la pestaña ya lo dice y así todo sube). En la computadora quedan
+  // arriba, a la derecha, View Report y + New Reading.
   const cab = web
-    ? `<div class="dl-lista-cab"><h2 class="dl-lista-t">Dry Logs</h2><div class="dl-lista-acc"><button type="button" class="btn btn-outline" data-dl-reporte>${IC('doc')}View Report</button><button type="button" class="btn btn-accent" data-dl="paso1">${IC('mas')}New Reading</button></div></div>`
-    : '<h2 class="dl-lista-t">Dry Logs</h2>';
+    ? `<div class="dl-lista-cab"><div class="dl-lista-acc"><button type="button" class="btn btn-outline" data-dl-reporte>${IC('doc')}View Report</button><button type="button" class="btn btn-accent" data-dl="paso1">${IC('mas')}New Reading</button></div></div>`
+    : '';
   const mas = web ? 'data-dl="paso1"' : 'data-dl-mas';
   return `<div class="dl-tel dl-lista${web ? ' dl-lista-web' : ''}">${cab}${AVISO_TEL ? `<p class="dl-tel-aviso">${IC('check')}${esc(AVISO_TEL)}</p>` : ''}${dias.map(d => tarjeta(d.dia)).join('')}${proxima}
     <p class="aviso" id="dlAviso"></p>

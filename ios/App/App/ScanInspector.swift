@@ -7,9 +7,14 @@ import simd
 // compute per-element VISUAL COVERAGE - which walls/doors/windows/
 // openings the camera actually got a good look at during the walkthrough.
 // This is pure geometry over the pose trace (no image is ever decoded -
-// cost is independent of photo count) and runs in the SAME ARSession
-// world space the geometry lives in (pauseARSession:false keeps one
-// continuous space), so there is no cross-space alignment step.
+// cost is independent of photo count).
+//
+// CORRECCIÓN (14-oct): antes aquí decía que todo vivía en UN solo espacio
+// de ARKit. No es cierto: cada captura de RoomPlan (cada run()) arranca con
+// su propio origen, y la caminata de cada cuarto viene en el marco de SU
+// captura. Por eso la geometría y las poses se pasan primero al plano
+// entregado con el movimiento de cada captura (inspect: marcoCuarto y
+// capturas); lo que no se sabe dónde va, no entra.
 //
 // HONESTY RULE (structural, enforced by the web verdict model): coverage
 // can only DOWNGRADE an element - trigger a question or a report note -
@@ -25,7 +30,7 @@ enum ScanInspector {
     // occlusion casting, surface corner+center samples only. This is a
     // coaching hint spoken in the moment; the full inspect() at session
     // end remains the verification that ships with the plan.
-    static func quickRoomCoverage(room: CapturedRoom, roomIndex: Int,
+    static func quickRoomCoverage(room: CapturedRoom, captura: Int,
                                   poses: [ScanKeyframeRecorder.PoseRecord])
         -> (percent: Int, total: Int, wellSeen: Int, worstType: String?, worstLengthFt: Double?) {
         struct El { let normal: SIMD3<Float>; let samples: [SIMD3<Float>]; let type: String; let lengthFt: Double }
@@ -52,7 +57,11 @@ enum ScanInspector {
         room.openings.forEach { addSurface($0, "paso") }
         guard !elements.isEmpty else { return (100, 0, 0, nil, nil) }
         struct Cam { let inv: simd_float4x4; let pos: SIMD3<Float> }
-        let own = poses.filter { $0.roomIndex == roomIndex }
+        // Solo las poses de la captura de este cuarto: cada captura de
+        // RoomPlan tiene su propio origen, y una pose de otra captura está en
+        // otro marco (antes se filtraba por el número de cuarto, que una
+        // captura descartada reusa).
+        let own = poses.filter { $0.captura == captura }
         let cams = own.map {
             Cam(inv: $0.transform.inverse,
                 pos: SIMD3($0.transform.columns.3.x, $0.transform.columns.3.y, $0.transform.columns.3.z))
@@ -208,49 +217,99 @@ enum ScanInspector {
         return d
     }
 
-    static func pathTrace(_ poses: [ScanKeyframeRecorder.PoseRecord]) -> [[String: Any]] {
+    // Las poses ya llegan en el plano entregado (o en su cuarto, si no se
+    // juntó), con el cuarto al que pertenecen; las de una captura que no se
+    // sabe dónde va ni siquiera llegan.
+    static func pathTrace(_ poses: [(x: Float, y: Float, cuarto: Int, nivel: Int)]) -> [[String: Any]] {
         var out: [[String: Any]] = []
         var lastX = Float.infinity, lastY = Float.infinity
         var lastRoom = -999
         for p in poses {
-            let x = p.transform.columns.3.x, y = p.transform.columns.3.z
-            if p.roomIndex == lastRoom, hypot(x - lastX, y - lastY) < 0.15 { continue }  // ~0.5 ft
-            lastX = x; lastY = y; lastRoom = p.roomIndex
+            let x = p.x, y = p.y
+            if p.cuarto == lastRoom, hypot(x - lastX, y - lastY) < 0.15 { continue }  // ~0.5 ft
+            lastX = x; lastY = y; lastRoom = p.cuarto
             out.append([
                 "x": (Double(x) * FloorPlanEncoder.metersToFeet * 100).rounded() / 100,
                 "y": (Double(y) * FloorPlanEncoder.metersToFeet * 100).rounded() / 100,
-                "r": p.roomIndex, "l": p.level
+                "r": p.cuarto, "l": p.nivel
             ])
             if out.count >= 1200 { break }
         }
         return out
     }
 
+    // El movimiento en el piso como matriz 3D: girar en el piso (x, z),
+    // mover, y subir o bajar `dy` (para poner el piso de cada captura en 0).
+    static func matriz(_ r: FloorPlanEncoder.Rigido2D, dy: Float) -> simd_float4x4 {
+        let c = Float(cos(r.th)), s = Float(sin(r.th))
+        return simd_float4x4(columns: (SIMD4(c, 0, s, 0), SIMD4(0, 1, 0, 0), SIMD4(-s, 0, c, 0),
+                                       SIMD4(Float(r.tx), dy, Float(r.ty), 1)))
+    }
+
+    // La altura del piso en el marco de un cuarto: donde terminan sus
+    // paredes por abajo (la mediana, por si una pared viene rara).
+    static func alturaDelPiso(_ room: CapturedRoom) -> Float {
+        let bajos = room.walls.map { $0.transform.columns.3.y - $0.dimensions.y / 2 }.sorted()
+        return bajos.isEmpty ? 0 : bajos[bajos.count / 2]
+    }
+
+    // Una captura: de qué cuarto es (el suyo, que da la altura del piso), a
+    // qué cuarto del plano pertenece (un parche, al de su cuarto) y cómo se
+    // lleva al plano entregado.
+    struct MarcoDeCaptura { let propio: Int; let grupo: Int; let marco: FloorPlanEncoder.Rigido2D }
+
+    // LOS MARCOS (14-oct). Cada captura de RoomPlan arranca con su propio
+    // origen, así que la geometría de cada cuarto y las poses de cada captura
+    // se pasan primero al plano entregado (`marcoCuarto`, `capturas`). Un
+    // cuarto o una captura sin movimiento conocido no entra. Si el plano NO se
+    // juntó (`juntado` false), cada cuarto se revisa solo, con las poses de su
+    // propia captura: comparar entre cuartos sin merge no significa nada.
     static func inspect(rooms: [CapturedRoom], deletedIndices: Set<Int>, levels: [Int],
                         trace: ScanKeyframeRecorder.Trace,
+                        marcoCuarto: [Int: FloorPlanEncoder.Rigido2D],
+                        capturas: [Int: MarcoDeCaptura],
+                        juntado: Bool,
+                        cuartoDeCaptura: [Int: Int] = [:],
                         isCancelled: () -> Bool = { false }) -> [String: Any] {
         guard !trace.poses.isEmpty else { return ["version": 1, "status": "skipped", "reason": "no_poses"] }
+        let pisoDe: [Int: Float] = Dictionary(uniqueKeysWithValues: rooms.indices.map { ($0, alturaDelPiso(rooms[$0])) })
+        let M: [Int: simd_float4x4] = marcoCuarto.reduce(into: [:]) { acc, kv in acc[kv.key] = matriz(kv.value, dy: -(pisoDe[kv.key] ?? 0)) }
+        func aPlano(_ m: simd_float4x4, _ p: SIMD3<Float>) -> SIMD3<Float> { let q = m * SIMD4(p.x, p.y, p.z, 1); return SIMD3(q.x, q.y, q.z) }
+        func aPlano2(_ m: simd_float4x4, _ p: SIMD2<Float>) -> SIMD2<Float> { let q = m * SIMD4(p.x, 0, p.y, 1); return SIMD2(q.x, q.z) }
+        func giro(_ m: simd_float4x4, _ n: SIMD3<Float>) -> SIMD3<Float> { let q = m * SIMD4(n.x, n.y, n.z, 0); return SIMD3(q.x, q.y, q.z) }
+        // Cada pose, ya en el plano, con el cuarto al que pertenece.
+        struct PoseEnPlano { let rec: ScanKeyframeRecorder.PoseRecord; let t: simd_float4x4; let cuarto: Int }
+        let posesEnPlano: [PoseEnPlano] = trace.poses.compactMap { p in
+            guard let c = capturas[p.captura] else { return nil }
+            let m = matriz(c.marco, dy: -(pisoDe[c.propio] ?? 0))
+            return PoseEnPlano(rec: p, t: m * p.transform, cuarto: c.grupo)
+        }
+        // Sin ninguna pose ubicada no hay cobertura ni camino, pero las fotos
+        // SÍ se mandan (sin posición): antes se perdían todas.
+        let sinUbicar = posesEnPlano.isEmpty
 
         // --- Occluder set: every non-deleted wall as a 2D XZ segment,
         // with the door/opening spans that allow seeing through it. ---
         struct Occluder {
             let a: SIMD2<Float>, b: SIMD2<Float>
             let level: Int
+            let room: Int
             let wallId: UUID
             let passSpans: [(center: SIMD2<Float>, halfWidth: Float)]
         }
         var occluders: [Occluder] = []
         for (idx, room) in rooms.enumerated() {
-            guard !deletedIndices.contains(idx) else { continue }
+            guard !deletedIndices.contains(idx), let m = M[idx] else { continue }
             let lvl = levels.indices.contains(idx) ? levels[idx] : 1
             for wall in room.walls {
-                let (s, e) = FloorPlanEncoder.wallEndpoints(wall)
+                let (s0, e0) = FloorPlanEncoder.wallEndpoints(wall)
+                let s = aPlano2(m, s0), e = aPlano2(m, e0)
                 var spans: [(SIMD2<Float>, Float)] = []
                 // Windows included: without them, a window plane modeled a
                 // few cm behind its wall centerline is "blocked" by its own
                 // host wall and falsely reads as never-observed.
                 for opening in room.doors + room.openings + room.windows {
-                    let p = SIMD2<Float>(opening.transform.columns.3.x, opening.transform.columns.3.z)
+                    let p = aPlano2(m, SIMD2<Float>(opening.transform.columns.3.x, opening.transform.columns.3.z))
                     // An opening belongs to this wall if it sits on its line.
                     let ab = e - s
                     let len2 = simd_length_squared(ab)
@@ -261,7 +320,7 @@ enum ScanInspector {
                     guard simd_distance(p, proj) < 0.3 else { continue }
                     spans.append((p, opening.dimensions.x / 2 + 0.15))
                 }
-                occluders.append(Occluder(a: s, b: e, level: lvl, wallId: wall.identifier, passSpans: spans))
+                occluders.append(Occluder(a: s, b: e, level: lvl, room: idx, wallId: wall.identifier, passSpans: spans))
             }
         }
 
@@ -289,7 +348,7 @@ enum ScanInspector {
         }
         var elements: [Element] = []
         for (idx, room) in rooms.enumerated() {
-            guard !deletedIndices.contains(idx) else { continue }
+            guard !deletedIndices.contains(idx), let m = M[idx] else { continue }
             let lvl = levels.indices.contains(idx) ? levels[idx] : 1
             for wall in room.walls {
                 let (s2, e2) = FloorPlanEncoder.wallEndpoints(wall)
@@ -297,14 +356,14 @@ enum ScanInspector {
                 var pts: [SIMD3<Float>] = []
                 for t in [Float(0), 0.25, 0.5, 0.75, 1] {
                     let p = s2 + (e2 - s2) * t
-                    pts.append(SIMD3(p.x, y, p.y))
+                    pts.append(aPlano(m, SIMD3(p.x, y, p.y)))
                 }
-                let n = SIMD3(wall.transform.columns.2.x, wall.transform.columns.2.y, wall.transform.columns.2.z)
+                let n = giro(m, SIMD3(wall.transform.columns.2.x, wall.transform.columns.2.y, wall.transform.columns.2.z))
                 elements.append(Element(id: wall.identifier.uuidString, type: "wall", roomIndex: idx, level: lvl,
                                         center: pts[2], normal: simd_normalize(n), samples: pts, ownWallId: wall.identifier))
             }
             func rectElement(_ surface: CapturedRoom.Surface, _ type: String) {
-                let T = surface.transform
+                let T = m * surface.transform
                 let hw = surface.dimensions.x / 2 * 0.9, hh = surface.dimensions.y / 2 * 0.9
                 var pts: [SIMD3<Float>] = []
                 for (lx, ly) in [(Float(0),Float(0)), (-hw,-hh), (hw,-hh), (hw,hh), (-hw,hh)] {
@@ -332,12 +391,12 @@ enum ScanInspector {
             let inv: simd_float4x4
             let camPos: SIMD3<Float>
         }
-        let poseCams: [PoseCam] = trace.poses.map {
-            PoseCam(inv: $0.transform.inverse,
-                    camPos: SIMD3($0.transform.columns.3.x, $0.transform.columns.3.y, $0.transform.columns.3.z))
+        let poseCams: [PoseCam] = posesEnPlano.map {
+            PoseCam(inv: $0.t.inverse,
+                    camPos: SIMD3($0.t.columns.3.x, $0.t.columns.3.y, $0.t.columns.3.z))
         }
 
-        for el in elements {
+        for el in elements where !sinUbicar {
             // The caller's watchdog may have already shipped the plan
             // without us - stop burning a hot phone's CPU on a result
             // nobody will read.
@@ -348,14 +407,16 @@ enum ScanInspector {
             var bestScore: Float = -1
             var bestKeyframe: String?
 
-            for (pi, pose) in trace.poses.enumerated() {
+            for (pi, pp) in posesEnPlano.enumerated() {
+                let pose = pp.rec
                 guard pose.level == el.level else { continue }
                 let camPos = poseCams[pi].camPos
                 let toElement = simd_distance(SIMD2(camPos.x, camPos.z), SIMD2(el.center.x, el.center.z))
                 // A pose counts toward its own room's elements plus
                 // anything within 6 m (open-plan sharing) - a pose in
-                // the kitchen never "observes" a distant bedroom.
-                guard pose.roomIndex == el.roomIndex || toElement < 6 else { continue }
+                // the kitchen never "observes" a distant bedroom. Sin plano
+                // juntado, solo las de su propio cuarto.
+                guard pp.cuarto == el.roomIndex || (juntado && toElement < 6) else { continue }
                 let inv = poseCams[pi].inv
                 var seenHere = 0
                 var sumIncidence: Float = 0
@@ -378,7 +439,7 @@ enum ScanInspector {
                     let a2 = SIMD2(camPos.x, camPos.z), b2 = SIMD2(sample.x, sample.z)
                     var blocked = false
                     for occ in occluders {
-                        guard occ.level == el.level, occ.wallId != el.ownWallId else { continue }
+                        guard occ.level == el.level, occ.wallId != el.ownWallId, juntado || occ.room == el.roomIndex else { continue }
                         if let hit = segmentsIntersect(a2, b2, occ.a, occ.b) {
                             let throughDoor = occ.passSpans.contains { simd_distance(hit, $0.center) <= $0.halfWidth }
                             if !throughDoor { blocked = true; break }
@@ -452,13 +513,20 @@ enum ScanInspector {
         let notasStuds = caliente ? [:] : DetectorDeStuds.notas(
             fotos: trace.keyframes.filter { $0.studScore == nil }.map { (id: $0.id, archivo: $0.file) },
             isCancelled: { isCancelled() || Date() > limiteNotas })
-        var poseDeFoto: [String: ScanKeyframeRecorder.PoseRecord] = [:]
-        for p in trace.poses { if let id = p.photoId { poseDeFoto[id] = p } }
+        var poseDeFoto: [String: simd_float4x4] = [:]
+        for p in posesEnPlano { if let id = p.rec.photoId { poseDeFoto[id] = p.t } }
         let kfDicts: [[String: Any]] = trace.keyframes.map {
-            var d: [String: Any] = ["id": $0.id, "file": $0.file.path, "roomIndex": $0.roomIndex, "level": $0.level, "w": $0.w, "h": $0.h]
+            // La foto se queda aunque su captura no se sepa dónde va; solo
+            // pierde la posición (no se inventa).
+            let cap = capturas[$0.captura]
+            var d: [String: Any] = ["id": $0.id, "file": $0.file.path, "level": $0.level, "w": $0.w, "h": $0.h]
+            // El cuarto de la foto es el de SU captura (aunque ese cuarto no vaya
+            // en el plano). Una foto de una captura que no dio cuarto (se
+            // descartó) no lleva cuarto: antes heredaba el número del siguiente.
+            if let g = cap?.grupo ?? cuartoDeCaptura[$0.captura] { d["roomIndex"] = g }
             if let n = $0.studScore ?? notasStuds[$0.id] { d["studScore"] = Double(n) }
-            if let p = poseDeFoto[$0.id] {
-                let c = p.transform.columns
+            if let t = poseDeFoto[$0.id] {
+                let c = t.columns
                 // La cámara mira por -Z de su propio marco.
                 let fwd = SIMD3<Float>(-c.2.x, -c.2.y, -c.2.z)
                 d["x"] = Double(c.3.x) * 3.28084
@@ -468,7 +536,8 @@ enum ScanInspector {
             // A qué le apuntaba la cámara, en pies y en las coordenadas del
             // plano (x, y = z del mundo, igual que las paredes del encoder):
             // el punto donde estaba lo que salió en la foto.
-            if let h = $0.hit {
+            if let h0 = $0.hit, let c = cap {
+                let h = aPlano(matriz(c.marco, dy: -(pisoDe[c.propio] ?? 0)), SIMD3(h0.x, h0.y, h0.z))
                 d["hitX"] = (Double(h.x) * 3.28084 * 100).rounded() / 100
                 d["hitY"] = (Double(h.z) * 3.28084 * 100).rounded() / 100
             }
@@ -481,9 +550,9 @@ enum ScanInspector {
         case .fair: thermalName = "fair"
         default: thermalName = "nominal"
         }
-        return [
+        var salida: [String: Any] = [
             "version": 1,
-            "status": trace.keyframes.isEmpty ? "no_photos" : "ok",
+            "status": sinUbicar ? "skipped" : (trace.keyframes.isEmpty ? "no_photos" : "ok"),
             "sessionDir": trace.dir.path,
             "poseSamples": trace.poses.count,
             // NUESTRA propia medida, no la de Apple: por donde el tecnico
@@ -494,11 +563,17 @@ enum ScanInspector {
             // puerta, no una pared que falta, y una pared que el camino
             // atraviesa no puede existir. Se manda en pies, 2D, sin
             // muestras a menos de medio pie una de otra (unos pocos KB).
-            "path": pathTrace(trace.poses),
+            "path": pathTrace(posesEnPlano.map { (x: $0.t.columns.3.x, y: $0.t.columns.3.z, cuarto: $0.cuarto, nivel: $0.rec.level) }),
+            // En qué coordenadas viene todo lo de arriba: "plano" = el plano
+            // entregado ya juntado; "cuarto" = cada cuarto en el suyo (sin
+            // merge). Antes venía en el marco de cada captura, revuelto.
+            "frame": juntado ? "plano" : "cuarto",
             "thermal": ["maxState": thermalName,
                         "photosSuppressedSec": Dictionary(uniqueKeysWithValues: trace.suppressedSecPerRoom.map { (String($0.key), $0.value) })],
             "keyframes": kfDicts,
             "elements": results
         ]
+        if sinUbicar { salida["reason"] = "no_frames" }
+        return salida
     }
 }
