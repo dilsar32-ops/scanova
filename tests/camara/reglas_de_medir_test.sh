@@ -170,10 +170,17 @@ ok("el + se queda vivo en el alto/ancho ya medido (un ancho que dobla se sigue)"
 ok("la página de las 3 preguntas sale SIEMPRE al abrir, con lo contestado ya marcado", 'abrirAjuste(volver: false)\n    }' in bloque(v, 'fileprivate func prepararMedirPrimero') and 'entrarAMedir()' not in bloque(v, 'fileprivate func prepararMedirPrimero'))
 ok("el aviso viejo 'Ojo: veo la pared, pero esta medida es de techo' no corre en medir primero", 'guard !(medirPrimero && nueva.medirActivo) else { return }' in bloque(v, 'private func updateSurfaceAssistant'))
 ok("la mira no se pone 'equivocada' en medir primero", '!(medirPrimero && n.medirActivo), let s = currentSurface()' in v)
-lm = bloque(v, 'fileprivate func listoMedir')
-ok("Listo revisa la parte por los puntos de la medida (si no la escogió a mano)", 'parteDeEstaMedida()' in lm and 'ponerParteDeLaMedida(z)' in lm and '!n.parteAMano' in lm)
+lm = bloque(v, 'fileprivate func listoMedir'); rp = bloque(v, 'fileprivate func revisarParteDeLaMedida')
+ok("Listo y 'Listo · el largo' revisan la parte por los puntos de la medida (si no la escogió a mano)",
+   'revisarParteDeLaMedida("listo")' in lm and 'revisarParteDeLaMedida("largo")' in bloque(v, 'fileprivate func terminarElLargo')
+   and 'parteDeEstaMedida()' in rp and 'ponerParteDeLaMedida(p)' in rp and '!n.parteAMano' in rp)
 ok("cambiar la parte de la medida no borra sus esquinas ni usa cambiarSeccion", 'cambiarSeccion(' not in bloque(v, 'private func ponerParteDeLaMedida') and 'pathPoints' not in bloque(v, 'private func ponerParteDeLaMedida'))
-ok("la primera esquina toma la parte a la que apunta claro", 'n.clasificador.ahoraMismo(ahora: CACurrentMediaTime())' in bloque(v, 'fileprivate func gatilloMedir'))
+gm2 = bloque(v, 'fileprivate func gatilloMedir')
+ok("la primera esquina toma la parte a la que apunta claro, sin brincarse '¿Ya terminó?' ni su 'Continuar'",
+   'n.clasificador.ahoraMismo(ahora: ahora)' in gm2 and '!(section == "wall" && (n.cierreCallado || medidasEnEstaPared() > 0))' in gm2)
+ok("la bitácora anota medir primero (cada +, la parte de la medida, cada cambio y cada guardada)", 'anotarMedir("mas"' in gm2
+   and 'anotarMedir("guardar"' in bloque(v, 'fileprivate func guardarMedir') and 'anotarMedir("resumen"' in v
+   and '(medirPrimero && nueva.medirActivo)' in bloque(v, 'fileprivate func anotarBitacora'))
 ok("en medir primero el seguro de la parte es solo una medida a medias o algo abierto", 'if medirPrimero && n.medirActivo {\n            return medidaEnCurso' in bloque(v, 'fileprivate func bloqueoDeParte'))
 ok("pared y techo en 1 s; el piso pide 2 s (leer la pantalla no es el piso)", 'estable(por: 1.0, ahora: ahora)' in v and 'estable(por: 2.0, ahora: ahora) != "floor"' in v)
 ok("la maqueta 38 recorre su prueba por las funciones de verdad (+, Listo el largo, Alto, Listo)", 'case 38:' in v and 'nueva.puntosDeMaqueta' in bloque(v, '@objc private func addTapped') and v.count('gatilloNuevoTocado(); gatilloNuevoTocado(); terminarElLargo()') == 2)

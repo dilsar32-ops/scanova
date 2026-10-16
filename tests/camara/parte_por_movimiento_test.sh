@@ -119,8 +119,14 @@ ok("solo el largo pegado al piso, en techo, y el teléfono ya ve el piso: piso (
    C.parteDeLaMedida(largo: [P(0, 0.03, 0), P(4, 0.03, 0)], segunda: [], camY: cam, pisoY: 0, actual: "ceiling", zona: "floor") == "floor")
 ok("solo el largo pegado al piso con la parte en pared: se queda pared (baseboard)",
    C.parteDeLaMedida(largo: [P(0, 0.03, 0), P(4, 0.03, 0)], segunda: [], camY: cam, pisoY: 0, actual: "wall", zona: nil) == nil)
-ok("solo el largo allá arriba (crown, la orilla del techo): techo",
-   C.parteDeLaMedida(largo: [P(0, 2.4, 0), P(4, 2.4, 0)], segunda: [], camY: cam, pisoY: 0, actual: "wall", zona: nil) == "ceiling")
+ok("solo el largo allá arriba con la parte en PARED (trim sobre la puerta, crown): se queda pared",
+   C.parteDeLaMedida(largo: [P(0, 2.1, 0), P(4, 2.1, 0)], segunda: [], camY: cam, pisoY: 0, actual: "wall", zona: nil) == nil)
+ok("solo el largo allá arriba con la parte en techo (crown): se queda techo",
+   C.parteDeLaMedida(largo: [P(0, 2.4, 0), P(4, 2.4, 0)], segunda: [], camY: cam, pisoY: 0, actual: "ceiling", zona: nil) == nil)
+ok("solo el largo a media pared con la parte en piso: pared",
+   C.parteDeLaMedida(largo: [P(0, 0.61, 0), P(4, 0.61, 0)], segunda: [], camY: cam, pisoY: 0, actual: "floor", zona: nil) == "wall")
+ok("solo el largo pegado al piso con la parte en piso (tackless): se queda piso",
+   C.parteDeLaMedida(largo: [P(0, 0.02, 0), P(4, 0.02, 0)], segunda: [], camY: cam, pisoY: 0, actual: "floor", zona: nil) == nil)
 ok("sin piso conocido se supone 1.35 m abajo del teléfono",
    C.parteDeLaMedida(largo: [P(0, 0.07, 0), P(4, 0.07, 0)], segunda: [P(4, 0.07, 0), P(4, 1.3, 0)], camY: cam, pisoY: nil, actual: "floor", zona: nil) == "wall")
 ok("una sola esquina no decide nada", C.parteDeLaMedida(largo: [P(0, 0.03, 0)], segunda: [], camY: cam, pisoY: 0, actual: "ceiling", zona: nil) == nil)

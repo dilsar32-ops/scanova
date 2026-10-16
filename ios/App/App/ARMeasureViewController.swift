@@ -5329,6 +5329,7 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        if medirPrimero && nueva.medirActivo && maqueta == 0 { anotarBitacora("salir", ["modo": "medir-primero", "medidas": items.count]); enviarBitacora() }
         cerrarLaboratorioAlSalir()
         sceneView.session.pause()
         displayLink?.invalidate()
@@ -8074,6 +8075,7 @@ fileprivate final class CamaraNueva {
     var ajusteVolver = false                      // la abrió otra vez desde la hoja del cuarto: la salida regresa
     var ajusteYaEstaba = false                    // ya estaba contestada (la página sale igual, con lo de antes marcado)
     var puntosDeMaqueta: [SIMD3<Float>] = []      // maqueta 38: dónde marca cada + (en el simulador no hay ARKit)
+    var ultimoResumenMedir: CFTimeInterval = 0    // la bitácora de medir primero: un resumen del detector cada 2 s
     var ajuste = ReglasDeMedir.Ajuste()
     var ajusteBorrador = ReglasDeMedir.Ajuste()   // lo que va tocando en la página (cuenta al tocar "Empezar a medir")
     let ajusteVista = UIView()
@@ -9872,6 +9874,17 @@ extension ARMeasureViewController {
         } else if voto != .pared { n.paredCandidata = nil }
         // Medir primero: el cuarto (por el mapa) y la parte (por el teléfono), entre una medida y otra.
         if medirPrimero { revisarMedirPrimero(ahora) }
+        if medirPrimero, n.medirActivo, ahora - n.ultimoResumenMedir >= 2 {
+            n.ultimoResumenMedir = ahora
+            let letras = n.clasificador.votos.suffix(15).map { v -> String in
+                switch v.v { case .piso: return "P"; case .pared: return "W"; case .techo: return "T"; case .esquina: return "e"; case .nada: return "."; case .moviendo: return "~" }
+            }.joined()
+            anotarMedir("resumen", ["parte": section, "zona": n.zonaVista ?? "", "bloqueado": bloqueoDeParte(), "a_mano": n.parteAMano,
+                                    "votos": letras, "grados": (m.grados * 10).rounded() / 10, "clase": m.golpe?.clase ?? "",
+                                    "a_pared_plano": m.golpe?.aParedPlano.map { ($0 * 100).rounded() / 100 } ?? -1,
+                                    "ubicado": ubicacionBase(), "firme": ubicacionFirme()])
+            if lab.bitacora.count >= 20 { enviarBitacora() }
+        }
     }
 
     // ¿Algo impide que el movimiento cambie o pregunte algo? REGLA MADRE: nunca a media medida, ni con algo abierto,
@@ -10138,8 +10151,8 @@ struct ClasificadorDeParte {
     /// LA PARTE DE UNA MEDIDA, POR DÓNDE QUEDARON SUS PUNTOS (su prueba del 16 oct: midió el techo, bajó el teléfono a la
     /// pared y la medida de la pared se quería guardar como techo). Al tocar Listo se revisa: si el alto subió por la pared
     /// es pared; si el ancho corre plano arriba del teléfono es techo, y pegado al piso es piso. Solo el largo: arriba del
-    /// teléfono, techo; a media pared, pared; pegado al piso puede ser pared (baseboard, corte) o piso (tackless): se queda
-    /// lo que ya era, pero nunca techo. Alturas en metros del mundo de la cámara. nil = no se sabe (se queda la de antes).
+    /// teléfono sigue siendo techo; desde el techo, lo de abajo es pared (o piso si el teléfono ya ve el piso); desde el
+    /// piso, lo de media pared o más arriba es pared; en la pared se queda (baseboard, corte, trim, crown: todo es pared). Alturas en metros del mundo de la cámara. nil = no se sabe (se queda la de antes).
     static func parteDeLaMedida(largo: [SIMD3<Double>], segunda: [SIMD3<Double>], camY: Double, pisoY: Double?, actual: String, zona: String?) -> String? {
         guard largo.count >= 2 else { return nil }
         let todos = largo + segunda
@@ -10158,10 +10171,15 @@ struct ClasificadorDeParte {
             }
             return nil
         }
-        if yProm > camY + 0.3 { return "ceiling" }
-        if yProm > piso + 0.35 { return "wall" }                             // una línea a media pared
-        if actual == "ceiling" { return zona == "floor" ? "floor" : "wall" }   // pegado al piso: nunca es techo
-        return nil
+        switch actual {
+        case "wall": return nil                    // en la pared todo cabe: baseboard, corte, trim sobre una puerta, crown
+        case "ceiling":
+            if yProm > camY + 0.3 { return nil }   // allá arriba: sigue siendo techo (crown)
+            if yProm > piso + 0.35 { return "wall" }                         // una línea a media pared
+            return zona == "floor" ? "floor" : "wall"                        // pegado al piso: nunca es techo
+        case "floor": return yProm > piso + 0.35 ? "wall" : nil              // a media pared o más arriba: no es el piso
+        default: return nil
+        }
     }
     /// ¿Volteó el teléfono de verdad? (25° o más en los últimos 3 s). Leer la pantalla no es apuntar al piso.
     func huboGiro(ahora: Double) -> Bool {
@@ -10442,7 +10460,22 @@ extension ARMeasureViewController {
     fileprivate func terminarElLargo() {
         guard stage == .measuringLength, pathPoints.count >= 2 else { return }
         finishPathTapped()
+        revisarParteDeLaMedida("largo")
+        if section == "floor" || section == "ceiling", pathPoints.count >= 3 {
+            mostrarAvisoNuevo("Ojo: con \(pathPoints.count) esquinas el área de un \(Self.sectionSpokenName(section)) sale mal. Guárdelo en dos medidas.", segundos: 5)
+        }
         abrirPregunta(.segunda)
+    }
+    // La parte de la medida por sus puntos (si él no la escogió a mano): al cerrar el largo y otra vez al tocar Listo.
+    fileprivate func revisarParteDeLaMedida(_ cuando: String) {
+        let n = nueva
+        let antes = section
+        let z = parteDeEstaMedida()
+        anotarMedir("parte-de-la-medida", ["cuando": cuando, "antes": antes, "dice": z ?? "", "a_mano": n.parteAMano,
+                                           "esquinas": pathPoints.count, "alto": widthPoints.count])
+        guard !n.parteAMano, ["floor", "wall", "ceiling"].contains(section), let p = z, p != section, seccionesDisponibles[p] != nil else { return }
+        ponerParteDeLaMedida(p)
+        mostrarAvisoNuevo("Esta medida es de \(Self.sectionSpokenName(p)): va en \(Self.sectionSpokenName(p).capitalized)", segundos: 3)
     }
     fileprivate func empezarAncho() {
         nueva.preguntaMedir = nil; nueva.firmaPanel = ""
@@ -10531,10 +10564,18 @@ extension ARMeasureViewController {
         let n = nueva
         guard n.medirActivo, n.preguntaMedir == nil, !n.ajusteAbierto, !roomName.isEmpty else { return }
         // La primera esquina: si el teléfono apunta CLARO a otra parte (pared, techo o piso), la parte cambia antes de marcar.
+        // (Sin brincarse "¿Ya terminó con esta pared?" ni su "Continuar": de una pared con medidas no se sale aquí; si de verdad
+        // era otra parte, Listo la corrige por los puntos.)
+        let ahora = CACurrentMediaTime()
         if stage == .pickingMaterial || stage == .measuringLength, pathPoints.isEmpty, !n.parteAMano,
-           let z = n.clasificador.ahoraMismo(ahora: CACurrentMediaTime()), z != section, seccionesDisponibles[z] != nil {
+           !(section == "wall" && (n.cierreCallado || medidasEnEstaPared() > 0)),
+           let z = n.clasificador.ahoraMismo(ahora: ahora), z != section, seccionesDisponibles[z] != nil {
+            anotarMedir("cambio", ["de": section, "a": z, "por": "primera-esquina"])
             aplicarCambio(.parte(z))
         }
+        anotarMedir("mas", ["parte": section, "paso": "\(stage)", "esquinas": pathPoints.count, "alto": widthPoints.count,
+                            "zona": n.zonaVista ?? "", "ahora": n.clasificador.ahoraMismo(ahora: ahora) ?? "",
+                            "grados": n.clasificador.votos.last.map { ($0.grados * 10).rounded() / 10 } ?? 0])
         switch stage {
         case .pickingMaterial:
             stage = .measuringLength
@@ -10580,11 +10621,7 @@ extension ARMeasureViewController {
         guard stage == .lengthDone || stage == .widthDone, hasLengthMeasurement else { return }
         // Su prueba del 16 oct: midió el techo, bajó a la pared y la medida de la pared se quería guardar como techo. La
         // parte se revisa con los PUNTOS de la medida (si él no la escogió a mano).
-        if !n.parteAMano, ["floor", "wall", "ceiling"].contains(section), let z = parteDeEstaMedida(), z != section,
-           seccionesDisponibles[z] != nil {
-            ponerParteDeLaMedida(z)
-            mostrarAvisoNuevo("Esta medida es de \(Self.sectionSpokenName(z)): va en \(Self.sectionSpokenName(z).capitalized)", segundos: 3)
-        }
+        revisarParteDeLaMedida("listo")
         let conSegunda = stage == .widthDone && (currentWidthFeet ?? 0) > 0
         switch section {
         case "wall": abrirPregunta(conSegunda ? .matPared : .que)
@@ -10622,6 +10659,14 @@ extension ARMeasureViewController {
         n.cambiandoSolo = false
         empezarPared()
         n.firmaPanel = ""
+    }
+    // Medir primero en la bitácora (16 oct, su prueba sin datos): cada +, cada Listo, cada cambio de parte o cuarto y cada
+    // medida guardada, más un resumen cada 2 s de lo que ve el detector. Sin nombres de clientes: cuartos, partes y números.
+    fileprivate func anotarMedir(_ tipo: String, _ d: [String: Any]) {
+        guard medirPrimero, maqueta == 0 else { return }
+        var datos = d
+        datos["cuarto"] = roomName; datos["nivel"] = nivelActual
+        anotarBitacora("medir-" + tipo, datos)
     }
     private func abrirPregunta(_ p: PreguntaMedir) {
         nueva.preguntaMedir = p
@@ -10682,6 +10727,11 @@ extension ARMeasureViewController {
         case .cuarto(let c): cambiarCuarto(c); n.cuartoAMano = nil
         case .parte(let z): elegirParteNueva(z)
         case .pared: break
+        }
+        switch d {
+        case .parte(let z): anotarMedir("cambio", ["a": z, "por": "telefono"])
+        case .cuarto(let c): anotarMedir("cambio", ["a_cuarto": c, "por": "mapa"])
+        case .pared(let i): anotarMedir("cambio", ["a_pared": i, "por": "telefono"])
         }
         // Que se vea que cambió solo (antes no decía nada); sin tapar el aviso de lo recién guardado.
         if Date() > n.avisoHasta {
@@ -10803,6 +10853,9 @@ extension ARMeasureViewController {
         n.parteAMano = false
         stage = .measuringLength
         mostrarAvisoNuevo(ReglasDeMedir.aviso(g, parte: parte), segundos: 3.8, ok: true)
+        anotarMedir("guardar", ["parte": parte, "material": g.material, "unidad": g.unidad, "largo": (g.largo * 10).rounded() / 10,
+                                "ancho": g.ancho.map { ($0 * 10).rounded() / 10 } ?? 0, "companero": g.companero ?? ""])
+        enviarBitacora()
         pintarCamaraNueva()
     }
 
@@ -12488,7 +12541,7 @@ extension ARMeasureViewController {
     }
     fileprivate func anotarBitacora(_ tipo: String, _ datos: [String: Any]) {
         let L = lab
-        guard L.activo || tipo == "salir" else { return }
+        guard L.activo || tipo == "salir" || (medirPrimero && nueva.medirActivo) else { return }
         if L.bitacoraSesion.isEmpty { L.bitacoraSesion = UUID().uuidString; L.bitacoraInicio = Date() }
         let fila: [String: Any] = ["t": (Date().timeIntervalSince(L.bitacoraInicio) * 10).rounded() / 10, "tipo": tipo, "datos": datos]
         L.bitacora.append(fila)
