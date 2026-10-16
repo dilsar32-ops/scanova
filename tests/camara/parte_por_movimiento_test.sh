@@ -160,15 +160,16 @@ ok("ubicado = seguro + firme + este nivel + el plano de este nivel", all(x in ub
 uf = bloque(v, 'fileprivate func ubicacionFirme')
 ok("firme = confirmado hace 20 s o menos, sin cortes a media medida, y parado en ese cuarto", '<= 20' in uf and 'rastreoMaloEnMedida' in uf and 'cuartoDondeEsta()' in uf)
 # ---- todavía no hace nada en la pantalla ----
-nuevo = v[v.index('// MARK: - ============ LA PARTE SALE DEL MOVIMIENTO (16 oct 2026)'):v.index('// MARK: - ============ UBICARSE DENTRO DEL PLANO')]
+nuevo = v[v.index('// MARK: - ============ LA PARTE SALE DEL MOVIMIENTO (16 oct 2026)'):v.index('// MARK: - ============ MEDIR PRIMERO, EL MATERIAL AL FINAL')]
 for x in ['cambiarSeccion(', 'elegirParteNueva(', 'includeCompanion', '.companion =', 'items.append', 'say(', 'preguntar(', 'sceneDepth', 'meshWithClassification', 'systemGreen']:
-    ok("el bloque nuevo no usa " + x, x not in nuevo)
+    ok("el detector no usa " + x, x not in nuevo)
 ok("nada de sceneDepth ni de la malla con clases en la cámara", 'meshWithClassification' not in v)
 ok("siguen siendo 5 caminos a cambiarSeccion", len(re.findall(r'cambiarSeccion\((sec|clave)\)', v)) == 5)
 ok("nadie le pone el compañero a lo ya guardado", re.search(r'items\[[^\]]+\]\.companion\s*=', v) is None)
 prendidas = sorted(re.findall(r'includeCompanion = ([^\n;]+)', v))
-ok("los sitios que prenden/apagan la insulación son los mismos 17 de antes", prendidas == sorted(['false'] * 10 + ['(orden == .ponerCompanero)', '(ultima.companion != nil)', '!niega', 'true', 'true', 'true', 'comp']))
-ok("los paneles y las preguntas siguen como estaban", 'fileprivate enum PanelCamara: Equatable { case nivel, cuarto, parte, material, voz, sigue }' in v and 'case masOtraSeccion  // "¿cambiamos de sección, o pasamos a otro cuarto?"\n    }' in v)
+# Los 17 de antes y UNO nuevo: medir primero guarda con el compañero que salió de sus respuestas del nivel (guardarMedir).
+ok("los sitios que prenden/apagan la insulación: los 17 de antes + el de medir primero", prendidas == sorted(['false'] * 10 + ['(orden == .ponerCompanero)', '(ultima.companion != nil)', '!niega', 'true', 'true', 'true', 'comp', 'g.companero != nil']))
+ok("las preguntas de voz siguen como estaban; los paneles, más el de medir primero", 'fileprivate enum PanelCamara: Equatable { case nivel, cuarto, parte, material, voz, sigue, medir }' in v and 'case masOtraSeccion  // "¿cambiamos de sección, o pasamos a otro cuarto?"\n    }' in v)
 ok("la voz al entrar a un cuarto sigue igual", 'Apunte el teléfono a lo que va a medir' not in v)
 ok("'(p == .sigue ? 0.7 : 0.6)' sigue igual", 'view.bounds.height * (p == .sigue ? 0.7 : 0.6)' in v)
 # ---- las dos apps ----

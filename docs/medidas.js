@@ -39,7 +39,9 @@ export const esPorPieza = (m) => POR_PIEZA.has(String(m || '').trim());
 // cuadrados ("pie lineal siempre va a ser un pie de alto, 1 por 1 da 1": se acabó "2 ft o menos = pie lineal"); pie lineal
 // solo lo que no tiene alto que medir y los gabinetes; tile y drywall pie cuadrado; countertop pie cuadrado; vanity top
 // pie lineal. Una pared sin alto NO se vuelve pie lineal: queda "missing height" y no se cobra.
-export const LINEAL = new Set(['Baseboard', 'Trim / Baseboard', 'Shoe Molding', 'Trim', 'Crown Molding', 'Tackless Strip', 'Toe Kick', 'Cabinets', 'Vanity', 'Vanity Top', 'Shower Curb']);
+// 'Drywall (1 ft cut)' (16-oct, medir primero): el corte bajo de drywall de 1 pie se cobra por pie lineal. No está en las
+// listas de arriba (no sale para escoger): solo llega de la cámara nueva, con ancho 1 para que su insulación salga largo × 1.
+export const LINEAL = new Set(['Baseboard', 'Trim / Baseboard', 'Shoe Molding', 'Trim', 'Crown Molding', 'Tackless Strip', 'Toe Kick', 'Cabinets', 'Vanity', 'Vanity Top', 'Shower Curb', 'Drywall (1 ft cut)']);
 // 'EA' | 'LF' | 'SF', o null para un material escrito a mano (no se le inventa unidad: con ancho área, sin ancho tramo).
 export function unidad(m){
   m = String(m || '').trim(); if(!m) return null;
@@ -472,9 +474,10 @@ async function lanzarCamara(alcance, d){
     res = await ARMeasure.measure({ modo: 'recorrido', alcance, nivel: nivel ? nivel.nombre : '', section: 'floor', materials: secciones.floor, secciones, cuartos, niveles,
       areasPorCuarto: {}, cuartosPorPlanta, areasPorPlanta: {}, crewName: String((PERFIL && PERFIL.full_name) || '').split(' ')[0], roomName: cuarto ? cuarto.nombre : '', roomAreaSqFt: 0, tema: TEMA_CAMARA, experiencia: EXPERIENCIA_CAMARA, paredesPorCuarto, planoPorCuarto,
       // "Probar lo demolido" (laboratorio): solo el manager ve el botón dentro de la cámara. Un aparato viejo lo ignora.
-      // porMovimiento (16-oct): la parte sale de hacia dónde apunta el teléfono + la insulación por pared. Primero solo el
-      // manager; después de su prueba con cinta se cambia a true. Un aparato viejo lo ignora.
-      laboratorio: esManager(), porMovimiento: esManager() });
+      // porMovimiento (16-oct): MEDIR PRIMERO, el material al final (el cuarto lo da el mapa, la parte el teléfono, y la
+      // insulación y el underlayment salen de 3 preguntas del nivel). Primero solo el manager; después de su prueba se cambia
+      // a true. `trabajo`: esas respuestas se guardan por trabajo y nivel. Un aparato viejo ignora las dos.
+      laboratorio: esManager(), porMovimiento: esManager(), trabajo: tid });
   }catch(e){ avisar('Could not open the measuring camera. ' + msg(e)); return; }
   finally{ try{ if(oyente && oyente.remove) await oyente.remove(); }catch(e){} if(BITACORA_PENDIENTE.length) subirBitacora(tid, null); }
   if(!res || res.cancelled){ if(res && res.error) avisar(res.error); return; }
