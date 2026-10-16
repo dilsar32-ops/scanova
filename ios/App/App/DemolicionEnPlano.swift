@@ -120,6 +120,44 @@ struct DemolicionEnPlano {
         return e
     }
 
+    // ---------------- EL TECHO DEL CUARTO (15 oct, "ahora pruébela para el techo") ----------------
+    // La cara del techo: a la altura del plano de ARKit del techo, centrada en el cuarto, con u a lo largo de la pared
+    // más larga del cuarto (así los huecos salen a escuadra con las paredes y su largo x ancho es el de la cinta).
+    static func caraDelTecho(paredes: [Pared], techoY: Float, acomodo ac: Acomodo2D, telefono: SIMD3<Float>) -> ComparadorDeTecho.Cara? {
+        guard let larga = paredes.max(by: { simd_length($0.b - $0.a) < simd_length($1.b - $1.a) }) else { return nil }
+        let pts = paredes.flatMap { [$0.a, $0.b] }
+        let cx = ((pts.map { $0.x }.min() ?? 0) + (pts.map { $0.x }.max() ?? 0)) / 2
+        let cy = ((pts.map { $0.y }.min() ?? 0) + (pts.map { $0.y }.max() ?? 0)) / 2
+        let c = alAR(SIMD2(cx, cy), ac), a = alAR(larga.a, ac), b = alAR(larga.b, ac)
+        return ComparadorDeTecho.Cara.desde(punto: SIMD3(c.x, techoY, c.y), eje: SIMD3(b.x - a.x, 0, b.y - a.y), telefono: telefono)
+    }
+    // Hasta dónde llega el techo del cuarto, en la cara: la caja de sus paredes; cada lado se afina con el plano de ARKit
+    // de la pared de ese lado si cae a 1 ft o menos (la ubicación sola trae unas pulgadas de error).
+    static func limitesDelTecho(_ cara: ComparadorDeTecho.Cara, paredes: [Pared], acomodo ac: Acomodo2D, planos: [PlanoAR])
+        -> (u: ClosedRange<Float>, v: ClosedRange<Float>)? {
+        var us: [Float] = [], vs: [Float] = []
+        for w in paredes { for q in [w.a, w.b] { let p = alAR(q, ac); let e = cara.enCara(SIMD3(p.x, cara.origen.y, p.y)); us.append(e.x); vs.append(e.y) } }
+        guard var u0 = us.min(), var u1 = us.max(), var v0 = vs.min(), var v1 = vs.max() else { return nil }
+        let unPie: Float = 0.3048
+        var fu0 = Float.infinity, fu1 = Float.infinity, fv0 = Float.infinity, fv1 = Float.infinity
+        let (pu0, pu1, pv0, pv1) = (u0, u1, v0, v1)
+        for pl in planos {
+            var n = SIMD3<Float>(pl.normal.x, 0, pl.normal.z)
+            guard simd_length(n) > 0.3 else { continue }
+            n = simd_normalize(n)
+            let e = cara.enCara(SIMD3(pl.punto.x, cara.origen.y, pl.punto.z))
+            if abs(simd_dot(n, cara.u)) > 0.9 {
+                if abs(e.x - pu0) < min(unPie, fu0) { fu0 = abs(e.x - pu0); u0 = e.x }
+                if abs(e.x - pu1) < min(unPie, fu1) { fu1 = abs(e.x - pu1); u1 = e.x }
+            } else if abs(simd_dot(n, cara.v)) > 0.9 {
+                if abs(e.y - pv0) < min(unPie, fv0) { fv0 = abs(e.y - pv0); v0 = e.y }
+                if abs(e.y - pv1) < min(unPie, fv1) { fv1 = abs(e.y - pv1); v1 = e.y }
+            }
+        }
+        guard u1 > u0 + 0.3, v1 > v0 + 0.3 else { return nil }
+        return (u0...u1, v0...v1)
+    }
+
     // ---------------- 3. EL REPORTE EN LA PARED ----------------
     struct Tramo: Equatable {
         var desde: Float, hasta: Float        // m, medidos desde la esquina `a` de la pared del plano

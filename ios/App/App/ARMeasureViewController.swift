@@ -8584,6 +8584,14 @@ extension ARMeasureViewController {
             let ac = ctx.ac
             func enPlano(_ u: Float) -> SIMD2<Double> { let w = cara.alMundo(SIMD2(u, 0)); return DemolicionEnPlano.alPlano(SIMD2(w.x, w.z), ac) }
             m.cortes = lab.resultado.area > 0 ? lab.resultado.tramos.map { (enPlano($0.uIni), enPlano($0.uFin)) } : []
+        } else if lab.activo, let tt = lab.techo, let ac = tt.ac {
+            // El techo: cada hueco como un rectángulo en el plano.
+            m.resaltada = nil
+            func enPlano(_ u: Float, _ v: Float) -> SIMD2<Double> { let w = tt.cara.alMundo(SIMD2(u, v)); return DemolicionEnPlano.alPlano(SIMD2(w.x, w.z), ac) }
+            m.cortes = lab.resultadoTecho.huecos.flatMap { h -> [(SIMD2<Double>, SIMD2<Double>)] in
+                let a = enPlano(h.u0, h.v0), b = enPlano(h.u1, h.v0), c = enPlano(h.u1, h.v1), d = enPlano(h.u0, h.v1)
+                return [(a, b), (b, c), (c, d), (d, a)]
+            }
         } else if m.resaltada != nil || !m.cortes.isEmpty { m.resaltada = nil; m.cortes = [] }
         let senas = forma?.senas ?? (marco.map { cuartosDelMarco($0).flatMap { $0.senas } } ?? [])
         if m.cuarto != roomName || m.paredes.count != fuertes.count || m.otras.count != otras.count {
@@ -9538,8 +9546,8 @@ extension ARMeasureViewController {
             roomName = "Living Room"; nueva.cuartoVisto = roomName
             let paso = maqueta
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.maquetaLaboratorio(paso) }
-        case 18, 19:
-            // El laboratorio CON el plano (16 oct): la cocina de 14 x 12 ft al lado de la sala; su pared sur (la de la
+        case 18, 19, 20:
+            // El laboratorio CON el plano (16 oct); 20 = el techo de la cocina con un hueco de 6 x 4 ft (15 oct): la cocina de 14 x 12 ft al lado de la sala; su pared sur (la de la
             // grabación de la maqueta 11) es de afuera. Ya ubicado. 18 = midiendo; 19 = apuntando, antes de fijar.
             func w(_ a: Double, _ b: Double, _ c: Double, _ d: Double, _ e: Bool) -> UbicadorEnPlano.ParedPlano {
                 UbicadorEnPlano.ParedPlano(seg: UbicadorEnPlano.Segmento(a: SIMD2(a, b), b: SIMD2(c, d)), exterior: e) }
@@ -9950,6 +9958,20 @@ fileprivate final class LabDemolicion {
     var reporte: DemolicionEnPlano.Reporte?
     var ultimasEsquinas: CFTimeInterval = 0
     var fijadaDesde = Date.distantPast
+    // EL TECHO (15 oct, "ahora pruébela para el techo"): el techo del cuarto, con su propio comparador.
+    var techo: TechoDelLab?
+    var comparadorTecho = ComparadorDeTecho()               // SOLO se toca dentro de `cola`
+    var resultadoTecho = ComparadorDeTecho.Resultado()
+    var capaTecho: SCNNode?
+    var fijada: Bool { cara != nil || techo != nil }
+}
+
+// El techo que se está midiendo en el laboratorio (con el plano: su cuarto y hasta dónde llegan sus paredes).
+fileprivate struct TechoDelLab {
+    var cuarto: String?
+    var cara: ComparadorDeTecho.Cara
+    var limites: (u: ClosedRange<Float>, v: ClosedRange<Float>)?
+    var ac: DemolicionEnPlano.Acomodo2D?
 }
 
 // La pared del plano que se está midiendo en el laboratorio.
@@ -10045,6 +10067,8 @@ extension ARMeasureViewController {
         L.generacion += 1
         L.cara = nil; L.anclaID = nil; L.caraLocal = nil; L.ultimoOrigen = nil
         L.enPlano = nil; L.apuntada = nil; L.reporte = nil
+        L.techo = nil; L.resultadoTecho = ComparadorDeTecho.Resultado(); L.capaTecho?.removeFromParentNode(); L.capaTecho = nil
+        L.cola.async { L.comparadorTecho.reiniciar() }
         nueva.minimapa.resaltada = nil; nueva.minimapa.cortes = []
         L.cola.async { L.comparador.reiniciar() }
         L.capa?.removeFromParentNode(); L.capa = nil
@@ -10107,12 +10131,26 @@ extension ARMeasureViewController {
     fileprivate func pintarLaboratorio() {
         let L = lab, r = L.resultado
         guard L.activo else { return }
-        if L.cara == nil && L.modoPlano {
-            L.numero.text = "Apunte a la pared"
+        if let tt = L.techo {
+            let rt = L.resultadoTecho
+            L.numero.text = String(format: "%.1f SF", rt.area / (0.3048 * 0.3048))
+            var d = "Techo" + (tt.cuarto.map { " · \($0)" } ?? "")
+            if let v = rt.techoVisto { d += String(format: " · visto %.0f%%", v * 100) }
+            if rt.huecos.isEmpty { d += "\nTodavía no veo huecos: camine despacio mirando el techo." }
+            for (i, h) in rt.huecos.prefix(2).enumerated() {
+                d += "\nHueco \(i + 1): \(Self.piesConComillas(h.ancho)) × \(Self.piesConComillas(h.fondo)) · " + String(format: "%.1f SF", h.area / (0.3048 * 0.3048))
+                let paredes = h.hastaPared.filter { $0 }.count
+                if paredes > 0 { d += paredes == 1 ? " · llega a la pared" : " · llega a \(paredes) paredes" }
+                if h.atico { d += " · ático" }
+            }
+            if rt.huecos.count > 2 { d += "  (+\(rt.huecos.count - 2) más)" }
+            L.detalle.text = d
+        } else if L.cara == nil && L.modoPlano {
+            L.numero.text = "Apunte a la pared o al techo"
             if let t = L.apuntadaTexto {
                 L.detalle.text = L.paredDesconocida ? t + " Apunte a otra, o toque Fijar a mano." : t + "\nQuédese apuntando un momento…"
             } else {
-                L.detalle.text = "Ya sé dónde está en el plano. Apunte la mira a la pared que va a medir y quédese un segundo. Luego camine despacio de una esquina a la otra, a 3-5 ft."
+                L.detalle.text = "Ya sé dónde está en el plano. Apunte la mira a la pared (o al techo) que va a medir y quédese un segundo. Luego camine despacio a lo largo, a 3-5 ft."
             }
         } else if L.cara == nil {
             L.numero.text = "Fije la pared"
@@ -10156,7 +10194,7 @@ extension ARMeasureViewController {
             L.grabando.text = n > 0 ? "\(n) grabación\(n == 1 ? "" : "es") sin guardar" : "Grabación guardada"
         } else { L.grabando.text = " " }
         // Los botones (cuadrícula pareja), solo cuando cambia lo que se puede hacer.
-        let firma = "\(L.cara != nil)|\(L.archivos.count)|\(L.grabadora != nil)|\(L.modoPlano)|\(L.paredDesconocida)"
+        let firma = "\(L.fijada)|\(L.archivos.count)|\(L.grabadora != nil)|\(L.modoPlano)|\(L.paredDesconocida)"
         guard firma != L.firmaBotones else { return }
         L.firmaBotones = firma
         L.botones.arrangedSubviews.forEach { $0.removeFromSuperview() }
@@ -10165,13 +10203,13 @@ extension ARMeasureViewController {
             let l = LosetaCamara(icono: icono, titulo: t, sub: nil, extra: nil, etiqueta: nil, centrada: true, alto: 54)
             l.marcada = marcada; l.accion = accion; losetas.append(l)
         }
-        if L.cara == nil && L.modoPlano {
+        if !L.fijada && L.modoPlano {
             // Con plano la pared se escoge sola; a mano solo si apunta a una pared que el plano no tiene.
             if L.paredDesconocida { loseta("scope", "Fijar a mano") { [weak self] in self?.fijarPared() } }
-        } else if L.cara == nil {
+        } else if !L.fijada {
             loseta("scope", "Fijar pared", marcada: true) { [weak self] in self?.fijarPared() }
         } else {
-            loseta("arrow.right.square", "Otra pared") { [weak self] in self?.otraPared() }
+            loseta("arrow.right.square", L.techo != nil ? "Medir otra" : "Otra pared") { [weak self] in self?.otraPared() }
         }
         if !L.archivos.isEmpty || L.grabadora != nil {
             loseta("square.and.arrow.up", "Guardar grabación") { [weak self] in self?.guardarGrabacion() }
@@ -10186,8 +10224,23 @@ extension ARMeasureViewController {
         let t = ProcessInfo.processInfo.thermalState
         if t == .critical { return "El teléfono está muy caliente: la prueba se pausó." }
         if t == .serious { return "El teléfono está caliente: voy más despacio." }
-        guard L.cara != nil else { return nil }
+        guard L.fijada else { return nil }
         if L.luz < 150 { return "Poca luz." }
+        if L.techo != nil {
+            if L.lejos > 0.6 { return "Más cerca del techo." }
+            for a in L.resultadoTecho.alarmas {
+                switch a {
+                case .tapado: return "Algo cuelga delante del techo (abanico, lámpara): barra alrededor."
+                case .sinOrilla: return "Hay un hueco sin drywall alrededor: no cuenta (¿nunca tuvo?)."
+                case .sinVigas: return "No veo las vigas de un hueco grande: no cuenta."
+                case .ambiguo: return "Se ve la cara de las vigas o insulación: eso no cuenta solo."
+                }
+            }
+            if let v = L.resultadoTecho.techoVisto, v < 0.85, Date().timeIntervalSince(L.fijadaDesde) > 6 {
+                return String(format: "Visto %.0f%% del techo: camine por donde falta (sale en el mapita).", v * 100)
+            }
+            return nil
+        }
         if !L.pisoVisto { return "Apunte un momento al piso frente a la pared." }
         if L.lejos > 0.6 { return "Más cerca: de 3 a 5 ft de la pared." }
         for a in L.resultado.alarmas {
@@ -10232,7 +10285,21 @@ extension ARMeasureViewController {
         var golpe: ARRaycastResult?
         if let q = sceneView.raycastQuery(from: centro, allowing: .existingPlaneGeometry, alignment: .vertical) { golpe = sceneView.session.raycast(q).first }
         if golpe == nil, let q = sceneView.raycastQuery(from: centro, allowing: .estimatedPlane, alignment: .vertical) { golpe = sceneView.session.raycast(q).first }
-        guard let g = golpe else { avisoLaboratorio("No veo una pared en la mira. Apunte al drywall entero de arriba del corte."); return }
+        guard let g = golpe else {
+            // Sin pared en la mira y mirando para arriba: el techo, a mano (sin plano no se saben sus paredes).
+            let adelante = -SIMD3<Float>(frame.camera.transform.columns.2.x, frame.camera.transform.columns.2.y, frame.camera.transform.columns.2.z)
+            let camY = frame.camera.transform.columns.3.y
+            if adelante.y > 0.5, let q = sceneView.raycastQuery(from: centro, allowing: .estimatedPlane, alignment: .horizontal),
+               let gt = sceneView.session.raycast(q).first(where: { $0.worldTransform.columns.3.y > camY + 0.4 }) {
+                let p = SIMD3<Float>(gt.worldTransform.columns.3.x, gt.worldTransform.columns.3.y, gt.worldTransform.columns.3.z)
+                let derecha = SIMD3<Float>(frame.camera.transform.columns.0.x, 0, frame.camera.transform.columns.0.z)
+                let tel = SIMD3<Float>(frame.camera.transform.columns.3.x, camY, frame.camera.transform.columns.3.z)
+                ponerTecho(TechoDelLab(cuarto: nil, cara: ComparadorDeTecho.Cara.desde(punto: p, eje: derecha, telefono: tel), limites: nil, ac: nil), t: frame.timestamp)
+                pintarLaboratorio()
+                return
+            }
+            avisoLaboratorio("No veo una pared en la mira. Apunte al drywall entero de arriba del corte."); return
+        }
         let punto = SIMD3<Float>(g.worldTransform.columns.3.x, g.worldTransform.columns.3.y, g.worldTransform.columns.3.z)
         // La normal: la del ancla de la pared si la hay (la del plano de ARKit), si no la del golpe.
         var t = g.worldTransform
@@ -10296,6 +10363,9 @@ extension ARMeasureViewController {
     // Lo que se apunta con la mira: ¿qué pared del plano es? Un segundo quieto en la misma = se fija.
     private func apuntarParedDelPlano(_ frame: ARFrame, ac: DemolicionEnPlano.Acomodo2D) {
         let L = lab
+        // Mirando para arriba (más de 30°): es el techo.
+        let adelante = -SIMD3<Float>(frame.camera.transform.columns.2.x, frame.camera.transform.columns.2.y, frame.camera.transform.columns.2.z)
+        if adelante.y > 0.5 { apuntarTechoDelPlano(frame, ac: ac); return }
         let centro = CGPoint(x: sceneView.bounds.midX, y: sceneView.bounds.midY)
         var golpe: ARRaycastResult?
         if let q = sceneView.raycastQuery(from: centro, allowing: .existingPlaneGeometry, alignment: .vertical) { golpe = sceneView.session.raycast(q).first }
@@ -10343,6 +10413,74 @@ extension ARMeasureViewController {
         }
         pintarLaboratorio()
     }
+    // EL TECHO del cuarto donde está: apuntando para arriba a un plano horizontal de ARKit arriba del teléfono, un segundo.
+    private func apuntarTechoDelPlano(_ frame: ARFrame, ac: DemolicionEnPlano.Acomodo2D) {
+        let L = lab
+        let camY = frame.camera.transform.columns.3.y
+        let centro = CGPoint(x: sceneView.bounds.midX, y: sceneView.bounds.midY)
+        var golpe: ARRaycastResult?
+        if let q = sceneView.raycastQuery(from: centro, allowing: .existingPlaneInfinite, alignment: .horizontal) {
+            golpe = sceneView.session.raycast(q).first { $0.worldTransform.columns.3.y > camY + 0.4 }
+        }
+        guard let g = golpe, let ancla = g.anchor as? ARPlaneAnchor, let cuarto = cuartoDondeEsta() else {
+            if L.apuntadaTexto != nil { L.apuntadaTexto = nil; L.paredDesconocida = false; pintarLaboratorio() }
+            L.apuntada = nil
+            return
+        }
+        let texto = "Techo · \(cuarto)"
+        if texto != L.apuntadaTexto || L.paredDesconocida { L.apuntadaTexto = texto; L.paredDesconocida = false; pintarLaboratorio() }
+        if let ap = L.apuntada, ap.indice == -1, ap.ancla == ancla.identifier {
+            if Date().timeIntervalSince(ap.desde) >= 1.0 { fijarTechoDelPlano(cuarto, ancla: ancla, frame: frame, ac: ac) }
+        } else { L.apuntada = (-1, ancla.identifier, Date()) }
+    }
+    private func fijarTechoDelPlano(_ cuarto: String, ancla: ARPlaneAnchor, frame: ARFrame, ac: DemolicionEnPlano.Acomodo2D) {
+        let paredes = paredesParaLab().filter { $0.cuarto.lowercased() == cuarto.lowercased() }.map { $0.pared }
+        let tel = SIMD3<Float>(frame.camera.transform.columns.3.x, frame.camera.transform.columns.3.y, frame.camera.transform.columns.3.z)
+        let techoY = (ancla.transform * SIMD4<Float>(ancla.center, 1)).y
+        guard let cara = DemolicionEnPlano.caraDelTecho(paredes: paredes, techoY: techoY, acomodo: ac, telefono: tel) else { return }
+        let planos = frame.anchors.compactMap { $0 as? ARPlaneAnchor }.filter { $0.alignment == .vertical }.map { Self.planoAR($0) }
+        let lim = DemolicionEnPlano.limitesDelTecho(cara, paredes: paredes, acomodo: ac, planos: planos)
+        lab.apuntada = nil; lab.apuntadaTexto = nil
+        ponerTecho(TechoDelLab(cuarto: cuarto, cara: cara, limites: lim, ac: ac), t: frame.timestamp)
+        pintarLaboratorio()
+    }
+    private func ponerTecho(_ t0: TechoDelLab, t: TimeInterval) {
+        let L = lab
+        L.generacion += 1
+        L.cara = nil; L.anclaID = nil; L.caraLocal = nil; L.enPlano = nil; L.reporte = nil
+        L.techo = t0
+        L.cola.async { L.comparadorTecho.reiniciar() }
+        L.pared += 1
+        L.fijadaDesde = Date()
+        L.resultadoTecho = ComparadorDeTecho.Resultado()
+        let c = ComparadorDeDemolicion.Cara(origen: t0.cara.origen, u: t0.cara.u, v: t0.cara.v, n: t0.cara.n)
+        empezarGrabacion(cara: c, t: t, evento: "fijar-techo")
+    }
+    // La capa naranja sobre el techo (los huecos que cuentan).
+    private func ponerCapaTecho(_ img: (ancho: Int, alto: Int, rgba: [UInt8]), cara: ComparadorDeTecho.Cara) {
+        let L = lab
+        guard let prov = CGDataProvider(data: Data(img.rgba) as CFData),
+              let cg = CGImage(width: img.ancho, height: img.alto, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: img.ancho * 4,
+                               space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue),
+                               provider: prov, decode: nil, shouldInterpolate: false, intent: .defaultIntent) else { return }
+        if L.capaTecho == nil {
+            let lado = CGFloat(2 * ComparadorDeTecho.radio)
+            let plano = SCNPlane(width: lado, height: lado)
+            let mat = SCNMaterial()
+            mat.lightingModel = .constant; mat.isDoubleSided = true
+            mat.diffuse.magnificationFilter = .nearest; mat.writesToDepthBuffer = false
+            plano.materials = [mat]
+            let nodo = SCNNode(geometry: plano)
+            nodo.renderingOrder = 100
+            sceneView.scene.rootNode.addChildNode(nodo)
+            L.capaTecho = nodo
+        }
+        L.capaTecho?.geometry?.firstMaterial?.diffuse.contents = UIImage(cgImage: cg)
+        var m = matrix_identity_float4x4
+        m.columns.0 = SIMD4(cara.u, 0); m.columns.1 = SIMD4(cara.v, 0); m.columns.2 = SIMD4(cara.n, 0); m.columns.3 = SIMD4(cara.origen + cara.n * 0.004, 1)
+        L.capaTecho?.simdTransform = m
+    }
+
     // Las esquinas (afinadas con los planos de ARKit de las paredes de al lado) y las puertas/ventanas, cada segundo.
     private func actualizarEsquinas(_ frame: ARFrame, forzar: Bool = false) {
         let L = lab
@@ -10365,6 +10503,8 @@ extension ARMeasureViewController {
         L.generacion += 1
         L.cara = nil; L.anclaID = nil; L.caraLocal = nil; L.ultimoOrigen = nil
         L.enPlano = nil; L.apuntada = nil; L.apuntadaTexto = nil; L.reporte = nil
+        L.techo = nil; L.resultadoTecho = ComparadorDeTecho.Resultado(); L.capaTecho?.removeFromParentNode(); L.capaTecho = nil
+        L.cola.async { L.comparadorTecho.reiniciar() }
         nueva.minimapa.resaltada = nil; nueva.minimapa.cortes = []
         L.cola.async { L.comparador.reiniciar() }
         L.capa?.removeFromParentNode(); L.capa = nil
@@ -10375,6 +10515,13 @@ extension ARMeasureViewController {
     // La pared se movió en el mapa (el ancla brincó más de 1 in) o se perdió el rastreo: los votos ya no cuadran.
     private func reiniciarPared(_ porque: String) {
         let L = lab
+        if L.techo != nil {
+            L.generacion += 1
+            L.cola.async { L.comparadorTecho.reiniciar() }
+            L.resultadoTecho = ComparadorDeTecho.Resultado()
+            avisoLaboratorio(porque.replacingOccurrences(of: "esta pared", with: "este techo"))
+            return
+        }
         guard let cara = L.cara else { return }
         L.generacion += 1
         L.cola.async { L.comparador.reiniciar() }
@@ -10396,7 +10543,7 @@ extension ARMeasureViewController {
             if let d = try? u.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate, d < ayer { try? fm.removeItem(at: u) }
         }
     }
-    private func empezarGrabacion(cara: ComparadorDeDemolicion.Cara, t: TimeInterval) {
+    private func empezarGrabacion(cara: ComparadorDeDemolicion.Cara, t: TimeInterval, evento: String = "fijar") {
         let L = lab
         cerrarGrabacion()
         let f = DateFormatter(); f.dateFormat = "yyyyMMdd-HHmmss"
@@ -10407,7 +10554,7 @@ extension ARMeasureViewController {
         let meta: [String: Any] = ["modelo": modelo, "ios": UIDevice.current.systemVersion, "paso": 2, "confianzaMin": 2,
                                    "pared": L.pared, "creado": ISO8601DateFormatter().string(from: Date()), "version": 1]
         guard let g = GrabadoraDeBarrido(url: url, meta: meta) else { return }
-        g.evento(t: t, ["evento": "fijar", "cara": LectorDeBarrido.caraComoLista(cara)])
+        g.evento(t: t, ["evento": evento, "cara": LectorDeBarrido.caraComoLista(cara)])
         L.grabadora = g
         L.archivos.append(url)
     }
@@ -10451,7 +10598,7 @@ extension ARMeasureViewController {
             nueva.mira.estado = .lista
         } else {
             nueva.mira.estado = .buscando
-            if L.cara != nil {
+            if L.fijada {
                 if let d = L.sinRastreoDesde {
                     if Date().timeIntervalSince(d) > 0.5 { L.sinRastreoDesde = nil; reiniciarPared("Se perdió el rastreo: empiezo esta pared otra vez.") }
                 } else { L.sinRastreoDesde = Date() }
@@ -10462,11 +10609,13 @@ extension ARMeasureViewController {
         if !planoPorCuarto.isEmpty { ubicarseEnElPlano(); pintarMinimapa() }
         let ac = acomodoParaLab()
         if (ac != nil) != L.modoPlano { L.modoPlano = ac != nil; pintarLaboratorio() }
-        if L.cara == nil, let ac = ac { apuntarParedDelPlano(frame, ac: ac) }
-        guard var cara = L.cara else { return }
+        if !L.fijada, let ac = ac { apuntarParedDelPlano(frame, ac: ac) }
+        let techo = L.techo
+        guard techo != nil || L.cara != nil else { return }
+        var cara = L.cara ?? ComparadorDeDemolicion.Cara(origen: techo!.cara.origen, u: techo!.cara.u, v: techo!.cara.v, n: techo!.cara.n)
         let tel = SIMD3<Float>(frame.camera.transform.columns.3.x, frame.camera.transform.columns.3.y, frame.camera.transform.columns.3.z)
         // La cara viaja con su ancla (ARKit la corrige mientras afina el mapa); un brinco de más de 1 in = empezar otra vez.
-        if let id = L.anclaID, let loc = L.caraLocal, let a = frame.anchors.first(where: { $0.identifier == id }) {
+        if techo == nil, let id = L.anclaID, let loc = L.caraLocal, let a = frame.anchors.first(where: { $0.identifier == id }) {
             let o = a.transform * loc.o, nn = a.transform * loc.n
             if let c = ComparadorDeDemolicion.Cara.desde(punto: SIMD3(o.x, o.y, o.z), normal: SIMD3(nn.x, nn.y, nn.z), telefono: tel) {
                 if let u = L.ultimoOrigen, simd_distance(u, c.origen) > 0.0254 {
@@ -10521,7 +10670,9 @@ extension ARMeasureViewController {
         L.cola.async { [weak self] in
             let pts = ComparadorDeDemolicion.puntos(profundidad: metros, confianza: conf, ancho: w, alto: h, fx: fx, fy: fy, cx: cx, cy: cy,
                                                     camaraAMundo: pose, paso: 2, confianzaMin: 2)
-            L.comparador.votar(camara: SIMD3(pose.columns.3.x, pose.columns.3.y, pose.columns.3.z), puntos: pts, cara: cara)
+            let camPos = SIMD3<Float>(pose.columns.3.x, pose.columns.3.y, pose.columns.3.z)
+            if let tt = techo { L.comparadorTecho.votar(camara: camPos, puntos: pts, cara: tt.cara) }
+            else { L.comparador.votar(camara: camPos, puntos: pts, cara: cara) }
             if let g = grab, !g.cerrada {
                 g.profundidad(t: t, ancho: w, alto: h, metros: metros, confianza: conf, pose: pose, fx: fx, fy: fy, cx: cx, cy: cy, extra: extra)
                 if let s = suave {
@@ -10530,6 +10681,21 @@ extension ARMeasureViewController {
                 }
                 if let p = planos { g.planos(t: t, p) }
                 if let f = foto, let jpg = UIImage(cgImage: f).jpegData(compressionQuality: 0.5) { g.foto(t: t, jpeg: jpg) }
+            }
+            // EL TECHO: sus huecos (hasta las paredes del cuarto si se saben).
+            if let tt = techo {
+                let rt = L.comparadorTecho.resultado(limites: tt.limites)
+                let imgT = pintar ? L.comparadorTecho.pintar(rt, px: 2) : nil
+                let lejosT = L.comparadorTecho.ultimoLejos
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    L.procesando = false
+                    guard L.activo, gen == L.generacion else { return }
+                    L.resultadoTecho = rt; L.lejos = lejosT; L.pisoVisto = true
+                    if let i = imgT { self.ponerCapaTecho(i, cara: tt.cara) }
+                    self.pintarLaboratorio()
+                }
+                return
             }
             // Con la pared del plano: sus esquinas, sus puertas y ventanas, y el reporte desde la esquina de la izquierda.
             let lim = ctx?.esquinas?.limites
@@ -10621,7 +10787,19 @@ extension ARMeasureViewController {
     // Documents/maqueta-barrido.scb (la que deja tests/demolicion_test.sh). 11 = después de barrer; 12 = recién entrando.
     fileprivate func maquetaLaboratorio(_ paso: Int) {
         entrarLaboratorio()
-        if paso == 18 || paso == 19 { nueva.minimapa.telefono = SIMD2(27, 6); nueva.minimapa.mirando = SIMD2(0, -1) }
+        if paso == 18 || paso == 19 || paso == 20 { nueva.minimapa.telefono = SIMD2(27, 6); nueva.minimapa.mirando = SIMD2(0, -1) }
+        if paso == 20, let ac = acomodoParaLab() {
+            // El techo de la cocina (x 0-14 ft, z 0-12 ft en ARKit) con un hueco de 6 x 4 ft a 5 ft y 4 ft de las paredes.
+            let L = lab, pie: Float = 0.3048
+            let cara = ComparadorDeTecho.Cara.desde(punto: SIMD3(7 * pie, 8 * pie, 6 * pie), eje: SIMD3(1, 0, 0), telefono: SIMD3(7 * pie, 1.2, 6 * pie))
+            L.techo = TechoDelLab(cuarto: "Kitchen", cara: cara, limites: ((-7 * pie)...(7 * pie), (-6 * pie)...(6 * pie)), ac: ac)
+            var r = ComparadorDeTecho.Resultado()
+            r.huecos = [ComparadorDeTecho.Hueco(u0: -2 * pie, u1: 4 * pie, v0: -2 * pie, v1: 2 * pie, area: 24 * pie * pie, vigas: 4, separacion: 16, atico: false, hastaPared: [false, false, false, false])]
+            r.area = 24 * pie * pie; r.techoVisto = 0.93
+            L.resultadoTecho = r; L.modoPlano = true; L.fijadaDesde = Date(); L.firmaBotones = ""
+            pintarLaboratorio(); pintarMinimapa()
+            return
+        }
         if paso == 19 {
             do {
                 let L = lab

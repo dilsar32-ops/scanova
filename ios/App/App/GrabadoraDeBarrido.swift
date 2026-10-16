@@ -208,6 +208,7 @@ extension LectorDeBarrido {
     static func repetir(_ registros: [Registro]) -> [Pared] {
         var paso = 2, confMin: UInt8 = 2
         var paredes: [Pared] = []
+        var techo = false
         for r in registros {
             switch r {
             case .meta(let m):
@@ -215,11 +216,14 @@ extension LectorDeBarrido {
                 if let c = m["confianzaMin"] as? Int { confMin = UInt8(c) }
             case .evento(let e):
                 let que = e["evento"] as? String ?? ""
-                if que == "fijar", let c = cara(e) { paredes.append(Pared(cara: c)) }
+                if que == "fijar", let c = cara(e) { paredes.append(Pared(cara: c)); techo = false }
+                // Un TECHO (15 oct): su propio comparador (ComparadorDeTecho); aquí solo se cuida que sus cuadros no caigan
+                // en la pared anterior.
+                if que == "fijar-techo" { techo = true }
                 if que == "reiniciar", var p = paredes.popLast() { p.comparador.reiniciar(); p.cuadros = 0; paredes.append(p) }
                 if que == "resumen", var p = paredes.popLast() { p.resumenTelefono = e; paredes.append(p) }
             case .cuadro(let c):
-                guard !c.suavizada, var p = paredes.popLast() else { continue }
+                guard !c.suavizada, !techo, var p = paredes.popLast() else { continue }
                 let caraAhora = cara(c.extra) ?? p.cara
                 let pts = ComparadorDeDemolicion.puntos(profundidad: c.metros, confianza: c.confianza, ancho: c.ancho, alto: c.alto,
                                                         fx: c.fx, fy: c.fy, cx: c.cx, cy: c.cy, camaraAMundo: c.pose,

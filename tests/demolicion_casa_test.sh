@@ -6,6 +6,6 @@
 set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 OUT="$(mktemp -d -t casa)"
-xcrun swiftc -O -o "$OUT/casa" "$DIR/../ios/App/App/ComparadorDeDemolicion.swift" "$DIR/../ios/App/App/DemolicionEnPlano.swift" \
+xcrun swiftc -O -o "$OUT/casa" "$DIR/../ios/App/App/ComparadorDeDemolicion.swift" "$DIR/../ios/App/App/DemolicionEnPlano.swift" "$DIR/../ios/App/App/ComparadorDeTecho.swift" \
   "$DIR/demolicion/escena.swift" "$DIR/demolicion_casa/casa.swift" "$DIR/demolicion_casa/main.swift" 2>&1 | grep -E "error" | head -10 || true
 "$OUT/casa" prueba
