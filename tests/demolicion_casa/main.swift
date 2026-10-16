@@ -570,3 +570,96 @@ if modo == "dibujo" {
     let d = try! JSONSerialization.data(withJSONObject: salida, options: [.prettyPrinted])
     FileManager.default.createFile(atPath: CommandLine.arguments[2], contents: d)
 }
+
+// ================== ESQUINAS DE AFUERA (15 oct, su pregunta: "hay esquinas adentro o como salidos") ==================
+// Un cuarto en L (la esquina de adentro de la L es una esquina DE AFUERA vista desde el cuarto) y una pared con un
+// cajón que sale (un chase de 3 ft que sobresale 1 ft): esquinas que salen a los dos lados y paredes cortitas de 1 ft.
+func pared(_ nombre: String, _ a: SIMD2<Float>, _ b: SIMD2<Float>, _ n: SIMD2<Float>) -> ParedCasa {
+    ParedCasa(nombre: nombre, a: a * pie, b: b * pie, n: n)
+}
+func cuartoL() -> Casa {
+    Casa(paredes: [pared("sur", SIMD2(0, 0), SIMD2(14, 0), SIMD2(0, 1)), pared("este", SIMD2(14, 0), SIMD2(14, 6), SIMD2(-1, 0)),
+                   pared("A", SIMD2(14, 6), SIMD2(8, 6), SIMD2(0, -1)), pared("B", SIMD2(8, 6), SIMD2(8, 12), SIMD2(-1, 0)),
+                   pared("norte", SIMD2(8, 12), SIMD2(0, 12), SIMD2(0, -1)), pared("oeste", SIMD2(0, 12), SIMD2(0, 0), SIMD2(1, 0))])
+}
+func cuartoConCajon() -> Casa {
+    Casa(paredes: [pared("sur1", SIMD2(0, 0), SIMD2(5, 0), SIMD2(0, 1)), pared("lado1", SIMD2(5, 0), SIMD2(5, 1), SIMD2(-1, 0)),
+                   pared("frente", SIMD2(5, 1), SIMD2(8, 1), SIMD2(0, 1)), pared("lado2", SIMD2(8, 1), SIMD2(8, 0), SIMD2(1, 0)),
+                   pared("sur2", SIMD2(8, 0), SIMD2(14, 0), SIMD2(0, 1)), pared("este", SIMD2(14, 0), SIMD2(14, 12), SIMD2(-1, 0)),
+                   pared("norte", SIMD2(14, 12), SIMD2(0, 12), SIMD2(0, -1)), pared("oeste", SIMD2(0, 12), SIMD2(0, 0), SIMD2(1, 0))])
+}
+if modo == "esquinas" || modo == "prueba-esquinas" {
+    print("\nESQUINAS DE AFUERA (3 semillas por pared)")
+    // `salida`: qué puntas son esquina DE AFUERA (ahí la cuadrilla puede pasar de largo frente a la pared).
+    struct Caso2 { var nombre: String; var casa: Casa; var ip: Int; var verdad: Corte; var salida: (a: Bool, b: Bool) = (false, false) }
+    var cL = cuartoL(); cL.paredes[2].cortes = [Corte(x0: 0, x1: 6 * pie, alto: 2 * pie)]; cL.paredes[3].cortes = [Corte(x0: 0, x1: 3 * pie, alto: 2 * pie)]
+    var cC = cuartoConCajon()
+    let unPie: Float = 1 * pie
+    cC.paredes[0].cortes = [Corte(x0: 0, x1: 5 * pie, alto: unPie)]; cC.paredes[1].cortes = [Corte(x0: 0, x1: 1 * pie, alto: unPie)]
+    cC.paredes[2].cortes = [Corte(x0: 0, x1: 3 * pie, alto: unPie)]; cC.paredes[3].cortes = [Corte(x0: 0, x1: 1 * pie, alto: unPie)]
+    cC.paredes[4].cortes = [Corte(x0: 0, x1: 6 * pie, alto: unPie)]
+    let casos2 = [Caso2(nombre: "L: pared A (6 ft) que termina en la esquina de afuera", casa: cL, ip: 2, verdad: cL.paredes[2].cortes[0], salida: (false, true)),
+                  Caso2(nombre: "L: pared B (6 ft) que empieza en la esquina de afuera", casa: cL, ip: 3, verdad: cL.paredes[3].cortes[0], salida: (true, false)),
+                  Caso2(nombre: "cajón: el frente de 3 ft (esquinas de afuera a los dos lados)", casa: cC, ip: 2, verdad: cC.paredes[2].cortes[0], salida: (true, true)),
+                  Caso2(nombre: "cajón: un lado de 1 ft", casa: cC, ip: 1, verdad: cC.paredes[1].cortes[0], salida: (false, true)),
+                  Caso2(nombre: "cajón: la pared de 5 ft que llega al cajón", casa: cC, ip: 0, verdad: cC.paredes[0].cortes[0])]
+    for k in casos2 {
+        let largo = k.casa.paredes[k.ip].largo
+        var camino = Camino()
+        // En una esquina DE AFUERA la cuadrilla puede pasar de largo frente a la pared (en una de adentro no: hay pared). El
+        // comparador pide que el teléfono se mueva 30 cm o más mirando cada pedazo: parado no cuenta.
+        if k.salida.a { camino.desdeX = -0.5 }
+        if k.salida.b { camino.hastaX = largo + 0.5 }
+        if largo < 2 * pie { camino.distancia = 0.9; if camino.desdeX == nil { camino.desdeX = 0.1 } }
+        if largo < 6 * pie { camino.segundos = 24 }
+        let cc = CasoCasa(nombre: k.nombre, casa: k.casa, camino: camino, verdad: [k.verdad])
+        print("\n" + k.nombre + "   verdad: [\(pies(k.verdad.x0)) → \(pies(k.verdad.x1)), alto \(pies(k.verdad.alto))] · " + String(format: "%.1f SF", (k.verdad.x1 - k.verdad.x0) * k.verdad.alto / (pie * pie)))
+        for s in 1...3 {
+            let r = conPlano(cc, semillaN: 400 + s, ip: k.ip)
+            let areaV = (k.verdad.x1 - k.verdad.x0) * k.verdad.alto
+            print("   \(s): pared \(r.pared.map { String($0) } ?? "—") · " + texto(r.rep) + String(format: " · %+.1f%%", (r.rep.area - areaV) / areaV * 100))
+            if modo == "prueba-esquinas" {
+                ok("\(k.nombre).\(s): escoge la pared correcta", r.pared == k.ip)
+                ok("\(k.nombre).\(s): nunca cobra de más (5%) y mide más del 85%", r.rep.area <= areaV * 1.05 && r.rep.area >= areaV * 0.85, texto(r.rep))
+            }
+        }
+    }
+    if modo == "prueba-esquinas" { print("\n  \(pasan) pasan, \(fallan) fallan"); exit(fallan == 0 ? 0 : 1) }
+}
+if modo == "cajon-col" {
+    var cC = cuartoConCajon()
+    cC.paredes[2].cortes = [Corte(x0: 0, x1: 3 * pie, alto: 1 * pie)]
+    let ip = Int(CommandLine.arguments[2]) ?? 2
+    cC.paredes[0].cortes = [Corte(x0: 0, x1: 5 * pie, alto: 1 * pie)]; cC.paredes[1].cortes = [Corte(x0: 0, x1: 1 * pie, alto: 1 * pie)]
+    cC.paredes[3].cortes = [Corte(x0: 0, x1: 1 * pie, alto: 1 * pie)]; cC.paredes[4].cortes = [Corte(x0: 0, x1: 6 * pie, alto: 1 * pie)]
+    var cam = Camino()
+    if ip == 2 { cam.desdeX = -0.5; cam.hastaX = 3 * pie + 0.5; cam.segundos = 24 }
+    let cc = CasoCasa(nombre: "x", casa: cC, camino: cam, verdad: [cC.paredes[ip].cortes.first ?? Corte(x0: 0, x1: 0, alto: 0)])
+    let r = conPlano(cc, semillaN: Int(CommandLine.arguments.count > 3 ? CommandLine.arguments[3] : "401") ?? 401, ip: ip)
+    guard let comp = r.comp, let e = r.esq else { print("sin comparador"); exit(0) }
+    print("piso \(String(describing: comp.pisoRef)) cuadros \(comp.cuadros) limites \(e.limites) afinadas \(e.afinadas)")
+    let res = comp.resultado(limites: e.limites)
+    print("columnas \(res.columnas.count) colIni \(res.colIni) alarmas \(res.alarmas) tramos \(res.tramos.count) area \(res.area)")
+    var linea = ""
+    var u = e.u.lowerBound - 0.1
+    while u < e.u.upperBound + 0.1 { if let c = C.columnaDe(u) { let k = c - res.colIni; linea += (k >= 0 && k < res.columnas.count) ? letra(res.columnas[k]) : " " }; u += C.celda }
+    print("columnas: " + linea)
+}
+if modo == "cajon-celdas" {
+    var cC = cuartoConCajon()
+    for (i, l) in [(0, 5), (1, 1), (2, 3), (3, 1), (4, 6)] { cC.paredes[i].cortes = [Corte(x0: 0, x1: Float(l) * pie, alto: 1 * pie)] }
+    var cam = Camino(); cam.desdeX = -0.5; cam.hastaX = 3 * pie + 0.5; cam.segundos = 24
+    let cc = CasoCasa(nombre: "x", casa: cC, camino: cam, verdad: [cC.paredes[2].cortes[0]])
+    let r = conPlano(cc, semillaN: 401, ip: 2)
+    let comp = r.comp!, e = r.esq!
+    let r0 = C.renglonDe(comp.pisoRef!)!
+    var u = e.u.lowerBound - 0.06
+    while u < e.u.lowerBound + 0.2 {
+        let c = C.columnaDe(u)!
+        var s = ""
+        for rr in r0..<(r0 + 12) { switch comp.estado(c, rr) { case .noVisto: s += "·"; case .sigue: s += "S"; case .ambiguo: s += "a"; case .cavidad: s += "c"; case .hondo: s += "H"; case .tapado: s += "T" } }
+        var vs = comp.votosDe(C.indice(c, r0 + 4)); let m = C.mediana(&vs)
+        print(String(format: "u-lim %+.1f in  %@   fila4 mediana %.2f (%d votos)", (C.uDeColumna(c) - e.u.lowerBound) / pulg, s, m, vs.count))
+        u += C.celda
+    }
+}

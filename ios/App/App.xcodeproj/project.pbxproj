@@ -43,6 +43,7 @@
 		B4B7A0640C425B9179A4C058 /* GrabadoraDeBarrido.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96D07CBBDFD740506C534FCC /* GrabadoraDeBarrido.swift */; };
 		51D1321B7F339946D3C51AA6 /* ComparadorDeDemolicion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F1C51311387ED35D9905D8E /* ComparadorDeDemolicion.swift */; };
 		F7ED9764421B3394C32BB151 /* DemolicionEnPlano.swift in Sources */ = {isa = PBXBuildFile; fileRef = 738E587B388B70374FC106B0 /* DemolicionEnPlano.swift */; };
+		89C1AF7C791D29D22A488A39 /* MallaDelCuarto.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96DC914F5448013CBCABEBCA /* MallaDelCuarto.swift */; };
 		BC2F25C96706F745059989F5 /* ComparadorDeTecho.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A00528CDE31C4A70F01959D /* ComparadorDeTecho.swift */; };
 		8618750AD8221FA8D6A7FA31 /* ScanKeyframeRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78D41EA4E3A13E6114418293 /* ScanKeyframeRecorder.swift */; };
 /* End PBXBuildFile section */
@@ -86,6 +87,7 @@
 		96D07CBBDFD740506C534FCC /* GrabadoraDeBarrido.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GrabadoraDeBarrido.swift; sourceTree = "<group>"; };
 		4F1C51311387ED35D9905D8E /* ComparadorDeDemolicion.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ComparadorDeDemolicion.swift; sourceTree = "<group>"; };
 		738E587B388B70374FC106B0 /* DemolicionEnPlano.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DemolicionEnPlano.swift; sourceTree = "<group>"; };
+		96DC914F5448013CBCABEBCA /* MallaDelCuarto.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MallaDelCuarto.swift; sourceTree = "<group>"; };
 		4A00528CDE31C4A70F01959D /* ComparadorDeTecho.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ComparadorDeTecho.swift; sourceTree = "<group>"; };
 		78D41EA4E3A13E6114418293 /* ScanKeyframeRecorder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ScanKeyframeRecorder.swift; sourceTree = "<group>"; };
 		F561A886D969696D52525BC0 /* BridgeViewController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BridgeViewController.swift; sourceTree = "<group>"; };
@@ -173,6 +175,7 @@
 				4F1C51311387ED35D9905D8E /* ComparadorDeDemolicion.swift */,
 				738E587B388B70374FC106B0 /* DemolicionEnPlano.swift */,
 				4A00528CDE31C4A70F01959D /* ComparadorDeTecho.swift */,
+				96DC914F5448013CBCABEBCA /* MallaDelCuarto.swift */,
 				78D41EA4E3A13E6114418293 /* ScanKeyframeRecorder.swift */,
 			);
 			path = App;
@@ -328,6 +331,7 @@
 				51D1321B7F339946D3C51AA6 /* ComparadorDeDemolicion.swift in Sources */,
 				F7ED9764421B3394C32BB151 /* DemolicionEnPlano.swift in Sources */,
 				BC2F25C96706F745059989F5 /* ComparadorDeTecho.swift in Sources */,
+				89C1AF7C791D29D22A488A39 /* MallaDelCuarto.swift in Sources */,
 				8618750AD8221FA8D6A7FA31 /* ScanKeyframeRecorder.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -481,7 +485,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = App/Scanova.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 202610164;
+				CURRENT_PROJECT_VERSION = 202610165;
 				DEVELOPMENT_TEAM = SCT9DU64JM;
 				INFOPLIST_FILE = App/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -515,7 +519,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = App/Scanova.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 202610164;
+				CURRENT_PROJECT_VERSION = 202610165;
 				DEVELOPMENT_TEAM = SCT9DU64JM;
 				INFOPLIST_FILE = App/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;

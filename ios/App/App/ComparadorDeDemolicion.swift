@@ -279,8 +279,10 @@ struct ComparadorDeDemolicion {
             if primera != nil { break }
         }
         guard let inicio = primera else {
-            // No arranca ninguna cavidad pegada al piso: ¿qué hay ahí abajo?
-            let arriba = min(Self.renglones - 1, r0 + 12)        // los primeros 2 ft
+            // No arranca ninguna cavidad pegada al piso: ¿qué hay ahí abajo? Se mira el PRIMER pie (16 oct: con los primeros
+            // 2 ft, en un corte de 1 ft entraba el drywall entero de arriba del corte y la columna de la sombra del stud de la
+            // esquina salía "entera": el corte no llegaba a la esquina).
+            let arriba = min(Self.renglones - 1, r0 + 6)         // el primer pie
             var s = 0, a = 0, t = 0, h = 0, cav = 0
             for r in min(r0 + 1, arriba)...arriba {
                 switch estado(c, r) {
@@ -297,8 +299,8 @@ struct ComparadorDeDemolicion {
             // Hay corte más arriba pero lo de abajo no es hueco: no se inventa. Si nada está DELANTE (solo la cara del
             // stud, ambigua), es la tira de un stud y no algo que tapa (casa 3D, 16 oct: partía un corte en dos).
             if cav >= 3 { return (t + tapadas == 0 && a + ambiguas > 0) ? .ambigua : .tapada }
-            if s >= 6 && a <= s { return .entera }
-            if a + s + ambiguas >= 6 { return .ambigua }
+            if s >= 4 && a <= s { return .entera }
+            if a + s + ambiguas >= 4 { return .ambigua }
             return .noVista
         }
         // Para arriba mientras sea cavidad; una caja o un tubo (isla de 6 in o menos) no corta.
@@ -604,6 +606,22 @@ struct ComparadorDeDemolicion {
                 altos.append(contentsOf: colAltos)
             }
             k = f
+        }
+        // En una pared corta solo hay uno o dos studs adentro: si el corte llega a la esquina, el stud de la esquina también
+        // cuenta para el patrón (16 oct, el frente de un cajón de 3 ft).
+        if !res.patronStuds, let l = limites, res.tramos.contains(where: { $0.esquinaIni || $0.esquinaFin }) {
+            var con = studs
+            for t in res.tramos {
+                if t.esquinaIni, l.lowerBound.isFinite { con.append(l.lowerBound + 0.75 * Self.pulgada) }
+                if t.esquinaFin, l.upperBound.isFinite { con.append(l.upperBound - 0.75 * Self.pulgada) }
+            }
+            con.sort()
+            if con.count >= 2 {
+                for k in 1..<con.count {
+                    let d = (con[k] - con[k - 1]) / Self.pulgada
+                    if abs(d - 16) <= 1.5 || abs(d - 24) <= 1.5 { res.patronStuds = true; res.separacionStuds = abs(d - 16) <= 1.5 ? 16 : 24; break }
+                }
+            }
         }
         // Sin patrón de studs no se pinta naranja ni se cuenta (un sótano sin terminar, una puerta, un espejo...).
         let cortado = res.tramos.reduce(Float(0)) { $0 + $1.largo }

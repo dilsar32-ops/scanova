@@ -735,6 +735,9 @@ enum FloorPlanEncoder {
             ])
         }
 
+        // El piso del cuarto: la mediana de la parte de abajo de sus paredes (RoomPlan las da centradas en su alto).
+        let bajos = room.walls.map { $0.transform.columns.3.y - $0.dimensions.y / 2 }.sorted()
+        let pisoY: Float? = bajos.isEmpty ? nil : bajos[bajos.count / 2]
         func encodeOpening(_ surface: CapturedRoom.Surface) -> [String: Any] {
             let p = point2D(surface)
             let sid = surface.identifier.uuidString
@@ -747,6 +750,12 @@ enum FloorPlanEncoder {
             ]
             if let wallId = nearestWallId(to: p, walls: wallLookup) { d["wallId"] = wallId }
             if let dicho = surfaceAnswers[sid] { d["voiceIs"] = dicho }
+            // A qué altura del piso EMPIEZA (15 oct): el antepecho de una ventana (una puerta da ~0). Antes se tiraba; con
+            // él la malla de la casa deja el hueco de la ventana en su lugar y lo demolido sabe dónde empieza el vidrio.
+            if let y0 = pisoY {
+                let abajo = Double(surface.transform.columns.3.y - surface.dimensions.y / 2 - y0) * metersToFeet
+                d["bottomFt"] = (max(0, abajo) * 100).rounded() / 100
+            }
             return d
         }
 

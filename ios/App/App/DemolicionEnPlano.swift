@@ -21,7 +21,7 @@ struct DemolicionEnPlano {
 
     // plano (pies) = R(giro) · (ARKit x,z en pies) + mov — lo mismo que UbicadorEnPlano.Acomodo.
     struct Acomodo2D { var giro: Double; var mov: SIMD2<Double> }
-    struct Pared { var a: SIMD2<Double>; var b: SIMD2<Double>; var exterior: Bool }      // pies, en el plano
+    struct Pared { var a: SIMD2<Double>; var b: SIMD2<Double>; var exterior: Bool; var alto: Double = 0 }   // pies, en el plano (alto 0 = no se sabe)
     struct PlanoAR { var punto: SIMD3<Float>; var normal: SIMD3<Float> }                  // un plano vertical de ARKit
     struct Abertura { var centro: SIMD2<Double>; var ancho: Double; var esPuerta: Bool }  // pies, en el plano (sobre la pared)
     static let piesPorMetro = 3.28084
@@ -164,6 +164,19 @@ struct DemolicionEnPlano {
         var alto: Float                       // m
         var area: Float                       // m²
         var hastaEsquinaA: Bool, hastaEsquinaB: Bool
+        var estandar = false                  // el alto se llevó a una medida de corte (1, 2, 3, 4, 6 ft o toda la pared)
+        var altoMedido: Float = 0             // lo que midió el láser antes de llevarlo a la medida de corte
+    }
+
+    // LAS MEDIDAS DE CORTE (16 oct, lo que dijo: "en water damage siempre se corta un pie; si no, toda la pared, o 2, 4 o
+    // 6 pies"). La cuadrilla corta con línea a esas alturas: si el láser midió a 1 in o menos de una, el alto ES esa. Si no
+    // está cerca de ninguna, se queda lo medido (alguien cortó a otra altura). El área de un corte así es largo x alto.
+    static let alturasDeCorte: [Float] = [12, 24, 36, 48, 72].map { $0 * 0.0254 }
+    static func alturaDeCorte(_ h: Float, altoPared: Float?) -> Float? {
+        var lista = alturasDeCorte
+        if let a = altoPared, a > 1.5 { lista.append(a) }
+        guard let mejor = lista.min(by: { abs($0 - h) < abs($1 - h) }), abs(mejor - h) <= 1.0 * 0.0254 else { return nil }
+        return mejor
     }
     struct Reporte {
         var tramos: [Tramo] = []
@@ -210,7 +223,6 @@ struct DemolicionEnPlano {
         rep.largoPared = e.u.upperBound - e.u.lowerBound
         rep.exterior = pared.exterior
         rep.alarmas = res.alarmas
-        rep.area = res.area
         let aEsMenor = desdeLaIzquierda || abs(e.uDeA - e.u.lowerBound) <= abs(e.uDeA - e.u.upperBound)
         func desdeA(_ u: Float) -> Float { aEsMenor ? u - e.u.lowerBound : e.u.upperBound - u }
         if res.area > 0 {
@@ -218,6 +230,11 @@ struct DemolicionEnPlano {
                 let x0 = desdeA(t.uIni), x1 = desdeA(t.uFin)
                 // Desde la esquina del plano: sin afinar puede salir una pulgada antes de 0 o después del largo.
                 let lo = max(0, min(x0, x1)), hi = min(rep.largoPared, max(x0, x1))
+                if let std = alturaDeCorte(t.alto, altoPared: pared.alto > 0 ? Float(pared.alto * 0.3048) : nil) {
+                    return Tramo(desde: lo, hasta: hi, alto: std, area: (t.uFin - t.uIni) * std,
+                                 hastaEsquinaA: aEsMenor ? t.esquinaIni : t.esquinaFin, hastaEsquinaB: aEsMenor ? t.esquinaFin : t.esquinaIni,
+                                 estandar: true, altoMedido: t.alto)
+                }
                 return Tramo(desde: lo, hasta: hi, alto: t.alto, area: t.area,
                              hastaEsquinaA: aEsMenor ? t.esquinaIni : t.esquinaFin, hastaEsquinaB: aEsMenor ? t.esquinaFin : t.esquinaIni)
             }.sorted { $0.desde < $1.desde }
@@ -245,6 +262,7 @@ struct DemolicionEnPlano {
         }
         cerrar(e.u.upperBound)
         rep.faltaVer.sort { $0.lowerBound < $1.lowerBound }
+        rep.area = rep.tramos.reduce(0) { $0 + $1.area }
         return rep
     }
 }

@@ -7995,6 +7995,9 @@ fileprivate final class CamaraNueva {
     var sigueDonde = ""
     // UBICARSE EN EL PLANO (15 oct): las paredes que el LiDAR va viendo, el acomodo encontrado y el minimapa.
     var planosVistos: [UUID: ARPlaneAnchor] = [:]
+    // De qué lado estaba el teléfono cuando vio cada pared (la cara de este cuarto mira para adentro; la del cuarto de al
+    // lado, para afuera): así la malla no se pega a la cara equivocada de una pared compartida.
+    var ladoPlano: [UUID: SIMD2<Double>] = [:]
     var acomodo: UbicadorEnPlano.Acomodo?
     var acomodoCuarto = ""
     var acomodoNivel = ""
@@ -8484,7 +8487,23 @@ extension ARMeasureViewController {
     // Las paredes que llegan del LiDAR (solo las verticales; ARKit las va agrandando mientras el teléfono se mueve).
     fileprivate func anotarPlanosVistos(_ anchors: [ARAnchor]) {
         guard experienciaNueva, !planoPorCuarto.isEmpty else { return }
-        for a in anchors { if let p = a as? ARPlaneAnchor, p.alignment == .vertical { nueva.planosVistos[p.identifier] = p } }
+        let cam = sceneView.session.currentFrame?.camera.transform
+        for a in anchors {
+            guard let p = a as? ARPlaneAnchor, p.alignment == .vertical else { continue }
+            nueva.planosVistos[p.identifier] = p
+            // El lado: la primera vez que se ve (o, si no se supo, cuando está enfrente y a menos de 4 m).
+            guard nueva.ladoPlano[p.identifier] == nil, let t = cam else { continue }
+            let c = p.transform * SIMD4<Float>(p.center, 1)
+            var n = SIMD2<Double>(Double(p.transform.columns.1.x), Double(p.transform.columns.1.z))
+            guard simd_length(n) > 0.7 else { continue }
+            n = simd_normalize(n)
+            let hacia = SIMD2<Double>(Double(t.columns.3.x - c.x), Double(t.columns.3.z - c.z))
+            let d = simd_length(hacia)
+            guard d > 0.05, d < 4 else { continue }
+            let frente = -SIMD2<Double>(Double(t.columns.2.x), Double(t.columns.2.z))
+            guard simd_length(frente) > 0.3, simd_dot(simd_normalize(frente), -hacia / d) > 0.6 else { continue }
+            nueva.ladoPlano[p.identifier] = simd_dot(n, hacia) >= 0 ? n : -n
+        }
     }
 
     // Una vez por segundo: ¿dónde estoy en el plano de este cuarto?
@@ -9546,7 +9565,7 @@ extension ARMeasureViewController {
             roomName = "Living Room"; nueva.cuartoVisto = roomName
             let paso = maqueta
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.maquetaLaboratorio(paso) }
-        case 18, 19, 20, 21:
+        case 18, 19, 20, 21, 22:
             // El laboratorio CON el plano (16 oct); 20 = el techo de la cocina con un hueco de 6 x 4 ft (15 oct): la cocina de 14 x 12 ft al lado de la sala; su pared sur (la de la
             // grabación de la maqueta 11) es de afuera. Ya ubicado. 18 = midiendo; 19 = apuntando, antes de fijar.
             func w(_ a: Double, _ b: Double, _ c: Double, _ d: Double, _ e: Bool) -> UbicadorEnPlano.ParedPlano {
@@ -9681,7 +9700,12 @@ struct UbicadorEnPlano {
         var angulo: Double { atan2(b.y - a.y, b.x - a.x) }
     }
     struct ParedPlano { var seg: Segmento; var exterior: Bool; var alto: Double = 0 }   // alto en pies (0 = no se sabe)
-    struct SenaPlano { var p: SIMD2<Double>; var esVentana: Bool; var ancho: Double = 0 }   // ventana o puerta del plano (su centro; ancho en pies, 0 = no se sabe)
+    struct SenaPlano {                                   // ventana o puerta del plano (su centro), en pies
+        var p: SIMD2<Double>; var esVentana: Bool
+        var ancho: Double = 0                            // 0 = no se sabe
+        var abajo: Double = -1                           // a qué altura del piso empieza (-1 = no se sabe: escaneo viejo)
+        var alto: Double = 0                             // 0 = no se sabe
+    }
     enum Clase { case pared, ventana, puerta }
     struct Visto { var seg: Segmento; var clase: Clase }                  // lo que el LiDAR ve, ya en pies (x, z)
     struct Acomodo {
@@ -9968,9 +9992,44 @@ fileprivate final class LabDemolicion {
     // lo quitado que se encuentra en una pared se queda pintado en su malla.
     var malla: [String: SCNNode] = [:]
     var mallaParedes: [String: (a: SIMD2<Double>, b: SIMD2<Double>, alto: Double)] = [:]
+    var mallaAberturas: [String: [(t0: Double, t1: Double, abajo: Double, arriba: Double, estimada: Bool)]] = [:]
     var mallaFirma: [String: String] = [:]
     var cortesPorPared: [String: [(t0: Double, t1: Double, alto: Double)]] = [:]
     var ultimaMalla: CFTimeInterval = 0
+    // LA MALLA POR CUARTO (16 oct, su prueba con dos fotos: "de cuarto en cuarto… en la otra esquina no la puso bien…
+    // se tienen que ayudar ambas"): solo el cuarto donde está; la ubicación se afina con las paredes que ve el láser
+    // (MallaDelCuarto); las esquinas que toca en la pantalla la amarran; con dos dedos se acerca.
+    var cuartoMalla: String?
+    var cuartoNuevo: (nombre: String, desde: Date)?
+    var cuartoMallaDesde = Date()
+    var mallaAR: [String: [MallaDelCuarto.ParedAR]] = [:]            // por cuarto, suavizado (metros del AR)
+    var mallaClaves: [String: [String]] = [:]                        // la clave de malla de cada pared de ese cuarto
+    var acCuarto: [String: DemolicionEnPlano.Acomodo2D] = [:]        // la ubicación afinada de cada cuarto
+    var ajusteInfo: (vistas: Int, total: Int, pines: Int) = (0, 0, 0)
+    var pines: [String: [MallaDelCuarto.Pin]] = [:]
+    var marcasPin: [SCNNode] = []
+    var zoom: CGFloat = 1
+    var zoomInicio: CGFloat = 1
+    var mallaFina = false
+    var gestos: [UIGestureRecognizer] = []
+    var delegadoGestos: ToquesDelLab?
+    let mallaPastilla = UILabel()
+    // LA MEMORIA DE LA CASA (16 oct: "volvemos a esa casa, ya la malla sabe dónde estaba… la tele"): lo quitado de cada
+    // pared y lo que ya se vio, guardado en el teléfono (sin nombres ni direcciones: solo las paredes del plano en pies).
+    var memoria: [String: (cortes: [(t0: Double, t1: Double, alto: Double)], vistos: [(Double, Double)], fecha: Date)] = [:]
+    var memoriaCargada = false
+    var memoriaId: String?
+    var paredMidiendo: String?
+    var vistosAhora: [String: [(Double, Double)]] = [:]
+    var ultimoGuardado: CFTimeInterval = 0
+}
+
+// Los toques del laboratorio (pellizco = zoom, un toque = marcar una esquina, dos toques = sin zoom): solo los que caen en
+// la cámara, nunca en la tarjeta, la pastilla o el mapita.
+fileprivate final class ToquesDelLab: NSObject, UIGestureRecognizerDelegate {
+    weak var vc: ARMeasureViewController?
+    init(_ vc: ARMeasureViewController) { self.vc = vc }
+    func gestureRecognizer(_ g: UIGestureRecognizer, shouldReceive toque: UITouch) -> Bool { vc?.toqueEsDeLaCamara(toque) ?? false }
 }
 
 // El techo que se está midiendo en el laboratorio (con el plano: su cuarto y hasta dónde llegan sus paredes).
@@ -10050,6 +10109,8 @@ extension ARMeasureViewController {
         nueva.mira.isHidden = false
         L.cara = nil
         L.resultado = ComparadorDeDemolicion.Resultado()
+        ponerGestosLab()
+        pintarPastillaMalla()
         pintarLaboratorio()
     }
 
@@ -10080,6 +10141,7 @@ extension ARMeasureViewController {
         L.cola.async { L.comparador.reiniciar() }
         L.capa?.removeFromParentNode(); L.capa = nil
         L.vistaMaqueta?.removeFromSuperview(); L.vistaMaqueta = nil
+        cerrarMallaPorCuarto()
         quitarMallaDeLaCasa()
         L.pastilla.isHidden = true; L.tarjeta.isHidden = true
         nueva.barra.isHidden = false; nueva.columna.isHidden = false
@@ -10107,6 +10169,14 @@ extension ARMeasureViewController {
         L.pastilla.backgroundColor = UIColor(red: 1.0, green: 0.86, blue: 0.45, alpha: 0.97)
         L.pastilla.layer.cornerRadius = 9; L.pastilla.layer.cornerCurve = .continuous; L.pastilla.clipsToBounds = true
         view.addSubview(L.pastilla)
+        L.mallaPastilla.translatesAutoresizingMaskIntoConstraints = false
+        L.mallaPastilla.font = .systemFont(ofSize: 12, weight: .semibold)
+        L.mallaPastilla.textColor = Claro.tinta
+        L.mallaPastilla.backgroundColor = UIColor(white: 1, alpha: 0.9)
+        L.mallaPastilla.layer.cornerRadius = 8; L.mallaPastilla.layer.cornerCurve = .continuous; L.mallaPastilla.clipsToBounds = true
+        L.mallaPastilla.isHidden = true
+        L.mallaPastilla.numberOfLines = 2
+        view.addSubview(L.mallaPastilla)
         L.tarjeta.repintar()
         L.tarjeta.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(L.tarjeta)
@@ -10125,6 +10195,10 @@ extension ARMeasureViewController {
             L.pastilla.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
             L.pastilla.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             L.pastilla.heightAnchor.constraint(equalToConstant: 30),
+            L.mallaPastilla.topAnchor.constraint(equalTo: L.pastilla.bottomAnchor, constant: 6),
+            L.mallaPastilla.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            L.mallaPastilla.heightAnchor.constraint(greaterThanOrEqualToConstant: 26),
+            L.mallaPastilla.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor, constant: -150),
             L.tarjeta.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 10),
             L.tarjeta.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10),
             L.tarjeta.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -4),
@@ -10232,6 +10306,10 @@ extension ARMeasureViewController {
         let t = ProcessInfo.processInfo.thermalState
         if t == .critical { return "El teléfono está muy caliente: la prueba se pausó." }
         if t == .serious { return "El teléfono está caliente: voy más despacio." }
+        if !L.fijada, L.modoPlano, L.cuartoMalla != nil, L.ajusteInfo.vistas == 0, L.ajusteInfo.pines == 0,
+           Date().timeIntervalSince(L.cuartoMallaDesde) > 4 {
+            return "La malla va solo con la ubicación: mire las paredes de este cuarto, o toque una esquina en la pantalla."
+        }
         guard L.fijada else { return nil }
         if L.luz < 150 { return "Poca luz." }
         if L.techo != nil {
@@ -10343,16 +10421,22 @@ extension ARMeasureViewController {
 
     // ---------------- LA PARED DEL PLANO (con la ubicación) ----------------
     // El acomodo de la ubicación, solo si es seguro y de este nivel.
-    fileprivate func acomodoParaLab() -> DemolicionEnPlano.Acomodo2D? {
+    fileprivate func acomodoDeUbicacion() -> DemolicionEnPlano.Acomodo2D? {
         guard !planoPorCuarto.isEmpty, let ac = nueva.acomodo, ac.seguro, nueva.acomodoNivel == nivelActual else { return nil }
         return DemolicionEnPlano.Acomodo2D(giro: ac.giro, mov: ac.mov)
+    }
+    // El que se usa: el del cuarto donde está, afinado con lo que ve el láser (MallaDelCuarto); si no, el de la ubicación.
+    fileprivate func acomodoParaLab() -> DemolicionEnPlano.Acomodo2D? {
+        guard let base = acomodoDeUbicacion() else { return nil }
+        if let c = lab.cuartoMalla, let ac = lab.acCuarto[c] { return ac }
+        return base
     }
     // Todas las paredes de la planta donde está, con su cuarto y las puertas/ventanas de ese cuarto que traen ancho.
     fileprivate func paredesParaLab() -> [(cuarto: String, pared: DemolicionEnPlano.Pared, aberturas: [DemolicionEnPlano.Abertura])] {
         guard let m = nueva.acomodoMarco ?? marcoDe(roomName) ?? marcoPorCuarto.values.min() else { return [] }
         return cuartosDelMarco(m).flatMap { c -> [(cuarto: String, pared: DemolicionEnPlano.Pared, aberturas: [DemolicionEnPlano.Abertura])] in
             let ab = c.senas.filter { $0.ancho > 0 }.map { DemolicionEnPlano.Abertura(centro: $0.p, ancho: $0.ancho, esPuerta: !$0.esVentana) }
-            return c.paredes.map { (cuarto: c.nombre, pared: DemolicionEnPlano.Pared(a: $0.seg.a, b: $0.seg.b, exterior: $0.exterior), aberturas: ab) }
+            return c.paredes.map { (cuarto: c.nombre, pared: DemolicionEnPlano.Pared(a: $0.seg.a, b: $0.seg.b, exterior: $0.exterior, alto: $0.alto), aberturas: ab) }
         }
     }
     fileprivate static func planoAR(_ a: ARPlaneAnchor) -> DemolicionEnPlano.PlanoAR {
@@ -10386,7 +10470,7 @@ extension ARMeasureViewController {
         let plano = Self.planoAR(ancla)
         let todas = paredesParaLab()
         // Primero las del cuarto donde está (una pared compartida está en los dos cuartos).
-        let aqui = cuartoDondeEsta()?.lowercased()
+        let aqui = (lab.cuartoMalla ?? cuartoDondeEsta())?.lowercased()
         let preferidas = todas.enumerated().filter { $0.element.cuarto.lowercased() == aqui }
         var idx: Int? = nil
         if !preferidas.isEmpty, let k = DemolicionEnPlano.paredDe(plano, paredes: preferidas.map { $0.element.pared }, acomodo: ac) { idx = preferidas[k].offset }
@@ -10430,7 +10514,7 @@ extension ARMeasureViewController {
         if let q = sceneView.raycastQuery(from: centro, allowing: .existingPlaneInfinite, alignment: .horizontal) {
             golpe = sceneView.session.raycast(q).first { $0.worldTransform.columns.3.y > camY + 0.4 }
         }
-        guard let g = golpe, let ancla = g.anchor as? ARPlaneAnchor, let cuarto = cuartoDondeEsta() else {
+        guard let g = golpe, let ancla = g.anchor as? ARPlaneAnchor, let cuarto = lab.cuartoMalla ?? cuartoDondeEsta() else {
             if L.apuntadaTexto != nil { L.apuntadaTexto = nil; L.paredDesconocida = false; pintarLaboratorio() }
             L.apuntada = nil
             return
@@ -10489,51 +10573,212 @@ extension ARMeasureViewController {
         L.capaTecho?.simdTransform = m
     }
 
-    // ---------------- LA MALLA DE LA CASA ----------------
-    // Su idea (15 oct): "revestir toda la casa". El escaneo del plano (RoomPlan) ya guarda cada pared del piso al techo,
-    // sin los muebles que tenía enfrente: esa es la malla. Con la ubicación se pone en la cámara sobre TODAS las paredes del
-    // piso; lo que el láser encuentra quitado se pinta en naranja sobre la malla de esa pared y se queda (aunque se pase a
-    // otra). La malla la pone la ubicación (unas pulgadas de error): sirve para VER la casa revestida y lo que falta; las
-    // pulgadas siguen saliendo del láser contra la cara medida en vivo.
+    // ---------------- LA MALLA DE LA CASA (por cuarto) ----------------
+    // Su idea (15 oct): "revestir toda la casa". El escaneo del plano (RoomPlan) ya guarda cada pared del piso al techo, sin
+    // los muebles que tenía enfrente: esa es la malla. Su prueba del 16 oct ("de cuarto en cuarto… en la otra esquina no la
+    // puso bien"): se pone SOLO en el cuarto donde está (el localizador dice cuál, y al pasar a otro la malla se va con él),
+    // y la ubicación de ese cuarto se afina con las paredes que el láser está viendo: cada pared vista se pega a su plano y
+    // cada esquina sale donde se cruzan (MallaDelCuarto). Lo quitado que se encuentra se pinta en naranja y se queda.
     private static let mallaPxPorPie: CGFloat = 24
     private func pintarMallaDeLaCasa(_ frame: ARFrame) {
         let L = lab
-        guard let ac = acomodoParaLab(), let m = nueva.acomodoMarco ?? marcoDe(roomName) ?? marcoPorCuarto.values.min() else {
+        guard let base = acomodoDeUbicacion(), let m = nueva.acomodoMarco ?? marcoDe(roomName) ?? marcoPorCuarto.values.min() else {
             if !L.malla.isEmpty { quitarMallaDeLaCasa() }
             return
         }
         let ahora = CACurrentMediaTime()
-        guard ahora - L.ultimaMalla >= 1.0 else { return }
+        guard ahora - L.ultimaMalla >= 0.5 else { return }
         L.ultimaMalla = ahora
-        pintarMalla(ac: ac, marco: m, piso: pisoParaLab(frame))
+        let piso = pisoParaLab(frame)
+        seguirElCuarto(m, base: base, frame: frame)
+        if let cuarto = L.cuartoMalla { afinarMalla(cuarto: cuarto, marco: m, base: base, piso: piso) }
+        pintarMalla(ac: acomodoParaLab() ?? base, marco: m, piso: piso)
     }
-    fileprivate func pintarMalla(ac: DemolicionEnPlano.Acomodo2D, marco m: Int, piso: Float) {
+    // Las paredes de un cuarto que llevan malla (1 ft o más), con su clave (la misma pared vista desde dos cuartos es una).
+    private func paredesDeMalla(_ c: (nombre: String, paredes: [UbicadorEnPlano.ParedPlano], senas: [UbicadorEnPlano.SenaPlano])) -> [(clave: String, pared: DemolicionEnPlano.Pared)] {
+        c.paredes.filter { simd_length($0.seg.b - $0.seg.a) >= 1 }.map {
+            (claveDeMalla($0.seg.a, $0.seg.b), DemolicionEnPlano.Pared(a: $0.seg.a, b: $0.seg.b, exterior: $0.exterior, alto: $0.alto))
+        }
+    }
+    // ¿En qué cuarto está? Mientras siga dentro del suyo (con su ubicación afinada) no se cambia: en una puerta la ubicación
+    // sola puede brincar al de al lado. Un cuarto nuevo cuenta después de 0.8 s.
+    private func seguirElCuarto(_ m: Int, base: DemolicionEnPlano.Acomodo2D, frame: ARFrame) {
         let L = lab
-        // Las paredes de la planta, sin repetir las que comparten dos cuartos.
-        for c in cuartosDelMarco(m) {
+        let t = frame.camera.transform
+        let pAR = SIMD2<Float>(t.columns.3.x, t.columns.3.z)
+        let cuartos = cuartosDelMarco(m)
+        if let actual = L.cuartoMalla, let c = cuartos.first(where: { $0.nombre == actual }),
+           UbicadorEnPlano.rodea(DemolicionEnPlano.alPlano(pAR, L.acCuarto[actual] ?? base), c.paredes) {
+            L.cuartoNuevo = nil
+            return
+        }
+        guard let aqui = cuartoDondeEsta() else { return }         // en una puerta o fuera de lo escaneado: se queda el de antes
+        if L.cuartoMalla == nil || aqui == L.cuartoMalla {
+            if L.cuartoMalla == nil { L.cuartoMalla = aqui; L.cuartoMallaDesde = Date(); pintarPastillaMalla() }
+            L.cuartoNuevo = nil
+            return
+        }
+        if let n = L.cuartoNuevo, n.nombre == aqui {
+            guard Date().timeIntervalSince(n.desde) >= 0.8 else { return }
+            L.cuartoMalla = aqui; L.cuartoNuevo = nil; L.cuartoMallaDesde = Date()
+            pintarPastillaMalla()
+            if !L.fijada { pintarLaboratorio() }
+        } else { L.cuartoNuevo = (aqui, Date()) }
+    }
+    // Lo que ve el láser, para la malla: las paredes de ARKit en el piso (metros), con su lado. Lo que no pasa de 1.2 m del
+    // piso es un mueble (un sillón, un gabinete bajo): no cuenta.
+    private func vistasParaMalla(piso: Float) -> [MallaDelCuarto.Vista] {
+        nueva.planosVistos.values.compactMap { p -> MallaDelCuarto.Vista? in
+            let t = p.transform
+            var n = SIMD2<Double>(Double(t.columns.1.x), Double(t.columns.1.z))
+            guard simd_length(n) > 0.7 else { return nil }
+            n = simd_normalize(n)
+            let dir = SIMD2(-n.y, n.x)
+            var lo = Double.infinity, hi = -Double.infinity, off = 0.0, cuenta = 0.0, arriba = -Float.infinity
+            for v in p.geometry.boundaryVertices {
+                let w = t * SIMD4<Float>(v.x, v.y, v.z, 1)
+                let q = SIMD2(Double(w.x), Double(w.z))
+                let sd = simd_dot(q, dir)
+                lo = min(lo, sd); hi = max(hi, sd); off += simd_dot(q, n); cuenta += 1; arriba = max(arriba, w.y)
+            }
+            guard cuenta > 2, hi - lo >= 0.3, arriba >= piso + 1.2 else { return nil }
+            off /= cuenta
+            return MallaDelCuarto.Vista(a: dir * lo + n * off, b: dir * hi + n * off, n: nueva.ladoPlano[p.identifier])
+        }
+    }
+    // La ubicación del cuarto, afinada con lo que ve el láser y las esquinas tocadas; suavizada para que la malla no brinque
+    // (un brinco de más de 50 cm = la ubicación cambió de verdad: se toma de una vez).
+    private func afinarMalla(cuarto: String, marco m: Int, base: DemolicionEnPlano.Acomodo2D, piso: Float) {
+        let L = lab
+        guard let c = cuartosDelMarco(m).first(where: { $0.nombre == cuarto }) else { return }
+        let lista = paredesDeMalla(c)
+        guard !lista.isEmpty else { return }
+        let aj = MallaDelCuarto.ajustar(paredes: lista.map { $0.pared }, ac: base, vistas: vistasParaMalla(piso: piso), pines: L.pines[cuarto] ?? [])
+        let antes = L.ajusteInfo
+        L.ajusteInfo = (aj.vistas, lista.count, aj.pines)
+        if antes != L.ajusteInfo { pintarPastillaMalla() }
+        L.mallaClaves[cuarto] = lista.map { $0.clave }
+        // Sin nada con qué afinar ahora (un momento sin ver paredes): se queda lo que ya se había afinado.
+        if !aj.afinado, L.acCuarto[cuarto] != nil, L.mallaAR[cuarto]?.count == lista.count { return }
+        var nuevas = aj.paredes, ac = aj.ac
+        if let prev = L.mallaAR[cuarto], prev.count == nuevas.count, let acP = L.acCuarto[cuarto] {
+            let salto = zip(prev, nuevas).map { max(simd_distance($0.a, $1.a), simd_distance($0.b, $1.b)) }.max() ?? 0
+            if salto < 0.5 {
+                let f = 0.35
+                nuevas = zip(prev, nuevas).map { p, n in var x = n; x.a = p.a + (n.a - p.a) * f; x.b = p.b + (n.b - p.b) * f; return x }
+                var dg = (ac.giro - acP.giro).truncatingRemainder(dividingBy: 2 * .pi)
+                if dg > .pi { dg -= 2 * .pi } else if dg < -.pi { dg += 2 * .pi }
+                ac = DemolicionEnPlano.Acomodo2D(giro: acP.giro + dg * f, mov: acP.mov + (ac.mov - acP.mov) * f)
+            }
+        }
+        L.mallaAR[cuarto] = nuevas
+        L.acCuarto[cuarto] = aj.afinado ? ac : nil
+    }
+    // Las dos puntas de una pared de la malla en el AR (metros), en el orden de su clave (`a` de la malla primero): las del
+    // cuarto donde está, ya afinadas; si es de otro cuarto, con la ubicación.
+    private func extremosEnAR(clave: String, ac: DemolicionEnPlano.Acomodo2D) -> (a: SIMD2<Double>, b: SIMD2<Double>)? {
+        let L = lab
+        guard let mw = L.mallaParedes[clave] else { return nil }
+        if let c = L.cuartoMalla, let claves = L.mallaClaves[c], let enAR = L.mallaAR[c], enAR.count == claves.count,
+           let j = claves.firstIndex(of: clave), let m = nueva.acomodoMarco ?? marcoDe(roomName) ?? marcoPorCuarto.values.min(),
+           let cu = cuartosDelMarco(m).first(where: { $0.nombre == c }) {
+            let lista = paredesDeMalla(cu)
+            if j < lista.count {
+                let w = lista[j].pared
+                let alReves = simd_distance(mw.a, w.a) > simd_distance(mw.a, w.b)
+                return alReves ? (enAR[j].b, enAR[j].a) : (enAR[j].a, enAR[j].b)
+            }
+        }
+        return (MallaDelCuarto.ar(mw.a, ac), MallaDelCuarto.ar(mw.b, ac))
+    }
+    // Lo que el láser ya vio de la pared que se mide (en la cara, u en metros): las columnas con algo seguro.
+    private static func vistosEnCara(_ r: ComparadorDeDemolicion.Resultado) -> [(Float, Float)] {
+        typealias C = ComparadorDeDemolicion
+        var out: [(Float, Float)] = [], ini: Int? = nil
+        func cerrar(_ fin: Int) { if let i = ini { out.append((C.uDeColumna(r.colIni + i) - C.celda / 2, C.uDeColumna(r.colIni + fin) + C.celda / 2)); ini = nil } }
+        for (i, col) in r.columnas.enumerated() {
+            var seguro = false
+            switch col { case .entera, .cortada, .sinOrilla, .bajoAbertura: seguro = true; default: seguro = false }
+            if seguro { if ini == nil { ini = i } } else { cerrar(i - 1) }
+        }
+        cerrar(r.columnas.count - 1)
+        return out
+    }
+    fileprivate func pintarMalla(ac: DemolicionEnPlano.Acomodo2D, marco m: Int, piso: Float, cuarto cuartoDado: String? = nil) {
+        let L = lab
+        let cuartos = cuartosDelMarco(m)
+        // Las paredes de la planta (los datos de todas; la malla solo se pone en el cuarto donde está).
+        for c in cuartos {
             for w in c.paredes where simd_length(w.seg.b - w.seg.a) >= 1 {
                 let clave = claveDeMalla(w.seg.a, w.seg.b)
                 if L.mallaParedes[clave] == nil { L.mallaParedes[clave] = (w.seg.a, w.seg.b, w.alto > 3 ? w.alto : 8) }
+                // Las puertas y ventanas de ESTA pared (a 1 ft o menos de su línea): la malla no las tapa.
+                guard let mw = L.mallaParedes[clave] else { continue }
+                let d = mw.b - mw.a, largo = simd_length(d), u = d / largo
+                var abs_: [(t0: Double, t1: Double, abajo: Double, arriba: Double, estimada: Bool)] = L.mallaAberturas[clave] ?? []
+                for sena in c.senas where sena.ancho > 0 {
+                    let t = simd_dot(sena.p - mw.a, u)
+                    guard t > -0.5, t < largo + 0.5, abs(simd_dot(sena.p - mw.a, SIMD2(-u.y, u.x))) < 1 else { continue }
+                    // Puerta: del piso a su alto (6'-8" si no se sabe). Ventana: desde su antepecho; un escaneo viejo no lo
+                    // guardó y se supone a 3 ft (se marca "estimada").
+                    let estimada = !sena.esVentana ? false : sena.abajo < 0
+                    let abajo = sena.esVentana ? (sena.abajo >= 0 ? sena.abajo : 3) : 0
+                    let alto = sena.alto > 0.5 ? sena.alto : (sena.esVentana ? 4 : 6.67)
+                    let nueva = (t - sena.ancho / 2, t + sena.ancho / 2, abajo, abajo + alto, estimada)
+                    if !abs_.contains(where: { abs($0.t0 - nueva.0) < 0.3 && abs($0.t1 - nueva.1) < 0.3 }) { abs_.append(nueva) }
+                }
+                L.mallaAberturas[clave] = abs_
             }
         }
-        // Lo que va saliendo de la pared que se mide, en pies desde la punta `a` de su malla.
-        if let ctx = L.enPlano, let cara = L.cara, L.resultado.area > 0 {
+        if !L.memoriaCargada { cargarMemoriaDeLaCasa() }
+        // Lo que va saliendo de la pared que se mide, en pies desde la esquina `a` de su malla (la de verdad, si ya se
+        // afinó): lo de antes se queda menos donde el láser acaba de ver (ahí manda lo de ahora).
+        if let ctx = L.enPlano, let cara = L.cara {
             let clave = claveDeMalla(ctx.pared.a, ctx.pared.b)
-            if let w = L.mallaParedes[clave] {
-                let d = w.b - w.a, largo = simd_length(d), u = d / max(largo, 0.01)
-                L.cortesPorPared[clave] = L.resultado.tramos.map { t in
-                    func enPies(_ uu: Float) -> Double { let p = cara.alMundo(SIMD2(uu, 0)); return simd_dot(DemolicionEnPlano.alPlano(SIMD2(p.x, p.z), ctx.ac) - w.a, u) }
+            if let e = extremosEnAR(clave: clave, ac: ctx.ac), simd_distance(e.a, e.b) > 0.1 {
+                let u = (e.b - e.a) / simd_distance(e.a, e.b)
+                func enPies(_ uu: Float) -> Double { let p = cara.alMundo(SIMD2(uu, 0)); return simd_dot(SIMD2(Double(p.x), Double(p.z)) - e.a, u) * MallaDelCuarto.k }
+                let nuevos: [MallaDelCuarto.Corte] = L.resultado.tramos.map { t in
                     let x0 = enPies(t.uIni), x1 = enPies(t.uFin)
                     return (min(x0, x1), max(x0, x1), Double(t.alto / 0.3048))
                 }
+                let vistos = MallaDelCuarto.unir(Self.vistosEnCara(L.resultado).map { (enPies($0.0), enPies($0.1)) })
+                if !vistos.isEmpty || !nuevos.isEmpty {
+                    L.vistosAhora[clave] = vistos
+                    L.cortesPorPared[clave] = MallaDelCuarto.mezclar(viejos: L.memoria[clave]?.cortes ?? [], nuevos: nuevos, vistos: vistos)
+                    if L.paredMidiendo != clave { anotarParedEnLaMemoria(); L.paredMidiendo = clave }
+                    let ahora = CACurrentMediaTime()
+                    if ahora - L.ultimoGuardado >= 10 { L.ultimoGuardado = ahora; anotarParedEnLaMemoria(seguir: true) }
+                }
             }
         }
-        for (clave, w) in L.mallaParedes {
-            let a = DemolicionEnPlano.alAR(w.a, ac), b = DemolicionEnPlano.alAR(w.b, ac)
-            let a3 = SIMD3<Float>(a.x, piso, a.y), b3 = SIMD3<Float>(b.x, piso, b.y)
-            let largoM = simd_distance(a3, b3)
+        // La malla: solo las paredes del cuarto donde está.
+        guard let cuarto = cuartoDado ?? L.cuartoMalla, let c = cuartos.first(where: { $0.nombre == cuarto }) else {
+            if !L.malla.isEmpty { quitarMallaDeLaCasa() }
+            return
+        }
+        let lista = paredesDeMalla(c)
+        let enAR: [MallaDelCuarto.ParedAR] = {
+            if let a = L.mallaAR[cuarto], a.count == lista.count { return a }
+            return lista.map { MallaDelCuarto.ParedAR(a: MallaDelCuarto.ar($0.pared.a, ac), b: MallaDelCuarto.ar($0.pared.b, ac)) }
+        }()
+        let pts = enAR.flatMap { [$0.a, $0.b] }
+        let centro = pts.isEmpty ? SIMD2<Double>.zero : pts.reduce(.zero, +) / Double(pts.count)
+        var usadas = Set<String>()
+        for (j, item) in lista.enumerated() {
+            let clave = item.clave, w = item.pared
+            guard let mw = L.mallaParedes[clave], !usadas.contains(clave) else { continue }
+            usadas.insert(clave)
+            let alReves = simd_distance(mw.a, w.a) > simd_distance(mw.a, w.b)
+            let A = alReves ? enAR[j].b : enAR[j].a, B = alReves ? enAR[j].a : enAR[j].b     // A = la punta `a` de la malla
+            let largoM = Float(simd_distance(A, B))
             guard largoM > 0.2 else { continue }
-            let altoM = Float(w.alto * 0.3048)
+            // La cara de enfrente del dibujo mira para adentro del cuarto (así los números se leen derechos): si no, se voltea.
+            let x2 = (B - A) / Double(largoM)
+            let espejo = simd_dot(MallaDelCuarto.perp(x2), centro - (A + B) / 2) < 0
+            let p0 = espejo ? B : A, p1 = espejo ? A : B
+            let a3 = SIMD3<Float>(Float(p0.x), piso, Float(p0.y)), b3 = SIMD3<Float>(Float(p1.x), piso, Float(p1.y))
+            let altoM = Float(mw.alto * 0.3048)
             let nodo: SCNNode
             if let n0 = L.malla[clave] { nodo = n0 } else {
                 let plano = SCNPlane(width: CGFloat(largoM), height: CGFloat(altoM))
@@ -10548,12 +10793,16 @@ extension ARMeasureViewController {
             if let pl = nodo.geometry as? SCNPlane, abs(Float(pl.width) - largoM) > 0.01 || abs(Float(pl.height) - altoM) > 0.01 {
                 pl.width = CGFloat(largoM); pl.height = CGFloat(altoM)
             }
-            // Su dibujo, solo si cambió lo cortado.
+            // Su dibujo, solo si cambió lo cortado (o el zoom, o el lado).
             let cortes = L.cortesPorPared[clave] ?? []
-            let firma = cortes.map { String(format: "%.2f-%.2f-%.2f", $0.t0, $0.t1, $0.alto) }.joined(separator: "|") + String(format: "|%.2f|%.2f", w.alto, Double(largoM))
+            let aberturas = L.mallaAberturas[clave] ?? []
+            let largoPies = Double(largoM) * MallaDelCuarto.k
+            let firma = cortes.map { String(format: "%.2f-%.2f-%.2f", $0.t0, $0.t1, $0.alto) }.joined(separator: "|")
+                + String(format: "|%.2f|%.1f|%d|%@|%@", mw.alto, largoPies, aberturas.count, L.mallaFina ? "f" : "g", espejo ? "e" : "d")
             if L.mallaFirma[clave] != firma {
                 L.mallaFirma[clave] = firma
-                nodo.geometry?.firstMaterial?.diffuse.contents = Self.texturaDeMalla(largoPies: Double(largoM) * 3.28084, altoPies: w.alto, cortes: cortes)
+                nodo.geometry?.firstMaterial?.diffuse.contents = Self.texturaDeMalla(largoPies: largoPies, altoPies: mw.alto, cortes: cortes,
+                                                                                    aberturas: aberturas, fina: L.mallaFina, espejo: espejo)
             }
             let x = simd_normalize(b3 - a3), y = SIMD3<Float>(0, 1, 0), z = simd_cross(x, y)
             var mt = matrix_identity_float4x4
@@ -10561,6 +10810,8 @@ extension ARMeasureViewController {
             mt.columns.3 = SIMD4((a3 + b3) / 2 + y * (altoM / 2), 1)
             nodo.simdTransform = mt
         }
+        // Las de otros cuartos se quitan (su memoria se queda: al regresar se vuelven a poner).
+        for (k, n) in L.malla where !usadas.contains(k) { n.removeFromParentNode(); L.malla[k] = nil; L.mallaFirma[k] = nil }
     }
     // La misma pared vista desde dos cuartos es UNA malla: se busca una que ya esté a 0.5 ft o menos (en cualquier orden).
     private func claveDeMalla(_ a: SIMD2<Double>, _ b: SIMD2<Double>) -> String {
@@ -10574,36 +10825,264 @@ extension ARMeasureViewController {
         for n in L.malla.values { n.removeFromParentNode() }
         L.malla.removeAll(); L.mallaFirma.removeAll()
     }
-    // El dibujo de una pared: una malla clarita (líneas cada 6 in, más marcadas cada 2 ft) y lo quitado en naranja, del piso
-    // para arriba. La izquierda del dibujo es la punta `a` de la pared.
-    static func texturaDeMalla(largoPies: Double, altoPies: Double, cortes: [(t0: Double, t1: Double, alto: Double)]) -> UIImage {
-        let px = mallaPxPorPie
+    // Al salir del laboratorio: lo medido a la memoria; las esquinas tocadas y el zoom se quitan (son de esta sesión).
+    private func cerrarMallaPorCuarto() {
+        let L = lab
+        anotarParedEnLaMemoria()
+        quitarGestosLab()
+        L.zoom = 1; aplicarZoomLab()
+        for n in L.marcasPin { n.removeFromParentNode() }
+        L.marcasPin.removeAll(); L.pines.removeAll()
+        L.cuartoMalla = nil; L.cuartoNuevo = nil; L.mallaAR.removeAll(); L.mallaClaves.removeAll(); L.acCuarto.removeAll()
+        L.ajusteInfo = (0, 0, 0)
+        L.mallaPastilla.isHidden = true
+    }
+    // El dibujo de una pared: una malla clarita (líneas cada 6 in, más marcadas cada 2 ft; con zoom, cada 3 in y marcadas
+    // cada pie), lo quitado en naranja del piso para arriba, y las alturas de corte de siempre (1 ft, 2 ft y 4 ft: lo que
+    // se corta en water damage) en amarillo con su número. La izquierda del dibujo es la punta `a` de la pared; con
+    // `espejo` se voltea (la cara de enfrente mira para adentro del cuarto y los números se leen derechos).
+    static func texturaDeMalla(largoPies: Double, altoPies: Double, cortes: [(t0: Double, t1: Double, alto: Double)],
+                               aberturas: [(t0: Double, t1: Double, abajo: Double, arriba: Double, estimada: Bool)] = [],
+                               fina: Bool = false, espejo: Bool = false) -> UIImage {
+        let px = mallaPxPorPie * (fina ? 2 : 1)
         let tam = CGSize(width: max(8, CGFloat(largoPies) * px), height: max(8, CGFloat(altoPies) * px))
+        func x(_ t: Double) -> CGFloat { CGFloat(espejo ? largoPies - t : t) * px }
         let r = UIGraphicsImageRenderer(size: tam)
         return r.image { c in
             let g = c.cgContext
             g.setFillColor(UIColor(white: 1, alpha: 0.10).cgColor); g.fill(CGRect(origin: .zero, size: tam))
             for corte in cortes {
-                let x0 = CGFloat(max(0, corte.t0)) * px, x1 = CGFloat(min(largoPies, corte.t1)) * px
+                let xa = x(max(0, corte.t0)), xb = x(min(largoPies, corte.t1))
                 let h = CGFloat(min(altoPies, corte.alto)) * px
                 g.setFillColor(UIColor(red: 1, green: 0.47, blue: 0, alpha: 0.55).cgColor)
-                g.fill(CGRect(x: x0, y: tam.height - h, width: max(0, x1 - x0), height: h))
+                g.fill(CGRect(x: min(xa, xb), y: tam.height - h, width: abs(xb - xa), height: h))
             }
+            let paso0: CGFloat = fina ? px / 4 : px / 2
             var paso: CGFloat = 0, i = 0
             while paso <= tam.width + 0.5 {
                 g.setStrokeColor(UIColor(white: 1, alpha: i % 4 == 0 ? 0.55 : 0.28).cgColor); g.setLineWidth(i % 4 == 0 ? 1.5 : 1)
                 g.move(to: CGPoint(x: paso, y: 0)); g.addLine(to: CGPoint(x: paso, y: tam.height)); g.strokePath()
-                paso += px / 2; i += 1
+                paso += paso0; i += 1
             }
             paso = tam.height; i = 0
             while paso >= -0.5 {
                 g.setStrokeColor(UIColor(white: 1, alpha: i % 4 == 0 ? 0.55 : 0.28).cgColor); g.setLineWidth(i % 4 == 0 ? 1.5 : 1)
                 g.move(to: CGPoint(x: 0, y: paso)); g.addLine(to: CGPoint(x: tam.width, y: paso)); g.strokePath()
-                paso -= px / 2; i += 1
+                paso -= paso0; i += 1
+            }
+            // Las alturas de corte de siempre.
+            let amarillo = UIColor(red: 1, green: 0.84, blue: 0.04, alpha: 0.95)
+            let letra: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: fina ? 22 : 13, weight: .heavy), .foregroundColor: amarillo,
+                                                        .strokeColor: UIColor(white: 0, alpha: 0.55), .strokeWidth: -3]
+            for pies in [1.0, 2.0, 4.0] where pies < altoPies - 0.3 {
+                let y = tam.height - CGFloat(pies) * px
+                g.setStrokeColor(amarillo.withAlphaComponent(0.8).cgColor); g.setLineWidth(fina ? 2.5 : 1.5)
+                g.setLineDash(phase: 0, lengths: fina ? [14, 8] : [8, 5])
+                g.move(to: CGPoint(x: 0, y: y)); g.addLine(to: CGPoint(x: tam.width, y: y)); g.strokePath()
+                g.setLineDash(phase: 0, lengths: [])
+                let texto = "\(Int(pies))'" as NSString
+                let t = texto.size(withAttributes: letra)
+                texto.draw(at: CGPoint(x: 6, y: y - t.height - 2), withAttributes: letra)
+                if tam.width > 6 * px { texto.draw(at: CGPoint(x: tam.width - t.width - 6, y: y - t.height - 2), withAttributes: letra) }
             }
             g.setStrokeColor(UIColor(white: 1, alpha: 0.85).cgColor); g.setLineWidth(2)
             g.stroke(CGRect(origin: .zero, size: tam).insetBy(dx: 1, dy: 1))
+            // Las puertas y ventanas: hueco limpio (la malla no las tapa) con su orilla; una ventana cuyo antepecho no se
+            // guardó (escaneo viejo) va con la orilla punteada.
+            for ab in aberturas {
+                let xa = x(max(0, ab.t0)), xb = x(min(largoPies, ab.t1))
+                let y0 = tam.height - CGFloat(min(altoPies, ab.arriba)) * px, y1 = tam.height - CGFloat(max(0, ab.abajo)) * px
+                let r = CGRect(x: min(xa, xb), y: y0, width: abs(xb - xa), height: max(0, y1 - y0))
+                g.clear(r)
+                g.setStrokeColor(UIColor(white: 1, alpha: 0.9).cgColor); g.setLineWidth(2)
+                g.setLineDash(phase: 0, lengths: ab.estimada ? [6, 5] : [])
+                g.stroke(r.insetBy(dx: 1, dy: 1))
+                g.setLineDash(phase: 0, lengths: [])
+            }
         }
+    }
+
+    // ---------------- MARCAR UNA ESQUINA, EL ZOOM ----------------
+    // Su pedido (16 oct): "tocar en la pantalla las esquinas… poder acercar y solo pucharle ahí para que la máquina entienda".
+    // Un toque en una esquina del cuarto la amarra a donde el láser la encuentra (la malla se acomoda); con dos dedos se
+    // acerca la imagen (hasta 4x; la malla se hace de cuadritos de 3 in) para tocar justo; dos toques regresan a normal.
+    // El zoom es de la imagen: el láser mide igual (para que mida mejor hay que acercarse a la pared, a 3-5 ft).
+    fileprivate func toqueEsDeLaCamara(_ t: UITouch) -> Bool {
+        guard lab.activo, let v = t.view else { return false }
+        if v is UIControl { return false }
+        for tapa in [lab.tarjeta, lab.pastilla, lab.mallaPastilla, nueva.minimapa] as [UIView] where v.isDescendant(of: tapa) { return false }
+        return true
+    }
+    private func ponerGestosLab() {
+        let L = lab
+        guard L.gestos.isEmpty else { return }
+        let d = ToquesDelLab(self); L.delegadoGestos = d
+        let pellizco = UIPinchGestureRecognizer(target: self, action: #selector(pellizcoLab(_:)))
+        let doble = UITapGestureRecognizer(target: self, action: #selector(dobleToqueLab(_:))); doble.numberOfTapsRequired = 2
+        let uno = UITapGestureRecognizer(target: self, action: #selector(toqueLab(_:))); uno.require(toFail: doble)
+        for g in [pellizco, doble, uno] as [UIGestureRecognizer] { g.delegate = d; g.cancelsTouchesInView = false; view.addGestureRecognizer(g); L.gestos.append(g) }
+    }
+    private func quitarGestosLab() {
+        for g in lab.gestos { view.removeGestureRecognizer(g) }
+        lab.gestos = []; lab.delegadoGestos = nil
+    }
+    @objc private func pellizcoLab(_ g: UIPinchGestureRecognizer) {
+        let L = lab
+        switch g.state {
+        case .began: L.zoomInicio = L.zoom
+        case .changed, .ended: L.zoom = min(4, max(1, L.zoomInicio * g.scale)); aplicarZoomLab()
+        default: break
+        }
+    }
+    @objc private func dobleToqueLab(_ g: UITapGestureRecognizer) { lab.zoom = 1; aplicarZoomLab(animado: true) }
+    fileprivate func aplicarZoomLab(animado: Bool = false) {
+        let L = lab, z = L.zoom
+        let t = z <= 1.01 ? CGAffineTransform.identity : CGAffineTransform(scaleX: z, y: z)
+        let vistas: [UIView] = view.subviews.filter { $0 is SCNView }        // la cámara (y la vista 3D de la maqueta)
+        if animado { UIView.animate(withDuration: 0.2) { vistas.forEach { $0.transform = t } } } else { vistas.forEach { $0.transform = t } }
+        let fina = z >= 1.8
+        if fina != L.mallaFina { L.mallaFina = fina; L.ultimaMalla = 0 }
+        pintarPastillaMalla()
+    }
+    @objc private func toqueLab(_ g: UITapGestureRecognizer) {
+        let L = lab
+        guard L.activo, maqueta == 0, let frame = sceneView.session.currentFrame else { return }
+        guard let cuarto = L.cuartoMalla, let m = nueva.acomodoMarco ?? marcoDe(roomName) ?? marcoPorCuarto.values.min(),
+              let c = cuartosDelMarco(m).first(where: { $0.nombre == cuarto }), let enAR = L.mallaAR[cuarto] else {
+            avisoLaboratorio("Primero ubíquese en el plano: la malla todavía no está puesta.")
+            return
+        }
+        let p = g.location(in: sceneView)
+        var golpe: simd_float4x4?
+        if let q = sceneView.raycastQuery(from: p, allowing: .estimatedPlane, alignment: .any) { golpe = sceneView.session.raycast(q).first?.worldTransform }
+        if golpe == nil, let q = sceneView.raycastQuery(from: p, allowing: .existingPlaneGeometry, alignment: .any) { golpe = sceneView.session.raycast(q).first?.worldTransform }
+        guard let h = golpe else { avisoLaboratorio("El láser no encontró nada ahí. Acérquese (o haga zoom) y toque la esquina otra vez."); return }
+        let w = SIMD3<Float>(h.columns.3.x, h.columns.3.y, h.columns.3.z)
+        let enPiso = SIMD2<Double>(Double(w.x), Double(w.z))
+        let paredes = paredesDeMalla(c).map { $0.pared }
+        guard enAR.count == paredes.count, let e = MallaDelCuarto.esquinaCercana(enPiso, paredes: paredes, enAR: enAR) else {
+            avisoLaboratorio("Toque justo en una esquina del cuarto, donde se juntan dos paredes. Con dos dedos puede acercar.")
+            return
+        }
+        var ps = (L.pines[cuarto] ?? []).filter { simd_distance($0.plano, e.plano) > 1.0 }
+        ps.append(MallaDelCuarto.Pin(plano: e.plano, ar: enPiso))
+        if ps.count > 4 { ps.removeFirst(ps.count - 4) }
+        L.pines[cuarto] = ps
+        marcarEsquina(w, piso: pisoParaLab(frame))
+        L.ultimaMalla = 0
+        let pulgadas = simd_distance(e.ar, enPiso) / 0.0254
+        avisoLaboratorio(pulgadas < 1.5 ? "Esquina marcada: la malla ya estaba ahí." : String(format: "Esquina marcada: la malla se mueve %.0f in para pegarse ahí.", pulgadas))
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+    // Una rayita naranja del piso a donde tocó, con su bolita: ahí quedó amarrada la malla.
+    private func marcarEsquina(_ w: SIMD3<Float>, piso: Float) {
+        let L = lab
+        let alto = max(0.1, w.y - piso)
+        let mat = SCNMaterial(); mat.lightingModel = .constant; mat.diffuse.contents = UIColor(red: 1, green: 0.47, blue: 0, alpha: 1)
+        mat.readsFromDepthBuffer = false
+        let palo = SCNCylinder(radius: 0.006, height: CGFloat(alto)); palo.materials = [mat]
+        let nodo = SCNNode(geometry: palo)
+        nodo.simdPosition = SIMD3(w.x, piso + alto / 2, w.z)
+        let bola = SCNSphere(radius: 0.02); bola.materials = [mat]
+        let nb = SCNNode(geometry: bola); nb.simdPosition = SIMD3(0, alto / 2, 0)
+        nodo.addChildNode(nb)
+        nodo.renderingOrder = 110
+        sceneView.scene.rootNode.addChildNode(nodo)
+        L.marcasPin.append(nodo)
+        while L.marcasPin.count > 8 { L.marcasPin.removeFirst().removeFromParentNode() }
+    }
+    // La pastilla de la malla, debajo de la del laboratorio: en qué cuarto, cuántas paredes van con el láser, las esquinas
+    // tocadas y el zoom.
+    fileprivate func pintarPastillaMalla() {
+        let L = lab
+        var partes: [String] = []
+        if let c = L.cuartoMalla {
+            partes.append("Malla · \(c)")
+            let i = L.ajusteInfo
+            if i.total > 0 { partes.append(i.vistas == 0 ? "con la ubicación" : "\(i.vistas) de \(i.total) paredes con el láser") }
+            if i.pines > 0 { partes.append(i.pines == 1 ? "1 esquina" : "\(i.pines) esquinas") }
+        }
+        if L.zoom > 1.01 { partes.append(String(format: "%.1f×", L.zoom)) }
+        L.mallaPastilla.text = "  " + partes.joined(separator: " · ") + "  "
+        L.mallaPastilla.isHidden = partes.isEmpty || !L.activo
+    }
+
+    // ---------------- LA MEMORIA DE LA CASA ----------------
+    // Lo medido se guarda en el teléfono (Documents/malla-memoria.json): las paredes del plano (pies) y, de cada una, lo
+    // quitado y lo ya visto. Al volver a la casa (el mismo plano: 60% o más de sus paredes iguales) la malla ya lo trae.
+    private var urlMemoria: URL? {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.appendingPathComponent("malla-memoria.json")
+    }
+    private static func mismaPared(_ w: (a: SIMD2<Double>, b: SIMD2<Double>, alto: Double), _ a: SIMD2<Double>, _ b: SIMD2<Double>) -> Bool {
+        (simd_distance(w.a, a) < 0.5 && simd_distance(w.b, b) < 0.5) || (simd_distance(w.a, b) < 0.5 && simd_distance(w.b, a) < 0.5)
+    }
+    private func cargarMemoriaDeLaCasa() {
+        let L = lab
+        L.memoriaCargada = true
+        guard maqueta == 0, !L.mallaParedes.isEmpty, let u = urlMemoria, let d = try? Data(contentsOf: u),
+              let casas = (try? JSONSerialization.jsonObject(with: d)) as? [[String: Any]] else { return }
+        let actuales = Array(L.mallaParedes)
+        func par(_ x: Any?) -> SIMD2<Double>? { guard let v = x as? [Double], v.count == 2 else { return nil }; return SIMD2(v[0], v[1]) }
+        var mejor: ([String: Any], Double)? = nil
+        for casa in casas {
+            guard let ps = casa["paredes"] as? [[String: Any]], !ps.isEmpty else { continue }
+            let iguales = ps.filter { p in
+                guard let a = par(p["a"]), let b = par(p["b"]) else { return false }
+                return actuales.contains { Self.mismaPared($0.value, a, b) }
+            }.count
+            let sc = min(Double(iguales) / Double(ps.count), Double(iguales) / Double(actuales.count))
+            if sc >= 0.6, mejor == nil || sc > mejor!.1 { mejor = (casa, sc) }
+        }
+        guard let casa = mejor?.0 else { return }
+        L.memoriaId = casa["id"] as? String
+        let iso = ISO8601DateFormatter()
+        for p in casa["paredes"] as? [[String: Any]] ?? [] {
+            guard let a = par(p["a"]), let b = par(p["b"]), let k = actuales.first(where: { Self.mismaPared($0.value, a, b) }) else { continue }
+            let alReves = simd_distance(k.value.a, a) > simd_distance(k.value.a, b)
+            let largo = simd_distance(a, b)
+            func voltear(_ x: (Double, Double)) -> (Double, Double) { alReves ? (largo - x.1, largo - x.0) : x }
+            let cortes: [MallaDelCuarto.Corte] = (p["cortes"] as? [[Double]] ?? []).filter { $0.count == 3 }.map { c in let v = voltear((c[0], c[1])); return (v.0, v.1, c[2]) }
+            let vistos = (p["vistos"] as? [[Double]] ?? []).filter { $0.count == 2 }.map { voltear(($0[0], $0[1])) }
+            guard !cortes.isEmpty || !vistos.isEmpty else { continue }
+            let fecha = (p["fecha"] as? String).flatMap { iso.date(from: $0) } ?? Date()
+            L.memoria[k.key] = (cortes, vistos, fecha)
+            L.cortesPorPared[k.key] = cortes
+        }
+    }
+    // Lo de la pared que se está midiendo pasa a la memoria (y se guarda). `seguir`: se sigue midiendo la misma.
+    private func anotarParedEnLaMemoria(seguir: Bool = false) {
+        let L = lab
+        guard let k = L.paredMidiendo else { return }
+        if !seguir { L.paredMidiendo = nil }
+        let vistos = L.vistosAhora[k] ?? []
+        let cortes = L.cortesPorPared[k] ?? []
+        guard !vistos.isEmpty || !cortes.isEmpty else { return }
+        L.memoria[k] = (cortes, MallaDelCuarto.unir((L.memoria[k]?.vistos ?? []) + vistos), Date())
+        if !seguir { L.vistosAhora[k] = nil }
+        guardarMemoriaDeLaCasa()
+    }
+    private func guardarMemoriaDeLaCasa() {
+        let L = lab
+        guard maqueta == 0, let u = urlMemoria, !L.mallaParedes.isEmpty, !L.memoria.isEmpty else { return }
+        var casas = ((try? Data(contentsOf: u)).flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [[String: Any]]) ?? []
+        let id = L.memoriaId ?? UUID().uuidString
+        L.memoriaId = id
+        let iso = ISO8601DateFormatter()
+        func r2(_ x: Double) -> Double { (x * 100).rounded() / 100 }
+        var paredes: [[String: Any]] = []
+        for (k, w) in L.mallaParedes {
+            var p: [String: Any] = ["a": [r2(w.a.x), r2(w.a.y)], "b": [r2(w.b.x), r2(w.b.y)]]
+            if let mm = L.memoria[k] {
+                p["cortes"] = mm.cortes.map { [r2($0.t0), r2($0.t1), r2($0.alto)] }
+                p["vistos"] = mm.vistos.map { [r2($0.0), r2($0.1)] }
+                p["fecha"] = iso.string(from: mm.fecha)
+            }
+            paredes.append(p)
+        }
+        casas.removeAll { ($0["id"] as? String) == id }
+        casas.append(["id": id, "nivel": nivelActual, "fecha": iso.string(from: Date()), "paredes": paredes])
+        if casas.count > 30 { casas = Array(casas.sorted { ($0["fecha"] as? String ?? "") < ($1["fecha"] as? String ?? "") }.suffix(30)) }
+        if let d = try? JSONSerialization.data(withJSONObject: casas) { try? d.write(to: u, options: .atomic) }
     }
 
     // Las esquinas (afinadas con los planos de ARKit de las paredes de al lado) y las puertas/ventanas, cada segundo.
@@ -10624,6 +11103,7 @@ extension ARMeasureViewController {
 
     private func otraPared() {
         let L = lab
+        anotarParedEnLaMemoria()
         cerrarGrabacion()
         L.generacion += 1
         L.cara = nil; L.anclaID = nil; L.caraLocal = nil; L.ultimoOrigen = nil
@@ -10914,23 +11394,26 @@ extension ARMeasureViewController {
     fileprivate func maquetaLaboratorio(_ paso: Int) {
         entrarLaboratorio()
         if paso == 18 || paso == 19 || paso == 20 { nueva.minimapa.telefono = SIMD2(27, 6); nueva.minimapa.mirando = SIMD2(0, -1) }
-        if paso == 21, let ac = acomodoParaLab() {
+        if paso == 21 || paso == 22, let ac = acomodoParaLab() {
             // LA MALLA DE LA CASA en el simulador: sin ARKit no hay cámara de verdad; se pone una cámara de SceneKit parada en
             // la cocina mirando la pared del sur, con un corte de 2 ft (de 3 a 11 ft) ya encontrado en esa pared.
             let L = lab
             nueva.fondoMaqueta?.isHidden = true
             sceneView.scene.background.contents = UIColor(white: 0.32, alpha: 1)      // en vez del video de la cámara
-            pintarMalla(ac: ac, marco: 0, piso: 0)
+            // Solo el cuarto donde está (la cocina); 22 = con zoom (2.2x: la malla de cuadritos de 3 in).
+            L.cuartoMalla = "Kitchen"; L.ajusteInfo = (0, 4, 0)
+            if paso == 22 { L.zoom = 2.2; L.mallaFina = true }
+            pintarMalla(ac: ac, marco: 0, piso: 0, cuarto: "Kitchen")
             if let clave = L.mallaParedes.first(where: { abs($0.value.a.y) < 0.1 && abs($0.value.b.y) < 0.1 && min($0.value.a.x, $0.value.b.x) >= 19.9 })?.key,
                let w = L.mallaParedes[clave] {
                 let desdeA = w.a.x <= w.b.x
                 L.cortesPorPared[clave] = [(desdeA ? 3 : 11, desdeA ? 11 : 3, 2)].map { (min($0.0, $0.1), max($0.0, $0.1), $0.2) }
-                pintarMalla(ac: ac, marco: 0, piso: 0)
+                pintarMalla(ac: ac, marco: 0, piso: 0, cuarto: "Kitchen")
             }
             let camNodo = SCNNode(); let cam = SCNCamera(); cam.fieldOfView = 70; cam.zNear = 0.05; cam.zFar = 50
             camNodo.camera = cam
-            camNodo.simdPosition = SIMD3(2.0, 1.25, 3.3)
-            camNodo.eulerAngles = SCNVector3(-0.05, 0.25, 0)
+            camNodo.simdPosition = SIMD3(0.7, 1.35, 3.3)
+            camNodo.eulerAngles = SCNVector3(-0.08, -0.95, 0)
             // En el simulador la vista de ARKit no dibuja ni guarda su escena: la malla (los MISMOS nodos) se pasa a una vista
             // de SceneKit normal, con la cámara parada en la cocina.
             let vista3D = SCNView(frame: view.bounds)
@@ -10942,6 +11425,7 @@ extension ARMeasureViewController {
             vista3D.backgroundColor = UIColor(white: 0.32, alpha: 1)
             vista3D.isUserInteractionEnabled = false
             view.insertSubview(vista3D, aboveSubview: sceneView)
+            aplicarZoomLab()
 
             L.modoPlano = true; L.firmaBotones = ""
             pintarLaboratorio(); pintarMinimapa()

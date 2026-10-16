@@ -2,8 +2,8 @@
 // (el mismo escáner de Field Reports, que ya viene dentro de la app: plugin RoomScan) y se dibuja con el
 // mismo código de Field Reports (plano.js, copiado por tools/extraer_plano.py). Un escaneo por piso;
 // un escaneo nuevo no borra el anterior (queda de historial), se ve el más reciente.
-import * as plano from './plano.js?v=2026-10-15-17';
-import { authFetch, esAparato } from './app.js?v=2026-10-15-17';
+import * as plano from './plano.js?v=2026-10-16-1';
+import { authFetch, esAparato } from './app.js?v=2026-10-16-1';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
@@ -93,7 +93,9 @@ export async function paredesParaCamara(trabajoId, nivelId){
       });
       // El 4o número es el ancho (pies, 16-oct): con él la cámara sabe dónde no hay drywall (puerta) y hasta dónde
       // medir bajo una ventana. Los aparatos viejos leen solo los 3 primeros.
-      ['windows', 'doors'].forEach(k => (room[k] || []).forEach(x => { if(x && x.position && !x._removed){ const an = Number(x._widthOverrideFt || x.widthFt) || 0; forma.senas.push([Math.round(x.position.x * 100) / 100, Math.round(x.position.y * 100) / 100, k === 'windows' ? 1 : 0, Math.round(an * 100) / 100]); } }));
+      // 5o y 6o (15-oct): a qué altura del piso empieza (-1 = el escaneo es viejo y no lo guardó) y su alto, para que la
+      // malla de la casa deje el hueco de la puerta o la ventana en su lugar.
+      ['windows', 'doors'].forEach(k => (room[k] || []).forEach(x => { if(x && x.position && !x._removed){ const an = Number(x._widthOverrideFt || x.widthFt) || 0, al = Number(x._heightOverrideFt || x.heightFt) || 0, ab = x.bottomFt == null ? -1 : Number(x.bottomFt); forma.senas.push([Math.round(x.position.x * 100) / 100, Math.round(x.position.y * 100) / 100, k === 'windows' ? 1 : 0, Math.round(an * 100) / 100, Math.round(ab * 100) / 100, Math.round(al * 100) / 100]); } }));
       if(forma.paredes.length >= 3) FORMAS[nombre] = forma;
     });
     return out;
