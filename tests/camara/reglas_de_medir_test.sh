@@ -136,6 +136,18 @@ ok("siguen siendo 5 caminos a cambiarSeccion", len(re.findall(r'cambiarSeccion\(
 ok("la parte y el cuarto solo cambian entre una medida y otra (la regla madre)", 'guard !bloqueoDeParte() else' in bloque(v, 'fileprivate func revisarMedirPrimero')
    and 'medidaEnCurso' in bloque(v, 'fileprivate func bloqueoDeParte') and 'n.preguntaMedir != nil' in bloque(v, 'fileprivate func bloqueoDeParte'))
 ok("'¿Ya terminó con esta pared?' desde 1 medida en esa pared, y 'Continuar' la calla", 'medidasEnEstaPared() > 0' in bloque(v, 'private func pedirCambio') and 'if n.cierreCallado { return }' in bloque(v, 'private func pedirCambio'))
+# Su prueba (16 oct, 3:31): "no puedo seguir midiendo más de una medida… eso ya lo teníamos arreglado". Medir es como
+# siempre: el largo por esquinas sin límite (lo cierra "Listo · el largo"), y el alto o el ancho también por esquinas.
+gat = bloque(v, 'fileprivate func gatilloMedir')
+ok("el + marca esquinas del largo sin límite (no cierra solo el largo)", 'addTapped()' in gat and 'finishPathTapped' not in gat)
+ok("el + también marca el alto o el ancho por esquinas", 'case .measuringWidth, .widthDone:\n            addTapped()' in gat)
+tel = bloque(v, 'fileprivate func terminarElLargo')
+ok("'Listo · el largo' cierra el largo con la función de siempre y pregunta si mide el alto/ancho", 'finishPathTapped()' in tel and 'abrirPregunta(.segunda)' in tel)
+ok("el alto/ancho empieza con la función de siempre (addWidthTapped), sin pegarse a la última esquina", 'addWidthTapped()' in bloque(v, 'fileprivate func empezarAncho') and 'empezarSegunda' not in v)
+ok("Deshacer en el alto/ancho quita un punto a la vez (undoTapped de siempre)", 'undoTapped()\n            if stage == .lengthDone { abrirPregunta(.segunda) }' in bloque(v, 'fileprivate func deshacerMedir'))
+mm = bloque(v, 'fileprivate func pintarMuelleMedir')
+ok("con el largo cerrado el botón dice 'Alto' (pared) o 'Ancho' (piso, techo), como antes", 'titulo = segundaPalabra.capitalized' in mm and 'self?.empezarAncho()' in mm)
+ok("el + se queda vivo en el alto/ancho ya medido (un ancho que dobla se sigue)", 'let masVivo = !roomName.isEmpty && stage != .lengthDone' in mm)
 ok("Terminar y mandar sigue por el camino de siempre", 'self.nueva.terminarDeVerdad = true\n            self.terminarNuevoTocado()' in v)
 ok("el corte de 1 pie va en pie lineal también en la cámara", 'if m.contains("1 ft cut") { return .lineal }' in v)
 ok("lo contestado del nivel se guarda por trabajo y nivel", 'Self.llaveAjuste + "|" + trabajoId + "|" + nivelActual' in v and 'arVC.trabajoId = call.getString("trabajo")' in plg)

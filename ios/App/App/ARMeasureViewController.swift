@@ -7766,7 +7766,7 @@ fileprivate enum Claro {
 
 fileprivate enum PanelCamara: Equatable { case nivel, cuarto, parte, material, voz, sigue, medir }
 // MEDIR PRIMERO (16 oct): lo que se le pregunta al tocar Listo, "¿Ya terminó con esta pared?" y la hoja del cuarto.
-fileprivate enum PreguntaMedir: Equatable { case que, otroLineal, shoe, matPared, insulPared, piso, pad, underCuarto, techo, techoCuarto, lineal1, cierre, cuarto }
+fileprivate enum PreguntaMedir: Equatable { case que, otroLineal, shoe, matPared, insulPared, piso, pad, underCuarto, techo, techoCuarto, lineal1, cierre, cuarto, segunda }
 // A dónde se va al cambiar (lo que pide el teléfono o el mapa, entre una medida y otra).
 fileprivate enum CambioDeLugar: Equatable { case parte(String), pared(Int), cuarto(String) }
 
@@ -10375,6 +10375,29 @@ extension ARMeasureViewController {
         guard !roomName.isEmpty else { return false }
         return stage == .lengthDone || stage == .widthDone || (stage == .measuringLength && pathPoints.count >= 2)
     }
+    // Su prueba (16 oct, 3:31): "no puedo seguir midiendo más de una medida… si las paredes tienen esquinas no me deja… y
+    // no me dice cuando termino el largo y quiero empezar el ancho". Como ya estaba en la cámara: el largo va por esquinas
+    // sin límite y lo cierra "Listo · el largo"; ahí se pregunta si mide el alto (o el ancho), que también va por esquinas.
+    fileprivate func terminarElLargo() {
+        guard stage == .measuringLength, pathPoints.count >= 2 else { return }
+        finishPathTapped()
+        abrirPregunta(.segunda)
+    }
+    fileprivate func empezarAncho() {
+        nueva.preguntaMedir = nil; nueva.firmaPanel = ""
+        if stage == .lengthDone { addWidthTapped() }      // + en el inicio, + en el final (y si dobla, + en la siguiente)
+        pintarCamaraNueva()
+    }
+    fileprivate func seguirConElLargo() {
+        nueva.preguntaMedir = nil; nueva.firmaPanel = ""
+        if stage == .lengthDone, let ultima = pathPoints.last {
+            stage = .measuringLength
+            pendingStart = ultima
+            pendingStartNode = currentMarkers.last
+            updateUI()
+        }
+        pintarCamaraNueva()
+    }
     // La tarjeta de abajo: CUARTO (por el mapa) | PARTE (por el teléfono) | MEDIDA, y Deshacer · + · Listo.
     fileprivate func pintarMuelleMedir() {
         let n = nueva
@@ -10398,32 +10421,47 @@ extension ARMeasureViewController {
             if pathPoints.isEmpty { leyenda = items.isEmpty ? "nada todavía" : "la guardada"; puedeDeshacer = !items.isEmpty }
             else { leyenda = "la esquina"; puedeDeshacer = true }
         case .lengthDone: leyenda = "el largo"; puedeDeshacer = true
-        case .measuringWidth, .widthDone: leyenda = "el " + segundaPalabra; puedeDeshacer = true
+        case .measuringWidth: leyenda = pendingStart == nil ? "el " + segundaPalabra : "punto del " + segundaPalabra; puedeDeshacer = true
+        case .widthDone: leyenda = "la esquina"; puedeDeshacer = true
         case .pickingMaterial: leyenda = "nada todavía"; puedeDeshacer = false
         }
         n.deshacer.setAttributedTitle(Self.dosRenglones("Deshacer", leyenda, color: puedeDeshacer ? Claro.tinta : Claro.apagado), for: .normal)
         n.deshacer.isEnabled = puedeDeshacer
         // El +: el largo, y después el alto (pared) o el ancho (piso, techo).
-        let masVivo = !roomName.isEmpty && (stage == .measuringLength || stage == .lengthDone || stage == .measuringWidth || stage == .pickingMaterial)
+        let masVivo = !roomName.isEmpty && stage != .lengthDone
         n.gatillo.isEnabled = masVivo
         n.gatillo.alpha = masVivo ? 1 : 0.45
-        n.gatillo.accessibilityLabel = stage == .lengthDone ? "Medir el \(segundaPalabra)" : "Marcar esquina"
-        // Listo: después del largo ("solo el largo") o del alto/ancho (el área).
+        n.gatillo.accessibilityLabel = "Marcar esquina"
+        // Listo: primero cierra el largo (y pregunta si mide el alto o el ancho); con el alto/ancho, el área.
         let listo = puedeListo()
-        let sub = stage == .widthDone ? "\(Self.pies(pathTotalFeet * (currentWidthFeet ?? 0))) pies²" : (listo ? "solo el largo" : "falta medir")
-        n.accionDerecha = listo ? { [weak self] in self?.listoMedir() } : nil
+        let sub: String
+        switch stage {
+        case .widthDone: sub = "\(Self.pies(pathTotalFeet * (currentWidthFeet ?? 0))) pies²"
+        case .measuringWidth: sub = "falta el " + segundaPalabra
+        case .measuringLength, .lengthDone: sub = listo ? "el largo" : "falta medir"
+        case .pickingMaterial: sub = "falta medir"
+        }
+        var titulo = "Listo", subDerecho = sub
+        switch stage {
+        case .measuringLength: n.accionDerecha = listo ? { [weak self] in self?.terminarElLargo() } : nil
+        case .lengthDone:
+            // Como antes: con el largo cerrado, el botón dice "Alto" (pared) o "Ancho" (piso, techo).
+            titulo = segundaPalabra.capitalized; subDerecho = section == "wall" ? "medir el corte" : "medir"
+            n.accionDerecha = { [weak self] in self?.empezarAncho() }
+        default: n.accionDerecha = listo ? { [weak self] in self?.listoMedir() } : nil
+        }
         n.derecho.isEnabled = listo
         n.derecho.backgroundColor = listo ? Claro.azul : Claro.loseta
-        n.derecho.setAttributedTitle(Self.dosRenglones("Listo", sub, color: listo ? .white : Claro.apagado, fuerte: true), for: .normal)
+        n.derecho.setAttributedTitle(Self.dosRenglones(titulo, subDerecho, color: listo ? .white : Claro.apagado, fuerte: true), for: .normal)
     }
     fileprivate func pistaMedir() -> String? {
         switch stage {
         case .pickingMaterial: return nil
         // Cortas: a la derecha de arriba va el mapita.
-        case .measuringLength: return pathPoints.isEmpty ? "Primera esquina" : "Siguiente esquina"
-        case .lengthDone: return section == "wall" ? "Alto con +, o Listo" : "Ancho con +, o Listo"
-        case .measuringWidth: return section == "wall" ? "Arriba del corte" : "La otra orilla"
-        case .widthDone: return "Toque Listo"
+        case .measuringLength: return pathPoints.isEmpty ? "Primera esquina" : (pathPoints.count == 1 ? "Siguiente esquina" : "Otra esquina, o Listo")
+        case .lengthDone: return section == "wall" ? "¿Mide el alto?" : "¿Mide el ancho?"
+        case .measuringWidth: return (pendingStart == nil ? "Inicio del " : "Final del ") + segundaPalabra + " con +"
+        case .widthDone: return "Otra esquina, o Listo"
         }
     }
 
@@ -10436,32 +10474,14 @@ extension ARMeasureViewController {
             stage = .measuringLength
             addTapped()
         case .measuringLength:
-            let antes = pathPoints.count
-            addTapped()
-            // Dos esquinas = el largo. El siguiente + ya es el alto o el ancho.
-            if pathPoints.count >= 2, pathPoints.count > antes { finishPathTapped() }
+            addTapped()                       // esquinas sin límite: la pared con esquinas se camina
         case .lengthDone:
-            empezarSegunda()
-        case .measuringWidth:
-            addTapped()
-        case .widthDone:
-            break
+            abrirPregunta(.segunda)
+        case .measuringWidth, .widthDone:
+            addTapped()                       // el alto o el ancho también por esquinas
         }
     }
-    // El alto (pared) o el ancho (piso, techo) arranca en la última esquina del largo: el siguiente + marca la otra punta.
-    fileprivate func empezarSegunda() {
-        guard stage == .lengthDone, let esquina = pathPoints.last else { return }
-        addWidthTapped()
-        let marca = addMarker(at: esquina, color: Self.tema.lineaAncho)
-        currentMarkers.append(marca)
-        widthPoints = [esquina]
-        recomputeWidthTotal()
-        pendingStart = esquina
-        pendingStartNode = marca
-        lineLayer.path = nil
-        updateUI()
-    }
-    // Deshacer, paso por paso: la esquina, el largo (vuelve a la primera esquina), el alto o el ancho entero.
+    // Deshacer, paso por paso, como siempre: la esquina del largo, y en el alto o el ancho un punto a la vez.
     fileprivate func deshacerMedir() {
         guard nueva.preguntaMedir == nil else { return }
         switch stage {
@@ -10473,7 +10493,8 @@ extension ARMeasureViewController {
             pendingStartNode = currentMarkers.last
             undoTapped()
         case .measuringWidth, .widthDone:
-            quitarSegunda()
+            undoTapped()
+            if stage == .lengthDone { abrirPregunta(.segunda) }
         }
     }
     private func quitarSegunda() {
@@ -10787,12 +10808,20 @@ extension ARMeasureViewController {
             poner(rejilla([loseta("Sí · con insulación", "\(pies(A)) pies²") { s in s.contestarPendiente(true) },
                            loseta("No · sin insulación", nil) { s in s.contestarPendiente(false) }], columnas: 2), 4)
             poner(salida("‹ Regresar") { s in s.nueva.porGuardar = nil; s.abrirPregunta(.techo) })
+        case .segunda:
+            let pared = section == "wall"
+            cabeza(dondeMedir(conMedida: true), numero([(pies(L), true), (" pies de largo", false)]), pared ? "¿Mide el alto?" : "¿Mide el ancho?",
+                   pared ? "Con el alto va por pie cuadrado. Sin alto, por pie lineal (baseboard o corte de 1 pie)." : "Con el ancho va por pie cuadrado.")
+            poner(rejilla([loseta(pared ? "Alto" : "Ancho", "marcarlo con + (por esquinas)") { s in s.empezarAncho() },
+                           loseta("Solo el largo", pared ? "baseboard, corte de 1 pie…" : (section == "floor" ? "tackless strip…" : "crown molding…")) { s in
+                                s.nueva.preguntaMedir = nil; s.listoMedir() }], columnas: 2), 4)
+            poner(salida("‹ Seguir con el largo") { s in s.seguirConElLargo() })
         case .lineal1:
             let esPiso = section == "floor"
             cabeza(dondeMedir(conMedida: true), numero([(pies(L), true), (" pies de largo, sin ancho", false)]), "¿Qué midió?", nil)
             let lineal = esPiso ? ("Tackless Strip", "Tackless strip") : ("Crown Molding", "Crown molding")
             poner(rejilla([loseta(lineal.1, "\(pies(L)) pies lineales") { s in s.guardarMedir(ReglasDeMedir.lineal(lineal.0, largo: L)) },
-                           loseta("Me falta el ancho", "marcarlo con +") { s in s.nueva.preguntaMedir = nil; s.empezarSegunda(); s.nueva.firmaPanel = ""; s.pintarCamaraNueva() }],
+                           loseta("Me falta el ancho", "marcarlo con +") { s in s.empezarAncho() }],
                           columnas: 2), 4)
             poner(corregir)
         case .cierre:
@@ -11009,7 +11038,7 @@ extension ARMeasureViewController {
             if paso == 35 { n.ajuste.techo = "mixto" }
             entrarAMedir()
             switch paso {
-            case 26: medida("wall", 14, nil)
+            case 26: medida("wall", 14, nil); abrirPregunta(.segunda)
             case 27: medida("wall", 14, nil); listoMedir()
             case 28: medida("wall", 14, nil); listoMedir(); abrirPregunta(.shoe)
             case 29: medida("wall", 14, 4); listoMedir()
