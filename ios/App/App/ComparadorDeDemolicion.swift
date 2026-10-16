@@ -765,7 +765,7 @@ struct ComparadorDeDemolicion {
     static let ambar: (UInt8, UInt8, UInt8, UInt8) = (255, 176, 64, 110)
     static let grisRaya: (UInt8, UInt8, UInt8, UInt8) = (90, 90, 90, 120)
 
-    func pintar(_ res: Resultado, piso pisoDado: Float? = nil, px: Int = 4) -> (ancho: Int, alto: Int, rgba: [UInt8]) {
+    func pintar(_ res: Resultado, piso pisoDado: Float? = nil, px: Int = 4, limites: ClosedRange<Float>? = nil) -> (ancho: Int, alto: Int, rgba: [UInt8]) {
         let piso = pisoDado ?? pisoRef
         let w = Self.columnas * px, h = Self.renglones * px
         var img = [UInt8](repeating: 0, count: w * h * 4)
@@ -791,6 +791,7 @@ struct ComparadorDeDemolicion {
         let seCuenta = res.patronStuds || res.largo > 0
         for (i, col) in res.columnas.enumerated() {
             let c = res.colIni + i
+            if let l = limites, !l.contains(Self.uDeColumna(c)) { continue }     // la pared de al lado: no se pinta
             switch col {
             case .cortada(let a):
                 let rTope = Self.renglonDe(piso + a - Self.celda / 2) ?? r0

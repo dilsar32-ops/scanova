@@ -154,7 +154,7 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
                     }
                     let senas: [UbicadorEnPlano.SenaPlano] = ((f["senas"] as? [[Any]]) ?? []).compactMap { x in
                         guard x.count >= 3, let px = num(x[0]), let py = num(x[1]) else { return nil }
-                        return UbicadorEnPlano.SenaPlano(p: SIMD2(px, py), esVentana: (num(x[2]) ?? 0) > 0.5)
+                        return UbicadorEnPlano.SenaPlano(p: SIMD2(px, py), esVentana: (num(x[2]) ?? 0) > 0.5, ancho: x.count >= 4 ? (num(x[3]) ?? 0) : 0)
                     }
                     if paredes.count >= 3 { mapa[cuarto] = (paredes, senas) }
                 }
@@ -244,7 +244,7 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
         arVC.modalPresentationStyle = .fullScreen
         arVC.experiencia = "nueva"
         arVC.maqueta = paso
-        arVC.laboratorio = (11...13).contains(paso)
+        arVC.laboratorio = (11...13).contains(paso) || paso == 18 || paso == 19
         arVC.modo = "recorrido"
         arVC.alcance = "nivel"
         arVC.nivelActual = "2nd Floor"

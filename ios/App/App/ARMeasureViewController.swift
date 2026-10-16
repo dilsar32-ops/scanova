@@ -7872,6 +7872,9 @@ fileprivate final class MinimapaCamara: UIView {
     // Los otros cuartos de la planta (claritos) y de qué cuarto son las paredes de arriba.
     var otras: [UbicadorEnPlano.ParedPlano] = [] { didSet { setNeedsDisplay() } }
     var cuarto = ""
+    // El laboratorio: la pared que se está midiendo y los pedazos que el láser ve cortados (pies del plano).
+    var resaltada: (SIMD2<Double>, SIMD2<Double>)? { didSet { setNeedsDisplay() } }
+    var cortes: [(SIMD2<Double>, SIMD2<Double>)] = [] { didSet { setNeedsDisplay() } }
     let estado = UILabel()
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -7908,6 +7911,15 @@ fileprivate final class MinimapaCamara: UIView {
         for s in senas {
             ctx.setFillColor((s.esVentana ? Claro.azul : Claro.gris).cgColor)
             let q = p(s.p); ctx.fill(CGRect(x: q.x - 3, y: q.y - 3, width: 6, height: 6))
+        }
+        if let (a, b) = resaltada {
+            ctx.setStrokeColor(UIColor(red: 1, green: 0.47, blue: 0, alpha: 0.35).cgColor); ctx.setLineWidth(7)
+            ctx.move(to: p(a)); ctx.addLine(to: p(b)); ctx.strokePath()
+        }
+        if !cortes.isEmpty {
+            ctx.setStrokeColor(UIColor(red: 1, green: 0.47, blue: 0, alpha: 1).cgColor); ctx.setLineWidth(5)
+            for (a, b) in cortes { ctx.move(to: p(a)); ctx.addLine(to: p(b)) }
+            ctx.strokePath()
         }
         if medida.count >= 2 {
             ctx.setStrokeColor(ARMeasureViewController.tema.lineaLargo.cgColor); ctx.setLineWidth(3)
@@ -8557,7 +8569,7 @@ extension ARMeasureViewController {
 
     private func pintarMinimapa() {
         let n = nueva, m = n.minimapa, g = n.mapaGrande
-        guard !planoPorCuarto.isEmpty, !lab.activo else { m.isHidden = true; return }
+        guard !planoPorCuarto.isEmpty else { m.isHidden = true; return }
         // La planta entera (los otros cuartos del mismo dibujo, claritos) y, si ya escogió, su cuarto en negro.
         let forma = formaDelCuarto()
         let marco = marcoDe(roomName) ?? n.acomodoMarco ?? marcoPorCuarto.values.min()
@@ -8565,7 +8577,14 @@ extension ARMeasureViewController {
         let otras = marco.map { mc in cuartosDelMarco(mc).filter { $0.nombre.lowercased() != roomName.lowercased() }.flatMap { $0.paredes } } ?? []
         guard !(fuertes.isEmpty && otras.isEmpty) else { m.isHidden = true; return }
         // Arriba, siempre (aunque haya un panel abierto); en la fase de ubicarse se ve el grande en su lugar.
-        m.isHidden = n.ubicandose
+        m.isHidden = n.ubicandose && !lab.activo
+        // En el laboratorio: la pared que se mide (naranja clarito) y lo que el láser ve cortado (naranja).
+        if lab.activo, let ctx = lab.enPlano, let cara = lab.cara {
+            m.resaltada = (ctx.pared.a, ctx.pared.b)
+            let ac = ctx.ac
+            func enPlano(_ u: Float) -> SIMD2<Double> { let w = cara.alMundo(SIMD2(u, 0)); return DemolicionEnPlano.alPlano(SIMD2(w.x, w.z), ac) }
+            m.cortes = lab.resultado.area > 0 ? lab.resultado.tramos.map { (enPlano($0.uIni), enPlano($0.uFin)) } : []
+        } else if m.resaltada != nil || !m.cortes.isEmpty { m.resaltada = nil; m.cortes = [] }
         let senas = forma?.senas ?? (marco.map { cuartosDelMarco($0).flatMap { $0.senas } } ?? [])
         if m.cuarto != roomName || m.paredes.count != fuertes.count || m.otras.count != otras.count {
             m.cuarto = roomName; m.paredes = fuertes; m.senas = senas; m.otras = otras
@@ -9519,6 +9538,20 @@ extension ARMeasureViewController {
             roomName = "Living Room"; nueva.cuartoVisto = roomName
             let paso = maqueta
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.maquetaLaboratorio(paso) }
+        case 18, 19:
+            // El laboratorio CON el plano (16 oct): la cocina de 14 x 12 ft al lado de la sala; su pared sur (la de la
+            // grabación de la maqueta 11) es de afuera. Ya ubicado. 18 = midiendo; 19 = apuntando, antes de fijar.
+            func w(_ a: Double, _ b: Double, _ c: Double, _ d: Double, _ e: Bool) -> UbicadorEnPlano.ParedPlano {
+                UbicadorEnPlano.ParedPlano(seg: UbicadorEnPlano.Segmento(a: SIMD2(a, b), b: SIMD2(c, d)), exterior: e) }
+            planoPorCuarto = ["Kitchen": ([w(20, 0, 34, 0, true), w(34, 0, 34, 12, true), w(34, 12, 20, 12, false), w(20, 12, 20, 0, false)],
+                                          [UbicadorEnPlano.SenaPlano(p: SIMD2(34, 6), esVentana: true, ancho: 3), UbicadorEnPlano.SenaPlano(p: SIMD2(20, 8), esVentana: false, ancho: 3)]),
+                              "Living Room": ([w(0, 0, 20, 0, true), w(20, 0, 20, 12, false), w(20, 12, 0, 12, false), w(0, 12, 0, 0, true)], [])]
+            marcoPorCuarto = ["Kitchen": 0, "Living Room": 0]
+            nueva.acomodo = UbicadorEnPlano.Acomodo(giro: 0, mov: SIMD2(20, 0), puntaje: 20, segundo: 4, seguro: true)
+            nueva.acomodoNivel = nivelActual; nueva.acomodoMarco = 0; nueva.acomodoCuarto = "Kitchen"
+            roomName = "Kitchen"; nueva.cuartoVisto = roomName
+            let paso = maqueta
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.maquetaLaboratorio(paso) }
         case 1:
             guardada("Kitchen", "wall", "Drywall", 12, 4); guardada("Kitchen", "floor", "Laminate", 12, 10)
             guardada("Kitchen", "kitchen", "Countertop", 14, 2); guardada("Kitchen", "kitchen", "Cabinets", 12, nil)
@@ -9640,7 +9673,7 @@ struct UbicadorEnPlano {
         var angulo: Double { atan2(b.y - a.y, b.x - a.x) }
     }
     struct ParedPlano { var seg: Segmento; var exterior: Bool }
-    struct SenaPlano { var p: SIMD2<Double>; var esVentana: Bool }        // ventana o puerta del plano (su centro)
+    struct SenaPlano { var p: SIMD2<Double>; var esVentana: Bool; var ancho: Double = 0 }   // ventana o puerta del plano (su centro; ancho en pies, 0 = no se sabe)
     enum Clase { case pared, ventana, puerta }
     struct Visto { var seg: Segmento; var clase: Clase }                  // lo que el LiDAR ve, ya en pies (x, z)
     struct Acomodo {
@@ -9906,6 +9939,28 @@ fileprivate final class LabDemolicion {
     var firmaBotones = ""
     var capa: SCNNode?
     var vistaMaqueta: UIImageView?
+    // CON LA UBICACIÓN (16 oct, su pedido "conéctalo a la cámara"): si la cámara ya se ubicó en el plano, no se fija la
+    // pared a mano: se apunta a la pared un segundo y la app sabe cuál es (cuarto, de afuera o de adentro, sus esquinas,
+    // sus puertas y ventanas) y dice el corte como en el plano: "de la esquina 0'-0" a 6'-0", alto 2'-0"".
+    var enPlano: ParedDelLab?
+    var apuntada: (indice: Int, ancla: UUID, desde: Date)?
+    var apuntadaTexto: String?
+    var paredDesconocida = false
+    var modoPlano = false
+    var reporte: DemolicionEnPlano.Reporte?
+    var ultimasEsquinas: CFTimeInterval = 0
+    var fijadaDesde = Date.distantPast
+}
+
+// La pared del plano que se está midiendo en el laboratorio.
+fileprivate struct ParedDelLab {
+    var cuarto: String
+    var pared: DemolicionEnPlano.Pared
+    var ac: DemolicionEnPlano.Acomodo2D
+    var aberturas: [DemolicionEnPlano.Abertura]
+    var esquinas: DemolicionEnPlano.Esquinas? = nil
+    var ventanas: [ClosedRange<Float>] = []
+    var puertas: [ClosedRange<Float>] = []
 }
 
 extension ARMeasureViewController {
@@ -9958,7 +10013,10 @@ extension ARMeasureViewController {
         }
         limpiarBarridosViejos()
         armarVistasLaboratorio()
-        for v in [nueva.barra, nueva.columna, nueva.muelle, nueva.panel, nueva.tarjeta, nueva.minimapa] { v.isHidden = true }
+        for v in [nueva.barra, nueva.columna, nueva.muelle, nueva.panel, nueva.tarjeta, nueva.fase] { v.isHidden = true }
+        nueva.minimapa.isHidden = planoPorCuarto.isEmpty
+        L.enPlano = nil; L.apuntada = nil; L.apuntadaTexto = nil; L.reporte = nil; L.paredDesconocida = false
+        L.modoPlano = acomodoParaLab() != nil
         L.pastilla.isHidden = false; L.tarjeta.isHidden = false
         nueva.mira.isHidden = false
         L.cara = nil
@@ -9986,6 +10044,8 @@ extension ARMeasureViewController {
         L.activo = false
         L.generacion += 1
         L.cara = nil; L.anclaID = nil; L.caraLocal = nil; L.ultimoOrigen = nil
+        L.enPlano = nil; L.apuntada = nil; L.reporte = nil
+        nueva.minimapa.resaltada = nil; nueva.minimapa.cortes = []
         L.cola.async { L.comparador.reiniciar() }
         L.capa?.removeFromParentNode(); L.capa = nil
         L.vistaMaqueta?.removeFromSuperview(); L.vistaMaqueta = nil
@@ -10047,9 +10107,34 @@ extension ARMeasureViewController {
     fileprivate func pintarLaboratorio() {
         let L = lab, r = L.resultado
         guard L.activo else { return }
-        if L.cara == nil {
+        if L.cara == nil && L.modoPlano {
+            L.numero.text = "Apunte a la pared"
+            if let t = L.apuntadaTexto {
+                L.detalle.text = L.paredDesconocida ? t + " Apunte a otra, o toque Fijar a mano." : t + "\nQuédese apuntando un momento…"
+            } else {
+                L.detalle.text = "Ya sé dónde está en el plano. Apunte la mira a la pared que va a medir y quédese un segundo. Luego camine despacio de una esquina a la otra, a 3-5 ft."
+            }
+        } else if L.cara == nil {
             L.numero.text = "Fije la pared"
             L.detalle.text = "Apunte la mira al drywall ENTERO de arriba del corte y toque Fijar pared. Luego camine despacio de una esquina a la otra, a 3-5 ft, con el teléfono a la cintura."
+                + (planoPorCuarto.isEmpty ? "" : "\n(Cuando se ubique en el plano, la pared se escoge sola.)")
+        } else if let ctx = L.enPlano {
+            let sf = (L.reporte?.area ?? r.area) / (0.3048 * 0.3048)
+            L.numero.text = String(format: "%.1f SF", sf)
+            let largo = Float(simd_length(ctx.pared.b - ctx.pared.a) / 3.28084)
+            var d = "\(ctx.cuarto) · pared de \(ctx.pared.exterior ? "afuera" : "adentro") · \(Self.piesConComillas(largo))"
+            let tramos = L.reporte?.tramos ?? []
+            if tramos.isEmpty {
+                d += "\nTodavía no veo corte: camine despacio a lo largo de la pared."
+            } else {
+                for t in tramos.prefix(2) {
+                    let desde = t.hastaEsquinaA ? "la esquina izq." : Self.piesConComillas(t.desde)
+                    let hasta = t.hastaEsquinaB ? "la esquina der." : Self.piesConComillas(t.hasta)
+                    d += "\nDe \(desde) a \(hasta) · alto \(Self.piesConComillas(t.alto))"
+                }
+                if tramos.count > 2 { d += "  (+\(tramos.count - 2) más)" }
+            }
+            L.detalle.text = d
         } else {
             L.numero.text = String(format: "%.1f SF", r.area / (0.3048 * 0.3048))
             var d = "Quitado: \(Self.piesPulgadas(r.largo)) de largo"
@@ -10071,7 +10156,7 @@ extension ARMeasureViewController {
             L.grabando.text = n > 0 ? "\(n) grabación\(n == 1 ? "" : "es") sin guardar" : "Grabación guardada"
         } else { L.grabando.text = " " }
         // Los botones (cuadrícula pareja), solo cuando cambia lo que se puede hacer.
-        let firma = "\(L.cara != nil)|\(L.archivos.count)|\(L.grabadora != nil)"
+        let firma = "\(L.cara != nil)|\(L.archivos.count)|\(L.grabadora != nil)|\(L.modoPlano)|\(L.paredDesconocida)"
         guard firma != L.firmaBotones else { return }
         L.firmaBotones = firma
         L.botones.arrangedSubviews.forEach { $0.removeFromSuperview() }
@@ -10080,7 +10165,10 @@ extension ARMeasureViewController {
             let l = LosetaCamara(icono: icono, titulo: t, sub: nil, extra: nil, etiqueta: nil, centrada: true, alto: 54)
             l.marcada = marcada; l.accion = accion; losetas.append(l)
         }
-        if L.cara == nil {
+        if L.cara == nil && L.modoPlano {
+            // Con plano la pared se escoge sola; a mano solo si apunta a una pared que el plano no tiene.
+            if L.paredDesconocida { loseta("scope", "Fijar a mano") { [weak self] in self?.fijarPared() } }
+        } else if L.cara == nil {
             loseta("scope", "Fijar pared", marcada: true) { [weak self] in self?.fijarPared() }
         } else {
             loseta("arrow.right.square", "Otra pared") { [weak self] in self?.otraPared() }
@@ -10089,7 +10177,7 @@ extension ARMeasureViewController {
             loseta("square.and.arrow.up", "Guardar grabación") { [weak self] in self?.guardarGrabacion() }
         }
         loseta("xmark", "Salir") { [weak self] in self?.salirLaboratorio() }
-        L.botones.addArrangedSubview(rejilla(losetas, columnas: 3))
+        L.botones.addArrangedSubview(rejilla(losetas, columnas: max(1, min(3, losetas.count))))
     }
 
     private func mensajeLaboratorio() -> String? {
@@ -10113,7 +10201,17 @@ extension ARMeasureViewController {
             case .bajoAbertura: return "El corte llega a una ventana o espejo: se mide solo hasta ahí."
             }
         }
+        // Lo que falta ver de ESTA pared (con el plano se sabe dónde termina): después de unos segundos de barrer.
+        if let rep = L.reporte, let f = rep.faltaVer.first, Date().timeIntervalSince(L.fijadaDesde) > 4 {
+            return "Falta ver de \(Self.piesConComillas(f.lowerBound)) a \(Self.piesConComillas(f.upperBound)): camine hasta allá."
+        }
         return nil
+    }
+
+    // 6'-0" (como en el plano).
+    static func piesConComillas(_ m: Float) -> String {
+        let p = Int((max(0, m) / 0.0254).rounded())
+        return "\(p / 12)'-\(p % 12)\""
     }
 
     private func avisoLaboratorio(_ s: String) {
@@ -10144,19 +10242,121 @@ extension ARMeasureViewController {
         guard let cara = ComparadorDeDemolicion.Cara.desde(punto: punto, normal: normal, telefono: tel) else {
             avisoLaboratorio("Eso no es una pared. Apunte al drywall entero de arriba del corte."); return
         }
+        L.enPlano = nil
+        ponerCara(cara, ancla: g.anchor as? ARPlaneAnchor, t: frame.timestamp)
+        pintarLaboratorio()
+    }
+
+    // La cara fijada (a mano o por el plano): viaja con el ancla de la pared, el comparador empieza de cero y se graba.
+    private func ponerCara(_ cara: ComparadorDeDemolicion.Cara, ancla: ARPlaneAnchor?, t: TimeInterval) {
+        let L = lab
         L.generacion += 1
         L.cara = cara
         L.ultimoOrigen = cara.origen
-        if let a = g.anchor as? ARPlaneAnchor {
+        if let a = ancla {
             let inv = a.transform.inverse
             L.anclaID = a.identifier
             L.caraLocal = (inv * SIMD4(cara.origen, 1), inv * SIMD4(cara.n, 0))
         } else { L.anclaID = nil; L.caraLocal = nil }
         L.cola.async { L.comparador.reiniciar() }
         L.pared += 1
-        empezarGrabacion(cara: cara, t: frame.timestamp)
+        L.fijadaDesde = Date()
+        L.reporte = nil
+        empezarGrabacion(cara: cara, t: t)
         L.resultado = ComparadorDeDemolicion.Resultado()
+    }
+
+    // ---------------- LA PARED DEL PLANO (con la ubicación) ----------------
+    // El acomodo de la ubicación, solo si es seguro y de este nivel.
+    fileprivate func acomodoParaLab() -> DemolicionEnPlano.Acomodo2D? {
+        guard !planoPorCuarto.isEmpty, let ac = nueva.acomodo, ac.seguro, nueva.acomodoNivel == nivelActual else { return nil }
+        return DemolicionEnPlano.Acomodo2D(giro: ac.giro, mov: ac.mov)
+    }
+    // Todas las paredes de la planta donde está, con su cuarto y las puertas/ventanas de ese cuarto que traen ancho.
+    fileprivate func paredesParaLab() -> [(cuarto: String, pared: DemolicionEnPlano.Pared, aberturas: [DemolicionEnPlano.Abertura])] {
+        guard let m = nueva.acomodoMarco ?? marcoDe(roomName) ?? marcoPorCuarto.values.min() else { return [] }
+        return cuartosDelMarco(m).flatMap { c -> [(cuarto: String, pared: DemolicionEnPlano.Pared, aberturas: [DemolicionEnPlano.Abertura])] in
+            let ab = c.senas.filter { $0.ancho > 0 }.map { DemolicionEnPlano.Abertura(centro: $0.p, ancho: $0.ancho, esPuerta: !$0.esVentana) }
+            return c.paredes.map { (cuarto: c.nombre, pared: DemolicionEnPlano.Pared(a: $0.seg.a, b: $0.seg.b, exterior: $0.exterior), aberturas: ab) }
+        }
+    }
+    fileprivate static func planoAR(_ a: ARPlaneAnchor) -> DemolicionEnPlano.PlanoAR {
+        let c = a.transform * SIMD4<Float>(a.center, 1)
+        return DemolicionEnPlano.PlanoAR(punto: SIMD3(c.x, c.y, c.z), normal: SIMD3(a.transform.columns.1.x, a.transform.columns.1.y, a.transform.columns.1.z))
+    }
+    // El piso: el plano de ARKit que dice "piso" (el más grande), o el horizontal más bajo, o el teléfono menos 1.1 m.
+    private func pisoParaLab(_ frame: ARFrame) -> Float {
+        let camY = frame.camera.transform.columns.3.y
+        let abajo = frame.anchors.compactMap { $0 as? ARPlaneAnchor }.filter { $0.alignment == .horizontal && $0.transform.columns.3.y < camY - 0.5 }
+        if let f = abajo.filter({ $0.classification == .floor }).max(by: { $0.planeExtent.width * $0.planeExtent.height < $1.planeExtent.width * $1.planeExtent.height }) {
+            return f.transform.columns.3.y
+        }
+        return abajo.map { $0.transform.columns.3.y }.min() ?? camY - 1.1
+    }
+    // Lo que se apunta con la mira: ¿qué pared del plano es? Un segundo quieto en la misma = se fija.
+    private func apuntarParedDelPlano(_ frame: ARFrame, ac: DemolicionEnPlano.Acomodo2D) {
+        let L = lab
+        let centro = CGPoint(x: sceneView.bounds.midX, y: sceneView.bounds.midY)
+        var golpe: ARRaycastResult?
+        if let q = sceneView.raycastQuery(from: centro, allowing: .existingPlaneGeometry, alignment: .vertical) { golpe = sceneView.session.raycast(q).first }
+        if golpe == nil, let q = sceneView.raycastQuery(from: centro, allowing: .existingPlaneInfinite, alignment: .vertical) { golpe = sceneView.session.raycast(q).first }
+        guard let g = golpe, let ancla = g.anchor as? ARPlaneAnchor else {
+            if L.apuntadaTexto != nil || L.paredDesconocida { L.apuntadaTexto = nil; L.paredDesconocida = false; pintarLaboratorio() }
+            L.apuntada = nil
+            return
+        }
+        let plano = Self.planoAR(ancla)
+        let todas = paredesParaLab()
+        // Primero las del cuarto donde está (una pared compartida está en los dos cuartos).
+        let aqui = cuartoDondeEsta()?.lowercased()
+        let preferidas = todas.enumerated().filter { $0.element.cuarto.lowercased() == aqui }
+        var idx: Int? = nil
+        if !preferidas.isEmpty, let k = DemolicionEnPlano.paredDe(plano, paredes: preferidas.map { $0.element.pared }, acomodo: ac) { idx = preferidas[k].offset }
+        if idx == nil { idx = DemolicionEnPlano.paredDe(plano, paredes: todas.map { $0.pared }, acomodo: ac) }
+        guard let i = idx else {
+            L.apuntada = nil
+            if !L.paredDesconocida { L.apuntadaTexto = "Esa pared no está en el plano."; L.paredDesconocida = true; pintarLaboratorio() }
+            return
+        }
+        let w = todas[i]
+        let texto = "\(w.cuarto) · pared de \(w.pared.exterior ? "afuera" : "adentro") · \(Self.piesConComillas(Float(simd_length(w.pared.b - w.pared.a) / 3.28084)))"
+        if texto != L.apuntadaTexto || L.paredDesconocida { L.apuntadaTexto = texto; L.paredDesconocida = false; pintarLaboratorio() }
+        if let ap = L.apuntada, ap.indice == i, ap.ancla == ancla.identifier {
+            if Date().timeIntervalSince(ap.desde) >= 1.0 { fijarParedDelPlano(w, ancla: ancla, frame: frame, ac: ac) }
+        } else { L.apuntada = (i, ancla.identifier, Date()) }
+    }
+    private func fijarParedDelPlano(_ w: (cuarto: String, pared: DemolicionEnPlano.Pared, aberturas: [DemolicionEnPlano.Abertura]),
+                                    ancla: ARPlaneAnchor, frame: ARFrame, ac: DemolicionEnPlano.Acomodo2D) {
+        let L = lab
+        let tel = SIMD3<Float>(frame.camera.transform.columns.3.x, frame.camera.transform.columns.3.y, frame.camera.transform.columns.3.z)
+        guard let cara = DemolicionEnPlano.cara(para: w.pared, plano: Self.planoAR(ancla), acomodo: ac, pisoY: pisoParaLab(frame), telefono: tel) else { return }
+        L.apuntada = nil; L.apuntadaTexto = nil
+        ponerCara(cara, ancla: ancla, t: frame.timestamp)
+        L.enPlano = ParedDelLab(cuarto: w.cuarto, pared: w.pared, ac: ac, aberturas: w.aberturas)
+        actualizarEsquinas(frame, forzar: true)
+        if let g = L.grabadora {
+            // Para la Mac: qué pared del plano es, en pies del plano y con el acomodo (así se repite igual allá).
+            let e: [String: Any] = ["evento": "pared-plano", "cuarto": w.cuarto, "exterior": w.pared.exterior,
+                                    "a": [w.pared.a.x, w.pared.a.y], "b": [w.pared.b.x, w.pared.b.y], "giro": ac.giro, "mov": [ac.mov.x, ac.mov.y]]
+            let t = frame.timestamp
+            L.cola.async { g.evento(t: t, e) }
+        }
         pintarLaboratorio()
+    }
+    // Las esquinas (afinadas con los planos de ARKit de las paredes de al lado) y las puertas/ventanas, cada segundo.
+    private func actualizarEsquinas(_ frame: ARFrame, forzar: Bool = false) {
+        let L = lab
+        guard var ctx = L.enPlano, let cara = L.cara else { return }
+        let ahora = CACurrentMediaTime()
+        guard forzar || ahora - L.ultimasEsquinas >= 1 else { return }
+        L.ultimasEsquinas = ahora
+        let ac = acomodoParaLab() ?? ctx.ac
+        ctx.ac = ac
+        let otros = frame.anchors.compactMap { $0 as? ARPlaneAnchor }.filter { $0.alignment == .vertical && $0.identifier != L.anclaID }.map { Self.planoAR($0) }
+        ctx.esquinas = DemolicionEnPlano.esquinas(cara, pared: ctx.pared, acomodo: ac, otros: otros)
+        let ab = DemolicionEnPlano.aberturasEnCara(cara, pared: ctx.pared, aberturas: ctx.aberturas, acomodo: ac)
+        ctx.ventanas = ab.ventanas; ctx.puertas = ab.puertas
+        L.enPlano = ctx
     }
 
     private func otraPared() {
@@ -10164,6 +10364,8 @@ extension ARMeasureViewController {
         cerrarGrabacion()
         L.generacion += 1
         L.cara = nil; L.anclaID = nil; L.caraLocal = nil; L.ultimoOrigen = nil
+        L.enPlano = nil; L.apuntada = nil; L.apuntadaTexto = nil; L.reporte = nil
+        nueva.minimapa.resaltada = nil; nueva.minimapa.cortes = []
         L.cola.async { L.comparador.reiniciar() }
         L.capa?.removeFromParentNode(); L.capa = nil
         L.resultado = ComparadorDeDemolicion.Resultado()
@@ -10256,6 +10458,11 @@ extension ARMeasureViewController {
             }
             return
         }
+        // La ubicación sigue afinándose mientras se prueba (con plano), y el mapita enseña la pared que se mide.
+        if !planoPorCuarto.isEmpty { ubicarseEnElPlano(); pintarMinimapa() }
+        let ac = acomodoParaLab()
+        if (ac != nil) != L.modoPlano { L.modoPlano = ac != nil; pintarLaboratorio() }
+        if L.cara == nil, let ac = ac { apuntarParedDelPlano(frame, ac: ac) }
         guard var cara = L.cara else { return }
         let tel = SIMD3<Float>(frame.camera.transform.columns.3.x, frame.camera.transform.columns.3.y, frame.camera.transform.columns.3.z)
         // La cara viaja con su ancla (ARKit la corrige mientras afina el mapa); un brinco de más de 1 in = empezar otra vez.
@@ -10308,7 +10515,8 @@ extension ARMeasureViewController {
         let pintar = ahora - L.ultimaPintura >= 0.5
         if pintar { L.ultimaPintura = ahora }
         let extra: [String: Any] = ["cara": LectorDeBarrido.caraComoLista(cara), "rastreo": "normal", "luz": Double(L.luz), "termico": termico.rawValue]
-        let gen = L.generacion, grab = L.grabadora
+        actualizarEsquinas(frame)
+        let gen = L.generacion, grab = L.grabadora, ctx = L.enPlano
         L.procesando = true
         L.cola.async { [weak self] in
             let pts = ComparadorDeDemolicion.puntos(profundidad: metros, confianza: conf, ancho: w, alto: h, fx: fx, fy: fy, cx: cx, cy: cy,
@@ -10323,14 +10531,19 @@ extension ARMeasureViewController {
                 if let p = planos { g.planos(t: t, p) }
                 if let f = foto, let jpg = UIImage(cgImage: f).jpegData(compressionQuality: 0.5) { g.foto(t: t, jpeg: jpg) }
             }
-            let r = L.comparador.resultado()
-            let img = pintar ? L.comparador.pintar(r, px: 4) : nil
+            // Con la pared del plano: sus esquinas, sus puertas y ventanas, y el reporte desde la esquina de la izquierda.
+            let lim = ctx?.esquinas?.limites
+            let r = L.comparador.resultado(limites: lim, ventanas: ctx?.ventanas ?? [], puertas: ctx?.puertas ?? [])
+            var rep: DemolicionEnPlano.Reporte? = nil
+            if let c = ctx, let e = c.esquinas { rep = DemolicionEnPlano.reporte(r, comp: L.comparador, esquinas: e, pared: c.pared, puertas: c.puertas, desdeLaIzquierda: true) }
+            let img = pintar ? L.comparador.pintar(r, px: 4, limites: lim) : nil
             let deriva = L.comparador.derivaV, piso = L.comparador.pisoRef != nil, lejos = L.comparador.ultimoLejos
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 L.procesando = false
                 guard L.activo, gen == L.generacion else { return }
                 L.resultado = r; L.derivaV = deriva; L.pisoVisto = piso; L.lejos = lejos
+                if gen == L.generacion, L.enPlano != nil { L.reporte = rep }
                 if let img = img { self.ponerCapa(img, cara: cara, deriva: deriva) }
                 self.pintarLaboratorio()
             }
@@ -10408,18 +10621,45 @@ extension ARMeasureViewController {
     // Documents/maqueta-barrido.scb (la que deja tests/demolicion_test.sh). 11 = después de barrer; 12 = recién entrando.
     fileprivate func maquetaLaboratorio(_ paso: Int) {
         entrarLaboratorio()
-        guard paso == 11 else { return }
+        if paso == 18 || paso == 19 { nueva.minimapa.telefono = SIMD2(27, 6); nueva.minimapa.mirando = SIMD2(0, -1) }
+        if paso == 19 {
+            do {
+                let L = lab
+                L.modoPlano = true
+                L.apuntadaTexto = "Kitchen · pared de afuera · 14'-0\""
+                L.firmaBotones = ""
+                pintarLaboratorio(); pintarMinimapa()
+            }
+            return
+        }
+        guard paso == 11 || paso == 18 else { return }
         let L = lab
         guard let doc = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.appendingPathComponent("maqueta-barrido.scb"),
               let regs = try? LectorDeBarrido.leer(doc), let p = LectorDeBarrido.repetir(regs).first else {
             avisoLaboratorio("Falta Documents/maqueta-barrido.scb"); return
         }
-        let r = p.comparador.resultado()
+        var r = p.comparador.resultado()
+        var lim: ClosedRange<Float>? = nil
+        if paso == 18, let ac = acomodoParaLab(), let w = paredesParaLab().first(where: { $0.cuarto == "Kitchen" && $0.pared.exterior && abs($0.pared.a.y) < 0.1 }) {
+            // La grabación es de una pared de 14 ft en z = 0 (x de 0 a 4.27 m); las de al lado, como las vería ARKit.
+            let otros = [DemolicionEnPlano.PlanoAR(punto: SIMD3(0, 1.2, 1.0), normal: SIMD3(1, 0, 0)),
+                         DemolicionEnPlano.PlanoAR(punto: SIMD3(4.2672, 1.2, 1.0), normal: SIMD3(-1, 0, 0))]
+            var ctx = ParedDelLab(cuarto: w.cuarto, pared: w.pared, ac: ac, aberturas: w.aberturas)
+            let e = DemolicionEnPlano.esquinas(p.cara, pared: w.pared, acomodo: ac, otros: otros)
+            ctx.esquinas = e
+            let ab = DemolicionEnPlano.aberturasEnCara(p.cara, pared: w.pared, aberturas: w.aberturas, acomodo: ac)
+            ctx.ventanas = ab.ventanas; ctx.puertas = ab.puertas
+            r = p.comparador.resultado(limites: e.limites, ventanas: ctx.ventanas, puertas: ctx.puertas)
+            L.reporte = DemolicionEnPlano.reporte(r, comp: p.comparador, esquinas: e, pared: w.pared, puertas: ctx.puertas, desdeLaIzquierda: true)
+            L.enPlano = ctx; L.modoPlano = true
+            lim = e.limites
+        }
         L.cara = p.cara; L.resultado = r; L.pisoVisto = true; L.lejos = 0
         L.archivos = [doc]
         L.firmaBotones = ""
+        if paso == 18 { pintarMinimapa() }
         // La capa, en 2D sobre la foto (en el simulador no hay ARKit que la ponga en la pared): solo lo barrido.
-        let img = p.comparador.pintar(r, px: 4)
+        let img = p.comparador.pintar(r, px: 4, limites: lim)
         if let prov = CGDataProvider(data: Data(img.rgba) as CFData),
            let cg = CGImage(width: img.ancho, height: img.alto, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: img.ancho * 4,
                             space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue),

@@ -159,14 +159,21 @@ struct DemolicionEnPlano {
     }
 
     static func reporte(_ comp: ComparadorDeDemolicion, esquinas e: Esquinas, pared: Pared, piso: Float? = nil,
-                        ventanas: [ClosedRange<Float>] = [], puertas: [ClosedRange<Float>] = []) -> Reporte {
+                        ventanas: [ClosedRange<Float>] = [], puertas: [ClosedRange<Float>] = [], desdeLaIzquierda: Bool = false) -> Reporte {
         let res = comp.resultado(piso: piso, limites: e.limites, ventanas: ventanas, puertas: puertas)
+        return reporte(res, comp: comp, esquinas: e, pared: pared, puertas: puertas, desdeLaIzquierda: desdeLaIzquierda)
+    }
+    // Con el resultado ya calculado (el teléfono lo calcula una vez por cuadro y lo usa también para pintar la pared).
+    // `desdeLaIzquierda`: las distancias desde la esquina de la IZQUIERDA viendo la pared (u menor), no desde la `a` del
+    // plano: así se lo dice uno a la cuadrilla parado frente a la pared.
+    static func reporte(_ res: ComparadorDeDemolicion.Resultado, comp: ComparadorDeDemolicion, esquinas e: Esquinas, pared: Pared,
+                        puertas: [ClosedRange<Float>] = [], desdeLaIzquierda: Bool = false) -> Reporte {
         var rep = Reporte()
         rep.largoPared = e.u.upperBound - e.u.lowerBound
         rep.exterior = pared.exterior
         rep.alarmas = res.alarmas
         rep.area = res.area
-        let aEsMenor = abs(e.uDeA - e.u.lowerBound) <= abs(e.uDeA - e.u.upperBound)
+        let aEsMenor = desdeLaIzquierda || abs(e.uDeA - e.u.lowerBound) <= abs(e.uDeA - e.u.upperBound)
         func desdeA(_ u: Float) -> Float { aEsMenor ? u - e.u.lowerBound : e.u.upperBound - u }
         if res.area > 0 {
             rep.tramos = res.tramos.map { t in

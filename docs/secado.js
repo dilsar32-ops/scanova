@@ -5,8 +5,8 @@
 //  · Equipment: qué equipo, cuántos, en qué cuarto, cuándo se puso y cuándo se quitó (días de equipo).
 // "Today's readings" junta todo lo del día en una sola pantalla: la cuadrilla camina con el medidor y escribe.
 // Lo que se guarda vive en sql/fotos-08-secado.sql.
-import { authFetch } from './app.js?v=2026-10-15-15';
-import { coordsDe, miPosicion } from './cerca.js?v=2026-10-15-15';
+import { authFetch } from './app.js?v=2026-10-15-16';
+import { coordsDe, miPosicion } from './cerca.js?v=2026-10-15-16';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
