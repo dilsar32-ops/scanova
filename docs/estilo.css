@@ -2561,3 +2561,29 @@ body.dl-barra .pie [data-nav="proyectos"], body.dl-barra .pie [data-nav="clients
 .card.med-pend p{ margin:0 0 10px; font-size:14.5px; line-height:1.45; }
 .card.med-pend .aviso{ margin:0 0 10px; }
 .doc-sub.doc-nota{ white-space:pre-wrap; }
+
+/* ---------- PEGAR FOTOS (16-oct, pegar.js) ---------- */
+.hoja.hoja-pegar .hoja-caja{ max-height:92%; }
+@media (min-width:900px){ .hoja.hoja-pegar .hoja-caja{ max-height:80%; } }
+.hoja-lista.pegar-cuerpo{ padding:0 18px 4px; }
+.hoja-pegar .pegar-destino{ margin:0 0 12px; }
+.hoja-pegar .pegar-fotos{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin:0 0 10px; }
+.hoja-pegar .pegar-fotos:empty{ display:none; }
+@media (min-width:900px){ .hoja-pegar .pegar-fotos{ grid-template-columns:repeat(4,minmax(0,1fr)); } }
+.pegar-fotos .pegar-f{ position:relative; aspect-ratio:1; border-radius:10px; overflow:hidden; background:var(--bg2); }
+.pegar-fotos .pegar-f img{ width:100%; height:100%; object-fit:cover; display:block; }
+.pegar-fotos .pegar-f.mal img{ opacity:.35; }
+.pegar-f .pegar-mal{ position:absolute; left:6px; right:6px; bottom:6px; padding:3px 6px; border-radius:6px; background:rgba(12,20,36,.72); color:#fff; font-size:11px; font-weight:600; text-align:center; }
+.pegar-f .pegar-quitar{ position:absolute; top:6px; right:6px; width:26px; height:26px; border-radius:7px; border:0; background:#fff; color:var(--ink); font-size:13px; line-height:26px; padding:0; cursor:pointer; box-shadow:0 1px 4px rgba(10,17,35,.25); }
+.hoja-pegar .pegar-caja{ position:relative; min-height:140px; border:1.5px dashed var(--line2); border-radius:12px; display:flex; align-items:center; justify-content:center; text-align:center; margin:0 0 4px; }
+.hoja-pegar .pegar-caja.llena{ min-height:56px; }
+.hoja-pegar .pegar-caja:focus-within{ border-color:var(--accent); }
+.pegar-caja .pegar-pista{ pointer-events:none; display:flex; flex-direction:column; align-items:center; gap:4px; padding:12px; color:var(--ink-soft); }
+.pegar-caja .pegar-pista .ic{ width:26px; height:26px; color:var(--accent); }
+.pegar-caja .pegar-pista b{ color:var(--ink); font-size:15px; }
+.pegar-caja .pegar-pista small{ font-size:12.5px; }
+.pegar-caja.llena .pegar-pista .ic{ display:none; }
+.pegar-caja .pegar-zona{ position:absolute; inset:0; z-index:1; border-radius:inherit; outline:none; color:transparent; caret-color:transparent; font-size:16px; overflow:hidden; -webkit-user-select:text; user-select:text; -webkit-touch-callout:default; }
+.hoja-pegar .pegar-botones{ display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:12px 18px; }
+.hoja-pegar .pegar-botones .btn{ width:100%; }
+.app .pegar-atrapa, body .pegar-atrapa{ position:absolute; left:-9999px; top:0; width:1px; height:1px; opacity:0; overflow:hidden; }

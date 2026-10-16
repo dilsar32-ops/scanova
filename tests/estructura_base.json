@@ -198,7 +198,16 @@
 "visorN",
 "visorPie",
 "visorQuien",
-"visorSig"
+"visorSig",
+"hojaPegar",
+"pegarTitulo",
+"pegarDestino",
+"pegarFotos",
+"pegarCaja",
+"pegarZona",
+"pegarAviso",
+"pegarSubir",
+"pegarAtrapa"
 ],
 "navs": [
 "atras",

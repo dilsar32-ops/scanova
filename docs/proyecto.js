@@ -1,16 +1,17 @@
 // Scanova · la ficha de un proyecto (diseño de Amilcar, 12 oct 2026): portada, nombre, dirección, etapa, cliente,
 // encargado y fecha; pestañas Rooms · Photos · Dry Logs · Floor Plan · Measurements · Notes · Documents · Activity.
 // Rooms = niveles (Basement, First Floor…) y sus cuartos (Kitchen…). Photos = las fotos por nivel y por cuarto.
-import { $, $$, authFetch, irA, atras, esManager, PERFIL, marcarLimpio, preguntar } from './app.js?v=2026-10-16-11';
-import * as trabajos from './trabajos.js?v=2026-10-16-11';
-import * as fotos from './fotos.js?v=2026-10-16-11';
-import * as panel from './panel.js?v=2026-10-16-11';
-import * as planos from './planos.js?v=2026-10-16-11';
-import * as camara from './camara.js?v=2026-10-16-11';
-import * as detalles from './detalles.js?v=2026-10-16-11';
-import * as drylog from './drylog.js?v=2026-10-16-11';
-import * as documentos from './documentos.js?v=2026-10-16-11';
-import * as medidas from './medidas.js?v=2026-10-16-11';
+import { $, $$, authFetch, irA, atras, esManager, PERFIL, marcarLimpio, preguntar } from './app.js?v=2026-10-16-12';
+import * as trabajos from './trabajos.js?v=2026-10-16-12';
+import * as fotos from './fotos.js?v=2026-10-16-12';
+import * as panel from './panel.js?v=2026-10-16-12';
+import * as planos from './planos.js?v=2026-10-16-12';
+import * as camara from './camara.js?v=2026-10-16-12';
+import * as detalles from './detalles.js?v=2026-10-16-12';
+import * as drylog from './drylog.js?v=2026-10-16-12';
+import * as documentos from './documentos.js?v=2026-10-16-12';
+import * as medidas from './medidas.js?v=2026-10-16-12';
+import * as pegar from './pegar.js?v=2026-10-16-12';
 
 const esc = (v) => trabajos.esc(v);
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -568,6 +569,7 @@ export function conectar(){
   camara.usarCuartos({ hay: (id) => !!(T && T.id === id), destino: destinoActual, nombre: nombreDestino, escoger: escogerCuarto });
   fotos.alPintar((urls) => { pintarFotos(urls); if(TAB === 'secado' && T) drylog.alCambiarFotos(); });
   fotos.usarDestino(destinoActual);
+  pegar.usar({ proyecto: () => T, tab: () => TAB, destino: destinoActual, nombre: nombreDestino }); pegar.conectar();
   fotos.usarOrdenVisor(ordenVisible);
   fotos.usarEtiqueta((f) => etiquetaFoto(f, CUARTOS, NIVELES));
   fotos.alClicFoto((id) => { if(!MODO_SEL) return false; if(SEL.has(id)) SEL.delete(id); else SEL.add(id); pintarFotos(); return true; });
@@ -602,6 +604,7 @@ export function conectar(){
       else if(a === 'cuarto-borrar') borrarCuarto(CUARTOS.find(x => x.id === id));
       else if(a === 'foto-camara') camara.abrir(T);
       else if(a === 'foto-carrete'){ const inp = $('#fotosPanel input[data-subir]'); if(inp) inp.click(); }
+      else if(a === 'foto-pegar') pegar.abrir();
       else if(a === 'foto-mover') mover([id]);
       else if(a === 'foto-bajar') bajarFoto(id);
       else if(a === 'foto-papelera') papelera([id]);
@@ -616,7 +619,7 @@ export function conectar(){
       return;
     }
     if((el = q('[data-subir-menu]'))){ e.stopPropagation();
-      panel.abrirMenuEn(el, `<button type="button" data-p-accion="foto-camara">${IC('camara')}<span>Take Photos<small class="menu-sub">Choose level & room · many in a row</small></span></button><button type="button" data-p-accion="foto-carrete">${IC('galeria')}From Library</button>`); return; }
+      panel.abrirMenuEn(el, `<button type="button" data-p-accion="foto-camara">${IC('camara')}<span>Take Photos<small class="menu-sub">Choose level & room · many in a row</small></span></button><button type="button" data-p-accion="foto-carrete">${IC('galeria')}From Library</button><button type="button" data-p-accion="foto-pegar">${IC('pegar')}<span>Paste Photos<small class="menu-sub">Copied from another app</small></span></button>`); return; }
     if(q('#btnEditar')){ trabajos.editar(T, 'pTrabajo'); return; }
     if(q('[data-editar-etq]')){ abrirEtiquetas(); return; }
     if((el = q('[data-etq-quitar]'))){ ETQ_EDIT.splice(Number(el.dataset.etqQuitar), 1); pintarEtiquetas(); return; }

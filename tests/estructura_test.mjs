@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 const base = JSON.parse(fs.readFileSync(new URL('./estructura_base.json', import.meta.url), 'utf8'));
 const idx = fs.readFileSync(new URL('../docs/index.html', import.meta.url), 'utf8');
-const js = ['proyecto.js', 'detalles.js', 'fotos.js', 'camara.js', 'panel.js', 'trabajos.js'].map(f => fs.readFileSync(new URL('../docs/' + f, import.meta.url), 'utf8')).join('\n');
+const js = ['proyecto.js', 'detalles.js', 'fotos.js', 'camara.js', 'panel.js', 'trabajos.js', 'pegar.js'].map(f => fs.readFileSync(new URL('../docs/' + f, import.meta.url), 'utf8')).join('\n');
 let pass = 0, fail = 0;
 const ok = (l, c) => { if(c){ pass++; } else { fail++; console.log('  FAIL ' + l); } };
 base.ids.forEach(id => ok('sigue el elemento #' + id, idx.includes('id="' + id + '"')));

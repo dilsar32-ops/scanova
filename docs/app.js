@@ -1,15 +1,15 @@
 // Scanova · arranque, sesión y navegación. Las pantallas viven en index.html; lo de trabajos en trabajos.js.
-import { SUPABASE_URL, ANON_KEY, APP_BUILD } from './config.js?v=2026-10-16-11';
-import { ESQUEMA_APARATO, urlEntrarGoogle } from './google.js?v=2026-10-16-11';
-import * as trabajos from './trabajos.js?v=2026-10-16-11';
-import * as personas from './personas.js?v=2026-10-16-11';
-import * as fotos from './fotos.js?v=2026-10-16-11';
-import * as panel from './panel.js?v=2026-10-16-11';
-import * as camara from './camara.js?v=2026-10-16-11';
-import * as direccion from './direccion.js?v=2026-10-16-11';
-import * as proyecto from './proyecto.js?v=2026-10-16-11';
-import * as foto from './foto.js?v=2026-10-16-11';
-import * as editor from './editor.js?v=2026-10-16-11';
+import { SUPABASE_URL, ANON_KEY, APP_BUILD } from './config.js?v=2026-10-16-12';
+import { ESQUEMA_APARATO, urlEntrarGoogle } from './google.js?v=2026-10-16-12';
+import * as trabajos from './trabajos.js?v=2026-10-16-12';
+import * as personas from './personas.js?v=2026-10-16-12';
+import * as fotos from './fotos.js?v=2026-10-16-12';
+import * as panel from './panel.js?v=2026-10-16-12';
+import * as camara from './camara.js?v=2026-10-16-12';
+import * as direccion from './direccion.js?v=2026-10-16-12';
+import * as proyecto from './proyecto.js?v=2026-10-16-12';
+import * as foto from './foto.js?v=2026-10-16-12';
+import * as editor from './editor.js?v=2026-10-16-12';
 
 export const $ = (s, r = document) => r.querySelector(s);
 export const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -582,7 +582,7 @@ export function debeRecargar(remota, local, yaIntentada){
 }
 function ocupado(){
   const b = document.body.classList;
-  if(b.contains('con-camara') || b.contains('fv-editando') || fotos.hayFotosSubiendo()) return true;
+  if(b.contains('con-camara') || b.contains('fv-editando') || b.contains('con-pegar') || fotos.hayFotosSubiendo()) return true;
   const p = [...document.querySelectorAll('.pantalla')].find(x => !x.hidden);
   if(p && ['pForma', 'pClave', 'pCrear', 'pCodigo', 'pNivel', 'pCuarto'].includes(p.id)) return true;
   const a = document.activeElement; return !!(a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && a.type !== 'button')));

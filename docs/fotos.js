@@ -2,11 +2,16 @@
 // por día y ver en grande. La página nunca ve las claves de R2: pide URLs firmadas a la función
 // fotos-subir, sube DIRECTO a R2 y luego confirma; la fila en fotos_fotos la escribe la función
 // solo cuando R2 ya tiene la foto completa (HEAD y tamaño).
-import { $, $$, authFetch, PERFIL, esManager } from './app.js?v=2026-10-16-11';
-import { esc, iniciales } from './trabajos.js?v=2026-10-16-11';
+import { $, $$, authFetch, PERFIL, esManager } from './app.js?v=2026-10-16-12';
+import { esc, iniciales } from './trabajos.js?v=2026-10-16-12';
 
 const FUNCION = '/functions/v1/fotos-subir';
 export const MAX_WEB = 1600, MAX_MINI = 320;
+// El original que NO es JPEG (PNG pegado, captura de pantalla…) se guarda como JPEG de hasta 16 MP: uno de 24-48 MP se pasa del
+// lienzo del iPhone y antes se reintentaba para siempre como si fuera falta de señal.
+export const MAX_AREA_ORIGINAL = 16e6;
+// El atajo para pegar según el teclado: ⌘V en Mac / iPhone / iPad, Ctrl+V en lo demás.
+export const atajoPegar = (ua) => /Mac|iPhone|iPad|iPod/i.test(ua || '') ? '⌘V' : 'Ctrl+V';
 const VARIANTES = ['original', 'web', 'mini'];
 
 // ---------- puro ----------
@@ -66,13 +71,18 @@ function leerImagen(file){
     img.src = url;
   });
 }
-function achicar(img, max, calidad){
+function achicar(img, max, calidad, maxArea){
   return new Promise((res, rej) => {
     const W = img.naturalWidth || img.width, H = img.naturalHeight || img.height;
-    const s = Math.min(1, max / Math.max(W, H)); const w = Math.max(1, Math.round(W * s)), h = Math.max(1, Math.round(H * s));
+    const s = Math.min(1, max / Math.max(W, H), maxArea ? Math.sqrt(maxArea / (W * H)) : 1);
+    const w = Math.max(1, Math.round(W * s)), h = Math.max(1, Math.round(H * s));
     const c = document.createElement('canvas'); c.width = w; c.height = h;
-    c.getContext('2d').drawImage(img, 0, 0, w, h);
-    c.toBlob(b => b ? res({ blob: b, w, h }) : rej(new Error('sin imagen')), 'image/jpeg', calidad);
+    const g = c.getContext('2d');
+    if(!g){ c.width = c.height = 0; rej(new Error('photo too large')); return; }
+    // Fondo blanco: un PNG transparente (una captura, un logo) salía negro al pasarlo a JPEG.
+    g.fillStyle = '#fff'; g.fillRect(0, 0, w, h);
+    g.drawImage(img, 0, 0, w, h);
+    c.toBlob(b => { c.width = c.height = 0; b ? res({ blob: b, w, h }) : rej(new Error('photo too large')); }, 'image/jpeg', calidad);
   });
 }
 export async function preparar(file){
@@ -80,9 +90,11 @@ export async function preparar(file){
   try{
     const web = await achicar(img, MAX_WEB, 0.82);
     const mini = await achicar(img, MAX_MINI, 0.75);
-    // El original va tal cual si ya es JPEG; si no (PNG, HEIC, WebP), una copia JPEG a tamaño completo.
-    const original = /^image\/jpe?g$/i.test(file.type || '') ? file : (await achicar(img, 1e9, 0.92)).blob;
-    return { original, web: web.blob, mini: mini.blob, ancho: img.naturalWidth || img.width, alto: img.naturalHeight || img.height };
+    // El original va tal cual si ya es JPEG; si no (PNG, HEIC, WebP), una copia JPEG de hasta 16 MP. El tamaño que se anota es el
+    // del original de verdad (el que se guarda), no el de la imagen leída.
+    if(/^image\/jpe?g$/i.test(file.type || '')) return { original: file, web: web.blob, mini: mini.blob, ancho: img.naturalWidth || img.width, alto: img.naturalHeight || img.height };
+    const o = await achicar(img, 1e9, 0.92, MAX_AREA_ORIGINAL);
+    return { original: o.blob, web: web.blob, mini: mini.blob, ancho: o.w, alto: o.h };
   } finally { URL.revokeObjectURL(url); }
 }
 export async function sha256Hex(blob){ return hexDe(await crypto.subtle.digest('SHA-256', await blob.arrayBuffer())); }
@@ -110,11 +122,15 @@ export async function subirUna(trabajoId, file, avance){
   const paso = (e) => { try{ avance && avance(e); }catch{} };
   paso('preparando');
   const foto_id = crypto.randomUUID();
-  const p = await preparar(file);
+  // Una foto que no se puede leer (o demasiado grande para el lienzo) es un error de la FOTO, no de la señal: sale con su "!"
+  // y no se reintenta para siempre (antes un TypeError del lienzo se leía como "sin señal").
+  let p; try{ p = await preparar(file); }catch{ throw new Error('could not read the photo'); }
   const sha256 = await sha256Hex(p.original);
   const bytes = { original: p.original.size, web: p.web.size, mini: p.mini.size };
   const tomada_at = new Date(file.lastModified || Date.now()).toISOString();
-  const firma = await llamar('firmar_subida', { trabajo_id: trabajoId, foto_id, bytes });
+  const firma = await llamar('firmar_subida', { trabajo_id: trabajoId, foto_id, bytes, sha256 });
+  // La misma foto ya está en el proyecto (o en su papelera): no se sube otra vez ni se deja el "!" rojo.
+  if(firma.repetida && firma.foto) return { foto: firma.foto, repetida: true };
   paso('subiendo');
   await Promise.all(VARIANTES.map(v => putR2(firma.urls[v], p[v])));
   paso('anotando');
@@ -197,7 +213,7 @@ export function botonesSubir(){
   if(TRABAJO && TRABAJO.estado === 'archivado') return '';
   const tactil = (navigator.maxTouchPoints || 0) > 0 || /iPhone|iPad|Android/i.test(navigator.userAgent);
   if(tactil) return '<button type="button" class="btn btn-accent btn-chico subir-btn" data-subir-menu><svg class="ic"><use href="#i-camara"/></svg>Upload Photos</button><input type="file" accept="image/*" multiple hidden data-subir>';
-  return '<label class="btn btn-accent btn-chico subir-btn"><svg class="ic"><use href="#i-camara"/></svg>Upload Photos<input type="file" accept="image/*" multiple hidden data-subir></label>';
+  return '<label class="btn btn-accent btn-chico subir-btn" title="Or press ' + atajoPegar(navigator.userAgent) + ' to paste copied photos"><svg class="ic"><use href="#i-camara"/></svg>Upload Photos<input type="file" accept="image/*" multiple hidden data-subir></label>';
 }
 // Lo que se está subiendo NO se enseña con letreros (su pedido del 14-oct: "eso debería pasar detrás, no
 // mostrarlo"). Solo aparecen las fotos mismas, en una fila, con una marquita mientras suben; al quedar, pasan a

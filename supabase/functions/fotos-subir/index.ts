@@ -96,6 +96,21 @@ async function fotoExistente(id: string) {
   const f = await r.json().catch(() => []);
   return Array.isArray(f) && f.length ? f[0] : null;
 }
+// La misma foto (misma huella) ya en ese trabajo, activa o en la papelera (16-oct, pegar fotos: antes se buscaba por el
+// foto_id NUEVO, nunca la encontraba, contestaba 409 y la foto se quedaba con su "!" rojo para siempre).
+async function fotoPorHuella(trabajo_id: string, company_id: string, sha256: string) {
+  const r = await fetch(SB() + "/rest/v1/fotos_fotos?trabajo_id=eq." + trabajo_id + "&company_id=eq." + company_id + "&sha256=eq." + sha256 + "&select=*&limit=1", { headers: sbHeaders() });
+  if (!r.ok) return null;
+  const f = await r.json().catch(() => []);
+  return Array.isArray(f) && f.length ? f[0] : null;
+}
+// Las 3 copias que se subieron de más a R2 (la foto ya estaba): se borran. Si falla, no pasa nada.
+async function borrarVariantes(company_id: string, trabajo_id: string, foto_id: string) {
+  try {
+    const { cliente, base } = r2Config();
+    for (const v of VARIANTES) { try { await cliente.fetch(base + "/" + claveDe(company_id, trabajo_id, foto_id, v), { method: "DELETE" }); } catch { /* sigue */ } }
+  } catch { /* sin R2: nada que borrar */ }
+}
 
 // ---- acciones ----
 type Cuerpo = Record<string, unknown>;
@@ -124,6 +139,9 @@ async function firmarSubida(u: Usuario, c: Cuerpo) {
   const t = await trabajoDe(trabajo_id, u.company_id);
   if (!t) return json(404, { ok: false, error: "ese trabajo no es de su empresa" });
   if (t.estado !== "activo") return json(409, { ok: false, error: "el trabajo está archivado" });
+  // Ya está esa misma foto: no se firma nada (la página no sube otra vez y no queda el "!" rojo).
+  const sha = String(c.sha256 || "").toLowerCase();
+  if (/^[0-9a-f]{64}$/.test(sha)) { const ya = await fotoPorHuella(trabajo_id, u.company_id, sha); if (ya) return json(200, { ok: true, repetida: true, foto: ya }); }
   const urls: Partial<Record<Variante, string>> = {};
   for (const v of VARIANTES) if (bytes[v]) urls[v] = await firmar("PUT", claveDe(u.company_id, trabajo_id, foto_id, v), 600);
   return json(200, { ok: true, urls, caduca_en_s: 600 });
@@ -164,7 +182,11 @@ async function confirmar(u: Usuario, c: Cuerpo) {
   };
   const r = await fetch(SB() + "/rest/v1/fotos_fotos", { method: "POST", headers: sbHeaders({ Prefer: "return=representation" }), body: JSON.stringify(fila) });
   const texto = await r.text();
-  if (r.status === 409) { const otra = await fotoExistente(foto_id); if (otra) return json(200, { ok: true, foto: otra, repetida: true }); return json(409, { ok: false, error: "esa misma foto ya está en ese trabajo" }); }
+  if (r.status === 409) {
+    const otra = await fotoExistente(foto_id) || await fotoPorHuella(trabajo_id, u.company_id, sha256);
+    if (otra) { if (otra.id !== foto_id) await borrarVariantes(u.company_id, trabajo_id, foto_id); return json(200, { ok: true, foto: otra, repetida: true }); }
+    return json(409, { ok: false, error: "esa misma foto ya está en ese trabajo" });
+  }
   if (!r.ok) return json(502, { ok: false, error: "no se pudo anotar la foto (" + r.status + ")", detalle: texto.slice(0, 300) });
   const filas = JSON.parse(texto || "[]");
   if (!Array.isArray(filas) || !filas.length) return json(502, { ok: false, error: "la base no devolvió la fila" });
