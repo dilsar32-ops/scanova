@@ -181,7 +181,9 @@ ok("7: lo tapado NUNCA suma (cobra de menos, no de más)", R7.allSatisfy { r7 in
 ok("7: y avisa que algo tapa abajo", R7.allSatisfy { r7 in r7.alarmas.contains(.tapadoAbajo) })
 let R8 = tres(caso8, "8")
 ok("8: el espejo NO cuenta (área menor que la verdad)", R8.allSatisfy { r8 in r8.area <= caso8.esperado.area * 1.02 })
-ok("8: y sale la alarma de muy hondo", R8.allSatisfy { r8 in r8.alarmas.contains { if case .hondo = $0 { return true }; return false } })
+// 16 oct (casa 3D): el hueco DEBAJO del espejo sí se cuenta (hasta donde empieza el espejo) y avisa que llega a una
+// ventana o espejo; lo del espejo nunca.
+ok("8: y avisa que llega a algo muy hondo (espejo)", R8.allSatisfy { r8 in r8.alarmas.contains { if case .hondo = $0 { return true }; if case .bajoAbertura = $0 { return true }; return false } })
 let R9 = tres(caso9, "9")
 ok("9: el paso abierto da 0 pies", R9.allSatisfy { r9 in r9.area == 0 })
 ok("9: y sale la alarma de muy hondo", R9.allSatisfy { r9 in r9.alarmas.contains { if case .hondo = $0 { return true }; return false } })

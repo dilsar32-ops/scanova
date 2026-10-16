@@ -10110,6 +10110,7 @@ extension ARMeasureViewController {
             case .ambiguo: return "Se ve la cara del stud o insulación: eso no cuenta solo."
             case .sinOrilla: return "Falta ver la orilla de arriba del corte."
             case .sinPiso: return "Apunte un momento al piso frente a la pared."
+            case .bajoAbertura: return "El corte llega a una ventana o espejo: se mide solo hasta ahí."
             }
         }
         return nil
