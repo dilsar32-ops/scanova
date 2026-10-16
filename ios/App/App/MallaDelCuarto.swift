@@ -18,7 +18,7 @@ enum MallaDelCuarto {
     // Una pared que ve el LiDAR: de `a` a `b`, en metros, en el piso del AR (x, z). `n`: hacia dónde estaba el teléfono
     // cuando la vio (la cara de la pared que se ve desde ESTE cuarto mira para adentro; la del cuarto de al lado, para
     // afuera). nil = no se sabe.
-    struct Vista { var a: SIMD2<Double>; var b: SIMD2<Double>; var n: SIMD2<Double>? = nil }
+    struct Vista { var a: SIMD2<Double>; var b: SIMD2<Double>; var n: SIMD2<Double>? = nil; var arriba: Double? = nil }
     // Una esquina tocada: dónde está en el plano (pies) y dónde la encontró el láser (metros, piso del AR).
     struct Pin { var plano: SIMD2<Double>; var ar: SIMD2<Double> }
     // Una pared ya acomodada, en metros del piso del AR. `vista`: pegada a lo que ve el láser. `finaA/B`: esa esquina salió
@@ -74,6 +74,21 @@ enum MallaDelCuarto {
             let d = w.b - w.a, L = simd_length(d)
             guard L >= 0.3 else { continue }
             let u = d / L, ni = adentro(w.a, w.b, c)
+            // FIX (16 oct, cocina): la cara de ESTA pared vista desde el cuarto de al lado (lado conocido, de espaldas) dice
+            // dónde está la pared: lo de este lado que queda más de `grosor` + 13 cm delante de ella es mueble. De lo que se
+            // ve de espaldas cuenta lo de MÁS ADENTRO (lo de más allá son los muebles del otro cuarto).
+            var detras = Double.infinity
+            for v in vistas where detrasDe(v, ni) {
+                let dv0 = v.b - v.a, lv = simd_length(dv0)
+                guard lv >= 0.3, abs(simd_dot(u, dv0 / lv)) >= coseno else { continue }
+                let s0 = simd_dot(v.a - w.a, u), s1 = simd_dot(v.b - w.a, u)
+                let lo = max(0, min(s0, s1)), hi = min(L, max(s0, s1))
+                guard hi - lo >= min(0.3, 0.5 * L) else { continue }
+                let tm = (lo + hi) / 2, dv = dv0 / lv
+                let pm = v.a + dv * simd_dot(w.a + u * tm - v.a, dv)
+                let af = simd_dot(pm - (w.a + u * tm), -ni)
+                if af > -0.3, af < 0.6 { detras = min(detras, af) }
+            }
             var mejor: (Pareja, Double)? = nil
             for (j, v) in vistas.enumerated() where deEsteLado(v, ni) {
                 let dv0 = v.b - v.a, lv = simd_length(dv0)
@@ -88,12 +103,16 @@ enum MallaDelCuarto {
                 let dist = simd_dot(w.a + u * tm - pm, perp(dv))
                 guard abs(dist) <= maxDist else { continue }
                 let afuera = simd_dot(pm - (w.a + u * tm), -ni)              // + = el plano queda más afuera que la pared
+                guard detras == .infinity || detras - afuera <= grosor + 0.13 else { continue }   // FIX: delante de la cara de atrás = mueble
                 if mejor == nil || afuera > mejor!.1 { mejor = (Pareja(pared: i, vista: j, t0: lo, t1: hi, dist: dist), afuera) }
             }
             if let m = mejor { out.append(m.0) }
         }
         return out
     }
+    // FIX: un plano vertical visto DE ESPALDAS (desde el otro lado de la pared): solo si se sabe el lado.
+    static func detrasDe(_ v: Vista, _ ni: SIMD2<Double>) -> Bool { (v.arriba ?? 9) >= 2.2 && (v.n.map { simd_dot($0, ni) < -0.3 } ?? false) }
+    static let grosor = 0.12          // una pared de adentro (2x4 + tablaroca, 4.5 in): la cara del otro cuarto queda así de atrás
 
     // ---------------- 0. PRIMERO EL GIRO (con las direcciones, que no dependen de dónde quedó) ----------------
     // Cada plano casi paralelo (12° o menos) a una pared del cuarto vota por la diferencia de ángulo; gana la que junta más
@@ -138,19 +157,38 @@ enum MallaDelCuarto {
             var nc = ni
             if nc.x < -1e-9 || (abs(nc.x) <= 1e-9 && nc.y < 0) { nc = -nc }
             var mios: [(d: Double, w: Double, afuera: Double, lo: Double, hi: Double)] = []
-            for v in vistas where deEsteLado(v, ni) {
+            var atras: [(d: Double, w: Double, afuera: Double, lo: Double, hi: Double)] = []
+            for v in vistas {
                 let dv0 = v.b - v.a, lv = simd_length(dv0)
                 guard lv >= 0.4, abs(simd_dot(u, dv0 / lv)) >= cos(6 * .pi / 180) else { continue }
                 let s0 = simd_dot(v.a - w.a, u), s1 = simd_dot(v.b - w.a, u)
-                guard max(s0, s1) > -1.5, min(s0, s1) < L + 1.5 else { continue }
+                let lo = min(s0, s1), hi = max(s0, s1)
+                guard hi > -1.5, lo < L + 1.5 else { continue }
                 let mid = (v.a + v.b) / 2
                 let d = simd_dot(mid - w.a, nc)
                 guard abs(d) <= 1.5 else { continue }
-                mios.append((d, min(lv, L), simd_dot(mid - w.a, -ni), min(s0, s1), max(s0, s1)))
+                // FIX (16 oct, cocina): vota lo que el plano tiene ENCIMA de la pared, no su largo; y lo que sale más de 50 cm
+                // pasado de las puntas de la pared resta (la cara de una pared de ESTE cuarto se acaba en sus esquinas).
+                let encima = max(0, min(L, hi) - max(0, lo)), fuera = max(0, -lo) + max(0, hi - L)
+                let peso = min(lv, L, encima + 0.5); _ = fuera
+                let afuera = simd_dot(mid - w.a, -ni)
+                if deEsteLado(v, ni) {
+                    guard peso > 0.1 else { continue }
+                    mios.append((d, peso, afuera, lo, hi))
+                } else if detrasDe(v, ni), afuera > -0.3, afuera < 0.6, encima >= 0.3 {
+                    // FIX: la cara de esta pared vista desde el cuarto de al lado: la de aquí queda `grosor` más adentro.
+                    atras.append((d + grosor * simd_dot(ni, nc), 0.5 * max(0, peso), afuera, lo, hi))
+                }
             }
-            // Lo que tiene otro plano DETRÁS (encimados a lo largo, 5-60 cm más afuera) es un mueble: no vota.
+            // FIX: de lo visto de espaldas solo cuenta lo de más adentro (la otra cara de esta pared); lo de más allá (10 cm o
+            // más) son los muebles del otro cuarto.
+            if let m = atras.map({ $0.afuera }).min() { atras = atras.filter { $0.afuera - m < 0.1 } }
+            // Lo que tiene otro plano DETRÁS (encimados a lo largo, 5-60 cm más afuera) es un mueble: no vota. FIX: también lo
+            // que queda más de `grosor` + 13 cm delante de la cara de atrás de la pared.
             let limpios = mios.filter { x in !mios.contains { y in
-                y.afuera - x.afuera > 0.05 && y.afuera - x.afuera < 0.6 && min(x.hi, y.hi) - max(x.lo, y.lo) > 0.2 } }
+                y.afuera - x.afuera > 0.05 && y.afuera - x.afuera < 0.6 && min(x.hi, y.hi) - max(x.lo, y.lo) > 0.2 } &&
+                !atras.contains { y in y.afuera - x.afuera > grosor + 0.13 && y.afuera - x.afuera < 0.8 && min(x.hi, y.hi) - max(x.lo, y.lo) > 0.2 } }
+                + atras.filter { $0.w > 0.05 }
             guard !limpios.isEmpty else { continue }
             if let g = grupos.firstIndex(where: { abs(simd_dot($0.n, nc)) > cos(10 * .pi / 180) }) {
                 let s = simd_dot(grupos[g].n, nc) > 0 ? 1.0 : -1.0

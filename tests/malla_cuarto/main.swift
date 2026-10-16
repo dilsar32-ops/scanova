@@ -223,6 +223,27 @@ do {
     let ok3 = corrida.aberturas().isEmpty
     print("\(ok3 ? "OK  " : "FALLA") a través · malla corrida 20 cm: no inventa huecos"); if !ok3 { fallas += 1 }
 }
+
+// LA COCINA DE LA BITÁCORA (16 oct, sesión 1): parado en la puerta mirando la cocina chica (7.9 x 8.25 ft), el láser ve los
+// gabinetes de arriba (30-40 cm delante de las paredes), el costado del refri pegado por ARKit al plano de la pared de la sala
+// (largo, casi todo fuera de la cocina) y, de espaldas, las caras de la sala de las dos paredes que comparte con ella. La
+// malla se iba 0.8 m (2.8 ft). Datos de verdad: paredes del plano, la ubicación del teléfono y los planos de ARKit (con su
+// lado: la normal del ancla). Verdad = lo que el mismo teléfono afinó después, ya viendo las 5 paredes (t 138.4).
+do {
+    let cocina = [Pared(a: SIMD2(-11.57, 14.19), b: SIMD2(-11.57, 5.94), exterior: false, alto: 8.3), Pared(a: SIMD2(-3.67, 5.94), b: SIMD2(-3.67, 14.19), exterior: false, alto: 8.3), Pared(a: SIMD2(-3.67, 14.19), b: SIMD2(-11.57, 14.19), exterior: true, alto: 8.3), Pared(a: SIMD2(-6.28, 5.94), b: SIMD2(-3.67, 5.94), exterior: false, alto: 8.3), Pared(a: SIMD2(-11.57, 5.94), b: SIMD2(-6.28, 5.94), exterior: false, alto: 8.3)]
+    let verdadCocina = Ac(giro: 4.6634, mov: SIMD2(-15.25, 9.11))
+    func planosAR(_ xs: [(Double, Double, Double, Double)]) -> [MallaDelCuarto.Vista] {
+        xs.map { let a = SIMD2($0.0, $0.1), b = SIMD2($0.2, $0.3), dv = simd_normalize(b - a); return MallaDelCuarto.Vista(a: a, b: b, n: SIMD2(dv.y, -dv.x)) }
+    }
+    caso("cocina real · t 98 (gabinetes + refri + caras de la sala)", cocina, verdad: verdadCocina, ac: Ac(giro: 4.6821, mov: SIMD2(-15.5, 9.34)),
+         vistas: planosAR([(3.99, 3.79, 4.33, -2.37), (-1.35, -2.66, -1.42, 0.89), (-1.14, -0.75, -1.43, 0.72), (-1.62, 3.08, -1.23, 3.17), (-0.56, 1.43, -1.56, 1.37), (3.17, 5.51, 3.25, 3.86), (3.25, 3.73, 4, 3.79), (-0.2, 2.74, 2.45, 2.87), (-1.74, 0.92, 1.1, 1.09), (0.95, 1.11, 0.88, 2.76), (4.35, -2.47, -0.99, -2.54), (-1.56, 1, -1.71, 3.44), (1.64, 1.03, 1.86, 1.24), (1.59, 1.04, 1.89, 1.22), (0.7, -2.44, -0.84, -2.28)]), maxIn: 3, debeAjustar: true)
+    caso("cocina real · t 128 (ya se ve la cara de una pared)", cocina, verdad: verdadCocina, ac: Ac(giro: 4.681, mov: SIMD2(-15.49, 9.34)),
+         vistas: planosAR([(-1.34, -2.66, -1.42, 0.89), (-1.14, -0.75, -1.43, 0.72), (-1.7, 3.08, -0.32, 3.19), (-0.11, 1.45, -1.6, 1.36), (3.17, 5.51, 3.25, 3.86), (3.25, 3.73, 4, 3.79), (-0.15, 2.74, 2.45, 2.87), (-1.74, 0.92, 1.1, 1.09), (0.95, 1.11, 0.88, 2.76), (4.35, -2.47, -0.99, -2.54), (-1.58, 1, -1.73, 3.49), (1.64, 1.03, 1.86, 1.24), (1.59, 1.04, 1.89, 1.22), (0.7, -2.44, -0.84, -2.28), (-0.26, 1.13, -1.26, 1.05)]), maxIn: 3, debeAjustar: true)
+    // El mismo caso del refri de arriba, pero con la cara del otro cuarto de esa pared vista de espaldas: ya se puede saber.
+    semilla = 5
+    caso("rect · refri en una dirección + la cara del otro cuarto", r, verdad: verdad, ac: ac,
+         vistas: [vista(r[0], verdad, f0: 0.1, f1: 0.9, empuje: 0.45), vista(r[1], verdad, f0: 0.2, f1: 0.8), vista(r[0], verdad, f0: 0.3, f1: 0.9, empuje: -0.12)], maxIn: 1.5, minVistas: 1)
+}
 extension SystemRandomNumberGenerator { static var shared = SystemRandomNumberGenerator() }
 print(fallas == 0 ? "TODO BIEN" : "FALLAS: \(fallas)")
 exit(fallas == 0 ? 0 : 1)

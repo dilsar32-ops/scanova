@@ -10051,6 +10051,13 @@ fileprivate final class LabDemolicion {
     var ultimaFotoBit: CFTimeInterval = 0
     var detalleAjuste: [String: [String: String]] = [:]       // cuarto -> clave -> id corto del plano que la pegó
     var resumenAjuste: [String: [String: Double]] = [:]       // cuarto -> giro (°), mov (m), vistas
+    // LO QUE ENSEÑÓ SU PRIMERA PRUEBA (16 oct, la bitácora de la sesión 1):
+    var ultimaVista: [UUID: (vista: MallaDelCuarto.Vista, arriba: Float)] = [:]   // el último dibujo bueno de cada plano
+    var rechazados: [String: String] = [:]                    // id corto del plano -> por qué no entró a la malla
+    var esquinaDudosa: (plano: SIMD2<Double>, golpe: SIMD2<Double>, cuando: CFTimeInterval)?   // un toque que no se creyó
+    var revisarEsquina: (cuarto: String, plano: SIMD2<Double>, antes: SIMD2<Double>, cuando: CFTimeInterval)?   // ¿se movió de verdad?
+    var paredFueraDesde: CFTimeInterval?                      // la pared que se mide salió de la mira desde…
+    var descartadas: [String: [(t0: Double, t1: Double)]] = [:]   // "cuarto|clave": las aberturas de más del 60% ya anotadas
 }
 
 // Una pared de la malla amarrada a un plano de ARKit: sus dos puntas en las coordenadas de ese plano (así sigue al plano si
@@ -10401,8 +10408,8 @@ extension ARMeasureViewController {
         return "\(p / 12)'-\(p % 12)\""
     }
 
-    private func avisoLaboratorio(_ s: String) {
-        lab.aviso = s; lab.avisoHasta = Date().addingTimeInterval(4)
+    private func avisoLaboratorio(_ s: String, segundos: TimeInterval = 4) {
+        lab.aviso = s; lab.avisoHasta = Date().addingTimeInterval(segundos)
         pintarLaboratorio()
     }
 
@@ -10529,8 +10536,18 @@ extension ARMeasureViewController {
             return
         }
         let w = todas[i]
-        let texto = "\(w.cuarto) · pared de \(w.pared.exterior ? "afuera" : "adentro") · \(Self.piesConComillas(Float(simd_length(w.pared.b - w.pared.a) / 3.28084)))"
+        var texto = "\(w.cuarto) · pared de \(w.pared.exterior ? "afuera" : "adentro") · \(Self.piesConComillas(Float(simd_length(w.pared.b - w.pared.a) / 3.28084)))"
+        // Solo se fija una pared que se tiene ENFRENTE y cerca (a 8 ft o menos, de frente 45° o menos). Su prueba: se fijó
+        // sola la pared norte de la sala desde 15 ft, a 1 s de entrar, y se quedó 3.5 min con avisos de otra pared.
+        let tel = SIMD3<Float>(frame.camera.transform.columns.3.x, frame.camera.transform.columns.3.y, frame.camera.transform.columns.3.z)
+        let hit = SIMD3<Float>(g.worldTransform.columns.3.x, g.worldTransform.columns.3.y, g.worldTransform.columns.3.z)
+        let nPlano = simd_normalize(SIMD2<Float>(ancla.transform.columns.1.x, ancla.transform.columns.1.z))
+        let haciaH = SIMD2<Float>(adelante.x, adelante.z)
+        let deFrente = simd_length(haciaH) > 0.2 && abs(simd_dot(simd_normalize(haciaH), nPlano)) >= cos(45 * .pi / 180)
+        let lejos = simd_distance(SIMD2(tel.x, tel.z), SIMD2(hit.x, hit.z)) > 2.45
+        if lejos || !deFrente { texto += lejos ? " · acérquese para medirla" : " · póngase de frente" }
         if texto != L.apuntadaTexto || L.paredDesconocida { L.apuntadaTexto = texto; L.paredDesconocida = false; pintarLaboratorio() }
+        if lejos || !deFrente { L.apuntada = nil; return }
         if let ap = L.apuntada, ap.indice == i, ap.ancla == ancla.identifier {
             if Date().timeIntervalSince(ap.desde) >= 1.0 { fijarParedDelPlano(w, ancla: ancla, frame: frame, ac: ac) }
         } else { L.apuntada = (i, ancla.identifier, Date()) }
@@ -10641,9 +10658,20 @@ extension ARMeasureViewController {
         L.ultimaMalla = ahora
         let piso = pisoParaLab(frame)
         let antes = L.cuartoMalla
+        anotarParedesDeMalla(cuartosDelMarco(m))
         seguirElCuarto(m, base: base, frame: frame)
-        if L.cuartoMalla != antes, let c = L.cuartoMalla { anotarBitacora("cuarto", ["cuarto": c, "antes": antes ?? "", "foto": fotoChica(frame) ?? ""]) }
+        if L.cuartoMalla != antes, let c = L.cuartoMalla {
+            anotarBitacora("cuarto", ["cuarto": c, "antes": antes ?? "", "foto": fotoChica(frame) ?? ""])
+            // Su prueba: la tarjeta siguió midiendo la pared norte de la sala estando en la cocina (3.5 min). La pared que se
+            // mide, si no es de este cuarto, se suelta al cambiar de cuarto (lo medido ya quedó en la memoria).
+            if let ctx = L.enPlano, ctx.cuarto != c, let cu = cuartosDelMarco(m).first(where: { $0.nombre == c }),
+               !paredesDeMalla(cu).contains(where: { $0.clave == claveDeMalla(ctx.pared.a, ctx.pared.b) }) {
+                otraPared()
+                avisoLaboratorio("Pasó a \(c): dejé de medir la pared de \(ctx.cuarto).")
+            }
+        }
         if let cuarto = L.cuartoMalla { afinarMalla(cuarto: cuarto, marco: m, base: base, piso: piso) }
+        revisarLaEsquinaTocada()
         pintarMalla(ac: acomodoParaLab() ?? base, marco: m, piso: piso)
         resumenBitacora(frame, piso: piso)
     }
@@ -10703,18 +10731,44 @@ extension ARMeasureViewController {
         // malla corrida (el láser pega en la pared de verdad detrás de ella).
         guard ahora - L.ultimasAberturas >= 1 else { return }
         L.ultimasAberturas = ahora
+        func estadoDe(_ clave: String) -> String {
+            guard let j = claves.firstIndex(of: clave), j < enAR.count else { return "?" }
+            return enAR[j].fija ? "fija" : (enAR[j].vista ? "laser" : "ubicacion")
+        }
         for p in paredes {
             guard let tr = L.traspasos[p.k] else { continue }
             let largo = simd_distance(p.a, p.b)
-            let nuevas = tr.aberturas().filter { $0.t1 - $0.t0 <= 0.6 * largo }.map {
+            let todas = tr.aberturas()
+            let viejas = L.aberturasVistas[p.k] ?? []
+            // Lo que se descarta por pasar del 60% de la pared también se anota (puede ser una abertura ancha de verdad en una
+            // pared corta, como la puerta a la cocina en la pared de 5.3 ft de la sala).
+            let yaAnotadas = L.descartadas[p.k] ?? []
+            L.descartadas[p.k] = todas.filter { $0.t1 - $0.t0 > 0.6 * largo }.map { ($0.t0 * MallaDelCuarto.k, $0.t1 * MallaDelCuarto.k) }
+            for x in todas where x.t1 - x.t0 > 0.6 * largo && !yaAnotadas.contains(where: { abs($0.t0 - x.t0 * MallaDelCuarto.k) < 0.7 && abs($0.t1 - x.t1 * MallaDelCuarto.k) < 0.7 }) {
+                anotarBitacora("abertura-descartada", ["cuarto": cuarto, "clave": p.clave, "de_ft": (x.t0 * MallaDelCuarto.k * 10).rounded() / 10,
+                                                       "a_ft": (x.t1 * MallaDelCuarto.k * 10).rounded() / 10, "largo_ft": (largo * MallaDelCuarto.k * 10).rounded() / 10])
+            }
+            let nuevas = todas.filter { $0.t1 - $0.t0 <= 0.6 * largo }.map {
                 (t0: $0.t0 * MallaDelCuarto.k, t1: $0.t1 * MallaDelCuarto.k, abajo: $0.abajo * MallaDelCuarto.k, arriba: $0.arriba * MallaDelCuarto.k, puerta: $0.puerta)
             }
-            let viejas = L.aberturasVistas[p.k] ?? []
+            // Las que ya estaban y cambiaron (de ventana a puerta, o crecieron 4 in o más): la bitácora solo decía la primera
+            // lectura (su puerta a la cocina salió de 1.7 ft y luego llegó a 2.3 ft sin que se anotara).
+            for n in nuevas {
+                guard let v = viejas.first(where: { min($0.t1, n.t1) - max($0.t0, n.t0) > 0 }) else { continue }
+                if v.puerta != n.puerta || abs(v.t0 - n.t0) >= 0.33 || abs(v.t1 - n.t1) >= 0.33 || abs(v.abajo - n.abajo) >= 0.5 || abs(v.arriba - n.arriba) >= 0.5 {
+                    anotarBitacora("abertura-cambio", ["cuarto": cuarto, "clave": p.clave, "tipo": n.puerta ? "puerta" : "ventana",
+                                                       "de_ft": (n.t0 * 10).rounded() / 10, "a_ft": (n.t1 * 10).rounded() / 10,
+                                                       "abajo_ft": (n.abajo * 10).rounded() / 10, "arriba_ft": (n.arriba * 10).rounded() / 10])
+                }
+            }
+            for v in viejas where !nuevas.contains(where: { min($0.t1, v.t1) - max($0.t0, v.t0) > 0 }) {
+                anotarBitacora("abertura-quitada", ["cuarto": cuarto, "clave": p.clave, "de_ft": (v.t0 * 10).rounded() / 10, "a_ft": (v.t1 * 10).rounded() / 10])
+            }
             for n in nuevas where !viejas.contains(where: { abs($0.t0 - n.t0) < 0.7 && abs($0.t1 - n.t1) < 0.7 }) {
                 // ¿Estaba en el plano? (una puerta o ventana del escaneo de antes a 1 ft o menos)
                 let delPlano = (L.mallaAberturas[p.clave] ?? []).contains { min($0.t1, n.t1) - max($0.t0, n.t0) > 0.5 * (n.t1 - n.t0) }
                 anotarBitacora("abertura", ["cuarto": cuarto, "clave": p.clave, "tipo": n.puerta ? "puerta" : "ventana", "en_el_plano": delPlano,
-                                            "estado_pared": (L.fijas[p.k] != nil) ? "fija" : "suelta", "foto": fotoChica(frame) ?? "",
+                                            "estado_pared": estadoDe(p.clave), "foto": fotoChica(frame) ?? "",
                                             "de_ft": (n.t0 * 10).rounded() / 10, "a_ft": (n.t1 * 10).rounded() / 10,
                                             "abajo_ft": (n.abajo * 10).rounded() / 10, "arriba_ft": (n.arriba * 10).rounded() / 10])
             }
@@ -10800,7 +10854,7 @@ extension ARMeasureViewController {
             let vs = vistasParaMalla(piso: piso)
             anotarBitacora("planos", ["verticales": vs.map { ["id": String($0.id.uuidString.prefix(8)), "a": [r($0.vista.a.x), r($0.vista.a.y)], "b": [r($0.vista.b.x), r($0.vista.b.y)],
                                                               "n": $0.vista.n.map { [r($0.x), r($0.y)] } ?? [],
-                                                              "arriba": r(Double($0.arriba - piso))] }])
+                                                              "arriba": r(Double($0.arriba - piso))] }, "fuera": L.rechazados])
         }
     }
     // Las paredes de un cuarto que llevan malla (1 ft o más), con su clave (la misma pared vista desde dos cuartos es una).
@@ -10836,23 +10890,72 @@ extension ARMeasureViewController {
     }
     // Lo que ve el láser, para la malla: las paredes de ARKit en el piso (metros), con su lado y hasta dónde llegan para
     // arriba. Lo que no pasa de 1.2 m del piso es un mueble (un sillón, un gabinete bajo): no cuenta.
+    // Su prueba (16 oct): el plano de 6 m de la pared sur de la sala, con una pared amarrada, se salió de la malla 7 de 25
+    // veces sin que ARKit lo quitara (y el cuarto giró 2-4°). Ahora se anota por qué se queda fuera cada plano, y el de una
+    // pared amarrada se sigue usando con su último dibujo bueno.
     private func vistasParaMalla(piso: Float) -> [(id: UUID, vista: MallaDelCuarto.Vista, arriba: Float)] {
-        nueva.planosVistos.values.compactMap { p -> (id: UUID, vista: MallaDelCuarto.Vista, arriba: Float)? in
+        let L = lab
+        let amarrados = Set(L.fijas.values.map { $0.ancla })
+        var out: [(id: UUID, vista: MallaDelCuarto.Vista, arriba: Float)] = []
+        var fuera: [String: String] = [:]
+        for p in nueva.planosVistos.values {
             let t = p.transform
             var n = SIMD2<Double>(Double(t.columns.1.x), Double(t.columns.1.z))
-            guard simd_length(n) > 0.7 else { return nil }
-            n = simd_normalize(n)
-            let dir = SIMD2(-n.y, n.x)
+            var porque: String? = nil
             var lo = Double.infinity, hi = -Double.infinity, off = 0.0, cuenta = 0.0, arriba = -Float.infinity
-            for v in p.geometry.boundaryVertices {
-                let w = t * SIMD4<Float>(v.x, v.y, v.z, 1)
-                let q = SIMD2(Double(w.x), Double(w.z))
-                let sd = simd_dot(q, dir)
-                lo = min(lo, sd); hi = max(hi, sd); off += simd_dot(q, n); cuenta += 1; arriba = max(arriba, w.y)
+            if simd_length(n) <= 0.7 { porque = "inclinado" } else {
+                n = simd_normalize(n)
+                let dir = SIMD2(-n.y, n.x)
+                for v in p.geometry.boundaryVertices {
+                    let w = t * SIMD4<Float>(v.x, v.y, v.z, 1)
+                    let q = SIMD2(Double(w.x), Double(w.z))
+                    let sd = simd_dot(q, dir)
+                    lo = min(lo, sd); hi = max(hi, sd); off += simd_dot(q, n); cuenta += 1; arriba = max(arriba, w.y)
+                }
+                if cuenta <= 2 { porque = "sin orilla" } else if hi - lo < 0.3 { porque = "angosto" } else if arriba < piso + 1.2 { porque = "bajo" }
             }
-            guard cuenta > 2, hi - lo >= 0.3, arriba >= piso + 1.2 else { return nil }
+            if let porque {
+                fuera[String(p.identifier.uuidString.prefix(8))] = porque
+                if amarrados.contains(p.identifier), let u = L.ultimaVista[p.identifier] { out.append((p.identifier, u.vista, u.arriba)) }
+                continue
+            }
             off /= cuenta
-            return (p.identifier, MallaDelCuarto.Vista(a: dir * lo + n * off, b: dir * hi + n * off, n: nueva.ladoPlano[p.identifier]), arriba)
+            let dir = SIMD2(-n.y, n.x)
+            let v = MallaDelCuarto.Vista(a: dir * lo + n * off, b: dir * hi + n * off, n: nueva.ladoPlano[p.identifier], arriba: Double(arriba - piso))
+            L.ultimaVista[p.identifier] = (v, arriba)
+            out.append((p.identifier, v, arriba))
+        }
+        L.rechazados = fuera
+        return out
+    }
+    // ¿Ese plano ya amarra otra pared que NO está en la misma línea? Un plano es la cara de UNA pared. Su prueba: la pared
+    // del fondo de la cocina se amarró al plano de la pared de la lavandería que ya tenía amarrado la sala, 2.6 ft más allá
+    // (y salieron 4 "ventanas" que no existen). Devuelve la clave de esa otra pared.
+    private func planoDeOtraPared(_ id: UUID, clave: String) -> String? {
+        let L = lab
+        guard let mw = L.mallaParedes[clave], simd_distance(mw.a, mw.b) > 0.1 else { return nil }
+        for (k2, f) in L.fijas where f.ancla == id {
+            let c2 = String(k2.split(separator: "|", maxSplits: 1).last ?? "")
+            guard c2 != clave, let o = L.mallaParedes[c2], !Self.enLaMismaLinea(mw.a, mw.b, o.a, o.b) else { continue }
+            return c2
+        }
+        return nil
+    }
+    // Dos paredes del plano (pies) en la misma línea: paralelas (10° o menos) y a 0.5 ft o menos una de la otra.
+    private static func enLaMismaLinea(_ a: SIMD2<Double>, _ b: SIMD2<Double>, _ c: SIMD2<Double>, _ d: SIMD2<Double>) -> Bool {
+        let u = simd_normalize(b - a), u2 = simd_normalize(d - c), n = MallaDelCuarto.perp(u)
+        return abs(simd_dot(u, u2)) >= cos(10 * .pi / 180) && abs(simd_dot(c - a, n)) <= 0.5 && abs(simd_dot(d - a, n)) <= 0.5
+    }
+    // Las claves de malla de todas las paredes de la planta, ANTES del primer ajuste: si no, la clave de una pared
+    // compartida sale primero con el orden de un cuarto y luego con el del otro (su prueba: dos paredes de la sala se
+    // tardaron medio segundo más en amarrarse por eso).
+    private func anotarParedesDeMalla(_ cuartos: [(nombre: String, paredes: [UbicadorEnPlano.ParedPlano], senas: [UbicadorEnPlano.SenaPlano])]) {
+        let L = lab
+        for c in cuartos {
+            for w in c.paredes where simd_length(w.seg.b - w.seg.a) >= 1 {
+                let clave = claveDeMalla(w.seg.a, w.seg.b)
+                if L.mallaParedes[clave] == nil { L.mallaParedes[clave] = (w.seg.a, w.seg.b, w.alto > 3 ? w.alto : 8) }
+            }
         }
     }
     // La ubicación del cuarto, afinada con lo que ve el láser y las esquinas tocadas. Cada pared que el láser confirma se
@@ -10863,7 +10966,17 @@ extension ARMeasureViewController {
         guard let c = cuartosDelMarco(m).first(where: { $0.nombre == cuarto }) else { return }
         let lista = paredesDeMalla(c)
         guard !lista.isEmpty else { return }
-        let vs = vistasParaMalla(piso: piso)
+        // Fuera los planos que ya amarran una pared de OTRO cuarto que no está en la línea de ninguna de este: son la cara de
+        // esa otra pared (su prueba: la cocina se corrió 2.8 ft pegándose a la pared de la lavandería vista desde la sala).
+        let ajenas = Set(L.fijas.compactMap { k, f -> UUID? in
+            let c2 = String(k.split(separator: "|", maxSplits: 1).last ?? "")
+            guard !lista.contains(where: { $0.clave == c2 }), let o = L.mallaParedes[c2] else { return nil }
+            let deAqui = L.fijas.contains { k3, f3 in
+                f3.ancla == f.ancla && lista.contains { it in it.clave == String(k3.split(separator: "|", maxSplits: 1).last ?? "") }
+            }
+            return deAqui || lista.contains(where: { Self.enLaMismaLinea($0.pared.a, $0.pared.b, o.a, o.b) }) ? nil : f.ancla
+        })
+        let vs = vistasParaMalla(piso: piso).filter { !ajenas.contains($0.id) }
         let aj = MallaDelCuarto.ajustar(paredes: lista.map { $0.pared }, ac: base, vistas: vs.map { $0.vista }, pines: L.pines[cuarto] ?? [])
         L.mallaClaves[cuarto] = lista.map { $0.clave }
         var lineas = aj.paredes
@@ -10876,6 +10989,14 @@ extension ARMeasureViewController {
                     let a4 = ancla.transform * f.aLocal, b4 = ancla.transform * f.bLocal
                     var linea = MallaDelCuarto.ParedAR(a: SIMD2(Double(a4.x), Double(a4.z)), b: SIMD2(Double(b4.x), Double(b4.z)))
                     linea.vista = true; linea.fija = true
+                    // Amarrada DE FRENTE (donde dice su plano); a lo largo la pone el ajuste del cuarto. Su prueba: la pared de
+                    // afuera de la cocina se amarró bien, pero cuando el cuarto estaba corrido, y se quedó 80 cm corrida a lo
+                    // largo (las esquinas ya no la alcanzaban).
+                    if simd_distance(linea.a, linea.b) > 0.05 {
+                        let o = linea.a, ul = simd_normalize(linea.b - linea.a)
+                        linea.a = o + ul * simd_dot(aj.paredes[i].a - o, ul)
+                        linea.b = o + ul * simd_dot(aj.paredes[i].b - o, ul)
+                    }
                     // ¿El láser la ve en otro plano, a más de 15 cm? Varias veces seguidas = se amarró mal: se suelta.
                     if let v = visto, v.id != f.ancla {
                         let nl = simd_normalize(linea.b - linea.a)
@@ -10902,6 +11023,10 @@ extension ARMeasureViewController {
             let s0 = simd_dot(vs[v.j].vista.a - w.a, u), s1 = simd_dot(vs[v.j].vista.b - w.a, u)
             let encima = min(largo, max(s0, s1)) - max(0, min(s0, s1))
             guard encima >= min(0.6, 0.4 * largo) else { continue }
+            if let otra = planoDeOtraPared(v.id, clave: item.clave) {
+                if veces == 3 { anotarBitacora("plano-ajeno", ["cuarto": cuarto, "clave": item.clave, "plano": String(v.id.uuidString.prefix(8)), "es_de": otra]) }
+                continue
+            }
             let inv = ancla.transform.inverse
             L.fijas[k] = ParedFija(ancla: v.id, aLocal: inv * SIMD4<Float>(Float(w.a.x), piso, Float(w.a.y), 1),
                                    bLocal: inv * SIMD4<Float>(Float(w.b.x), piso, Float(w.b.y), 1))
@@ -11238,6 +11363,8 @@ extension ARMeasureViewController {
         L.mallaPastilla.isHidden = true
         L.techoAhora = nil
         L.fijas.removeAll(); L.candidatas.removeAll(); L.traspasos.removeAll(); L.aberturasVistas.removeAll()
+        L.ultimaVista.removeAll(); L.rechazados.removeAll(); L.descartadas.removeAll()
+        L.esquinaDudosa = nil; L.revisarEsquina = nil; L.paredFueraDesde = nil
     }
     // El dibujo de una pared: una malla clarita (líneas cada 6 in, más marcadas cada 2 ft; con zoom, cada 3 in y marcadas
     // cada pie), lo quitado en naranja del piso para arriba, y las alturas de corte de siempre (1 ft, 2 ft y 4 ft: lo que
@@ -11367,14 +11494,19 @@ extension ARMeasureViewController {
             return
         }
         let p = g.location(in: sceneView)
-        var golpe: simd_float4x4?
-        if let q = sceneView.raycastQuery(from: p, allowing: .estimatedPlane, alignment: .any) { golpe = sceneView.session.raycast(q).first?.worldTransform }
-        if golpe == nil, let q = sceneView.raycastQuery(from: p, allowing: .existingPlaneGeometry, alignment: .any) { golpe = sceneView.session.raycast(q).first?.worldTransform }
+        // Dónde tocó: primero la profundidad del LiDAR en ESE punto de la pantalla (lo que de verdad hay ahí); si no, el
+        // rayo contra los planos de ARKit (primero los que ya tienen forma, luego los estimados). Su prueba: con el rayo
+        // estimado los toques cayeron de 6 in a 2.4 ft de la esquina.
+        var rayo: simd_float4x4?
+        if let q = sceneView.raycastQuery(from: p, allowing: .existingPlaneGeometry, alignment: .any) { rayo = sceneView.session.raycast(q).first?.worldTransform }
+        if rayo == nil, let q = sceneView.raycastQuery(from: p, allowing: .estimatedPlane, alignment: .any) { rayo = sceneView.session.raycast(q).first?.worldTransform }
+        let lidar = puntoDelLidar(p, frame: frame)
         let pantalla = [Double(p.x / max(1, sceneView.bounds.width)), Double(p.y / max(1, sceneView.bounds.height))].map { ($0 * 1000).rounded() / 1000 }
-        guard let h = golpe else {
+        let w: SIMD3<Float>
+        if let l = lidar { w = l } else if let h = rayo { w = SIMD3<Float>(h.columns.3.x, h.columns.3.y, h.columns.3.z) } else {
             anotarBitacora("toque", ["cuarto": cuarto, "pantalla": pantalla, "zoom": Double(L.zoom), "porque": "sin golpe", "foto": fotoChica(frame) ?? ""])
             avisoLaboratorio("El láser no encontró nada ahí. Acérquese (o haga zoom) y toque la esquina otra vez."); return }
-        let w = SIMD3<Float>(h.columns.3.x, h.columns.3.y, h.columns.3.z)
+        let golpeRayo: [Double] = rayo.map { [$0.columns.3.x, $0.columns.3.y, $0.columns.3.z].map { (Double($0) * 1000).rounded() / 1000 } } ?? []
         let enPiso = SIMD2<Double>(Double(w.x), Double(w.z))
         let paredes = paredesDeMalla(c).map { $0.pared }
         guard enAR.count == paredes.count, let e = MallaDelCuarto.esquinaCercana(enPiso, paredes: paredes, enAR: enAR) else {
@@ -11383,20 +11515,98 @@ extension ARMeasureViewController {
             avisoLaboratorio("Toque justo en una esquina del cuarto, donde se juntan dos paredes. Con dos dedos puede acercar.")
             return
         }
+        let ahi = paredesDeMalla(c).filter { it in simd_distance(it.pared.a, e.plano) <= 1 || simd_distance(it.pared.b, e.plano) <= 1 }.map { $0.clave }
+        let fijasAhi = ahi.filter { L.fijas[cuarto + "|" + $0] != nil }
+        let pulgadas = simd_distance(e.ar, enPiso) / 0.0254
+        let T = frame.camera.transform
+        func r3(_ x: Double) -> Double { (x * 1000).rounded() / 1000 }
+        var datos: [String: Any] = ["cuarto": cuarto, "plano": [e.plano.x, e.plano.y], "pulgadas": (pulgadas * 10).rounded() / 10,
+                                    "golpe": [w.x, w.y, w.z].map { r3(Double($0)) }, "malla": [e.ar.x, e.ar.y].map { r3($0) },
+                                    "tel": [T.columns.3.x, T.columns.3.y, T.columns.3.z].map { r3(Double($0)) },
+                                    "mira": [-T.columns.2.x, -T.columns.2.y, -T.columns.2.z].map { r3(Double($0)) },
+                                    "pantalla": pantalla, "zoom": Double(L.zoom), "paredes": ahi, "paredes_fijas": fijasAhi, "foto": fotoChica(frame) ?? "",
+                                    "con": lidar != nil ? "lidar" : "rayo", "golpe_rayo": golpeRayo]
+        // Su prueba (16 oct): tocó 3 veces la misma esquina y la pantalla decía "la malla se mueve 19 in", pero no se movía
+        // nada: las dos paredes ya estaban amarradas a lo que ve el láser (a 3 cm de donde se cruzan los planos) y el toque
+        // había caído en la pared, a 1.5 ft de la esquina. Si las paredes de la esquina están amarradas, el toque NO se cree
+        // a la primera; si vuelve a tocar en el mismo lugar, manda él: se sueltan esas paredes y la esquina va donde tocó.
+        if ahi.count >= 2, fijasAhi.count == ahi.count, pulgadas > 4 {
+            let ahora = CACurrentMediaTime()
+            if let d = L.esquinaDudosa, simd_distance(d.plano, e.plano) < 1, simd_distance(d.golpe, enPiso) < 0.3, ahora - d.cuando < 15 {
+                for k in ahi {
+                    L.fijas[cuarto + "|" + k] = nil; L.candidatas[cuarto + "|" + k] = nil
+                    anotarBitacora("pared-suelta", ["cuarto": cuarto, "clave": k, "porque": "tocó la esquina dos veces"])
+                }
+                L.esquinaDudosa = nil
+                datos["forzada"] = true
+            } else {
+                L.esquinaDudosa = (e.plano, enPiso, ahora)
+                datos["dudosa"] = true
+                anotarBitacora("esquina", datos)
+                avisoLaboratorio(String(format: "Esa esquina ya está pegada a lo que ve el láser. Su toque cayó a %.0f in de ella (¿en la pared?). Si de verdad está mal, tóquela otra vez ahí mismo.", pulgadas), segundos: 7)
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                return
+            }
+        }
+        L.esquinaDudosa = nil
         var ps = (L.pines[cuarto] ?? []).filter { simd_distance($0.plano, e.plano) > 1.0 }
         ps.append(MallaDelCuarto.Pin(plano: e.plano, ar: enPiso))
         if ps.count > 4 { ps.removeFirst(ps.count - 4) }
         L.pines[cuarto] = ps
         marcarEsquina(w, piso: pisoParaLab(frame))
-        let fijasAhi = paredesDeMalla(c).filter { it in simd_distance(it.pared.a, e.plano) <= 1 || simd_distance(it.pared.b, e.plano) <= 1 }
-            .filter { L.fijas[cuarto + "|" + $0.clave] != nil }.map { $0.clave }
-        anotarBitacora("esquina", ["cuarto": cuarto, "plano": [e.plano.x, e.plano.y], "pulgadas": (simd_distance(e.ar, enPiso) / 0.0254 * 10).rounded() / 10,
-                                   "golpe": [w.x, w.y, w.z].map { (Double($0) * 1000).rounded() / 1000 }, "malla": [e.ar.x, e.ar.y].map { ($0 * 1000).rounded() / 1000 },
-                                   "pantalla": pantalla, "zoom": Double(L.zoom), "paredes_fijas": fijasAhi, "foto": fotoChica(frame) ?? ""])
+        anotarBitacora("esquina", datos)
         L.ultimaMalla = 0
-        let pulgadas = simd_distance(e.ar, enPiso) / 0.0254
-        avisoLaboratorio(pulgadas < 1.5 ? "Esquina marcada: la malla ya estaba ahí." : String(format: "Esquina marcada: la malla se mueve %.0f in para pegarse ahí.", pulgadas))
+        // Ya no se promete cuánto se mueve: en un segundo se mide cuánto se movió de verdad (revisarLaEsquinaTocada).
+        L.revisarEsquina = pulgadas < 1.5 ? nil : (cuarto, e.plano, e.ar, CACurrentMediaTime())
+        avisoLaboratorio(pulgadas < 1.5 ? "Esquina marcada: la malla ya estaba ahí." : "Esquina marcada: la malla se está acomodando…")
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+    // El punto del mundo que el LiDAR ve en un punto de la pantalla (la misma cuenta que vigilarAberturas: profundidad
+    // del píxel por la cámara). nil = sin profundidad ahí o poco segura.
+    private func puntoDelLidar(_ p: CGPoint, frame: ARFrame) -> SIMD3<Float>? {
+        guard let prof = frame.smoothedSceneDepth ?? frame.sceneDepth else { return nil }
+        let pb = prof.depthMap
+        guard CVPixelBufferGetPixelFormatType(pb) == kCVPixelFormatType_DepthFloat32, sceneView.bounds.width > 0, sceneView.bounds.height > 0 else { return nil }
+        let orient = view.window?.windowScene?.interfaceOrientation ?? .portrait
+        let aImagen = frame.displayTransform(for: orient, viewportSize: sceneView.bounds.size).inverted()
+        let n = CGPoint(x: p.x / sceneView.bounds.width, y: p.y / sceneView.bounds.height).applying(aImagen)
+        guard n.x >= 0, n.x <= 1, n.y >= 0, n.y <= 1 else { return nil }
+        CVPixelBufferLockBaseAddress(pb, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pb, .readOnly) }
+        let w = CVPixelBufferGetWidth(pb), h = CVPixelBufferGetHeight(pb), bpr = CVPixelBufferGetBytesPerRow(pb)
+        let x = min(w - 1, max(0, Int(n.x * CGFloat(w)))), y = min(h - 1, max(0, Int(n.y * CGFloat(h))))
+        if let cm = prof.confidenceMap {
+            let conf = Self.copiarConfianza(cm)
+            if y * w + x < conf.count, conf[y * w + x] < 1 { return nil }
+        }
+        guard let base = CVPixelBufferGetBaseAddress(pb) else { return nil }
+        let d = (base + y * bpr).assumingMemoryBound(to: Float32.self)[x]
+        guard d > 0.1, d < 6 else { return nil }
+        let K = frame.camera.intrinsics, res = frame.camera.imageResolution
+        let esc = Float(w) / Float(res.width)
+        let fx = K[0][0] * esc, fy = K[1][1] * esc, cx = K[2][0] * esc, cy = K[2][1] * esc
+        let m = frame.camera.transform * SIMD4<Float>((Float(x) - cx) / fx * d, -(Float(y) - cy) / fy * d, -d, 1)
+        return SIMD3(m.x, m.y, m.z)
+    }
+    // Un segundo después de marcar una esquina: cuánto se movió DE VERDAD la malla (antes se decía la distancia del toque).
+    private func revisarLaEsquinaTocada() {
+        let L = lab
+        guard let r = L.revisarEsquina, CACurrentMediaTime() - r.cuando >= 1.0 else { return }
+        L.revisarEsquina = nil
+        guard r.cuarto == L.cuartoMalla, let m = nueva.acomodoMarco ?? marcoDe(roomName) ?? marcoPorCuarto.values.min(),
+              let c = cuartosDelMarco(m).first(where: { $0.nombre == r.cuarto }), let enAR = L.mallaAR[r.cuarto] else { return }
+        let paredes = paredesDeMalla(c).map { $0.pared }
+        guard enAR.count == paredes.count else { return }
+        var pos: [SIMD2<Double>] = []
+        for (i, w) in paredes.enumerated() {
+            if simd_distance(w.a, r.plano) <= 1 { pos.append(enAR[i].a) }
+            if simd_distance(w.b, r.plano) <= 1 { pos.append(enAR[i].b) }
+        }
+        guard !pos.isEmpty else { return }
+        let ahora = pos.reduce(.zero, +) / Double(pos.count)
+        let movio = simd_distance(ahora, r.antes) / 0.0254
+        anotarBitacora("esquina-movio", ["cuarto": r.cuarto, "plano": [r.plano.x, r.plano.y], "pulgadas": (movio * 10).rounded() / 10])
+        avisoLaboratorio(movio < 1 ? "La malla no se movió: lo que ve el láser la deja donde estaba." : String(format: "La malla se movió %.0f in a la esquina.", movio))
     }
     // Una rayita naranja del piso a donde tocó, con su bolita: ahí quedó amarrada la malla.
     private func marcarEsquina(_ w: SIMD3<Float>, piso: Float) {
@@ -11536,7 +11746,9 @@ extension ARMeasureViewController {
         let ahora = CACurrentMediaTime()
         guard forzar || ahora - L.ultimasEsquinas >= 1 else { return }
         L.ultimasEsquinas = ahora
-        let ac = acomodoParaLab() ?? ctx.ac
+        // Con la ubicación afinada de SU cuarto (su prueba: medía una pared de la sala con el ajuste de la cocina, corrido
+        // 2.8 ft, y salían "Algo muy hondo" sin que hubiera nada).
+        let ac = L.acCuarto[ctx.cuarto] ?? acomodoDeUbicacion() ?? ctx.ac
         ctx.ac = ac
         let otros = frame.anchors.compactMap { $0 as? ARPlaneAnchor }.filter { $0.alignment == .vertical && $0.identifier != L.anclaID }.map { Self.planoAR($0) }
         ctx.esquinas = DemolicionEnPlano.esquinas(cara, pared: ctx.pared, acomodo: ac, otros: otros)
@@ -11545,6 +11757,30 @@ extension ARMeasureViewController {
         L.enPlano = ctx
     }
 
+    // La pared del plano que se fijó y de la que todavía no se ha visto nada: si sale de la mira 6 s, se suelta sola (con
+    // algo ya visto se queda: puede estar barriendo de lado a lado).
+    private func soltarParedSinMirar(_ frame: ARFrame) {
+        let L = lab
+        guard let ctx = L.enPlano, L.cara != nil, L.techo == nil, L.resultado.vistoPct < 0.01 else { L.paredFueraDesde = nil; return }
+        let ac = L.acCuarto[ctx.cuarto] ?? acomodoDeUbicacion() ?? ctx.ac
+        guard let e = extremosEnAR(clave: claveDeMalla(ctx.pared.a, ctx.pared.b), ac: ac) else { return }
+        let T = frame.camera.transform
+        let tel = SIMD2<Double>(Double(T.columns.3.x), Double(T.columns.3.z))
+        var mira = SIMD2<Double>(Double(-T.columns.2.x), Double(-T.columns.2.z))
+        guard simd_length(mira) > 0.2 else { return }       // mirando al piso o al techo: no se decide
+        mira = simd_normalize(mira)
+        let laVe = (0...4).contains { k -> Bool in
+            let p = e.a + (e.b - e.a) * (Double(k) / 4), d = p - tel, l = simd_length(d)
+            return l > 0.05 && l <= 5 && simd_dot(d / l, mira) >= cos(40 * .pi / 180)
+        }
+        if laVe { L.paredFueraDesde = nil; return }
+        let ahora = CACurrentMediaTime()
+        guard let desde = L.paredFueraDesde else { L.paredFueraDesde = ahora; return }
+        guard ahora - desde >= 6 else { return }
+        L.paredFueraDesde = nil
+        otraPared()
+        avisoLaboratorio("Ya no veo la pared de \(ctx.cuarto) que iba a medir: la solté. Apunte a la que quiere medir.")
+    }
     private func otraPared() {
         let L = lab
         anotarBitacora("otra-pared", ["sf": ((L.reporte?.area ?? L.resultado.area) / (0.3048 * 0.3048) * 10).rounded() / 10])
@@ -11663,6 +11899,7 @@ extension ARMeasureViewController {
         let ac = acomodoParaLab()
         if (ac != nil) != L.modoPlano { L.modoPlano = ac != nil; pintarLaboratorio() }
         if !L.fijada, let ac = ac { apuntarParedDelPlano(frame, ac: ac) }
+        soltarParedSinMirar(frame)
         let techo = L.techo
         guard techo != nil || L.cara != nil else { return }
         var cara = L.cara ?? ComparadorDeDemolicion.Cara(origen: techo!.cara.origen, u: techo!.cara.u, v: techo!.cara.v, n: techo!.cara.n)
