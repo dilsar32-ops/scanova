@@ -11,7 +11,7 @@
 //    del trabajo por partida; las notas; y el PDF "Measurements & Demo" (lo arma Documents).
 // Lo que cambia contra Field Reports: aquí el trabajo ya es el proyecto (cliente, dirección y fecha ya están), y los
 // niveles y cuartos son los del proyecto (los mismos de Photos y Dry Logs).
-import { $, authFetch, esAparato, esManager, preguntar, PERFIL } from './app.js?v=2026-10-16-4';
+import { $, authFetch, esAparato, esManager, preguntar, PERFIL } from './app.js?v=2026-10-16-5';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -504,6 +504,14 @@ async function lanzarCamara(alcance, d){
   // La cámara se cayó a media sesión, pero trajo lo que ya estaba guardado: se dice por qué terminó así.
   if(res.aviso) avisar(String(res.aviso));
 }
+// La fila que se manda al servidor por cada medida de la cámara. TODAS llevan los mismos campos: el servidor rechaza
+// (400 "All object keys must match") una tanda donde unas traen la resta y otras no (su prueba del 16-oct: la pared
+// completa guardada con el techo).
+export function filaParaGuardar(n, tid, nivel, cuarto){
+  return { id: n.id, trabajo_id: tid, nivel_id: nivel ? nivel.id : null, cuarto_id: cuarto ? cuarto.id : null, nivel_nombre: nivel ? nivel.nombre : (n.nivel || null), cuarto_nombre: cuarto ? cuarto.nombre : (n.cuarto || null),
+    seccion: n.seccion, material: n.material, largo: n.largo, ancho: n.ancho, origen: 'camara', orden: n.orden,
+    menos: num(n.menos) ? n.menos : null, menos_que: num(n.menos) ? (n.menos_que || null) : null };
+}
 // Cada medida con su nivel y su cuarto DEL PROYECTO: si la cuadrilla dijo uno que todavía no existe, se crea (así sale
 // también en Photos y Dry Logs, como un cuarto agregado a mano). Antes se releen del servidor: otro del equipo pudo
 // agregar "Kitchen" hace un minuto, y no se debe crear un segundo "Kitchen".
@@ -523,11 +531,7 @@ async function guardarDeCamara(tid, nuevas){
         cuarto = CUARTOS.find(c => c.nivel_id === nivel.id && norm(c.nombre) === norm(n.cuarto)) || null;
         if(!cuarto && AYUDA.asegurarCuarto){ cuarto = await AYUDA.asegurarCuarto(nivel.id, n.cuarto, tid); sigue(); if(cuarto && !CUARTOS.some(x => x.id === cuarto.id)) CUARTOS = CUARTOS.concat(cuarto); }
       }
-      const fila = { id: n.id, trabajo_id: tid, nivel_id: nivel ? nivel.id : null, cuarto_id: cuarto ? cuarto.id : null, nivel_nombre: nivel ? nivel.nombre : (n.nivel || null), cuarto_nombre: cuarto ? cuarto.nombre : (n.cuarto || null),
-        seccion: n.seccion, material: n.material, largo: n.largo, ancho: n.ancho, origen: 'camara', orden: n.orden };
-      // Solo si trae resta: lo demás se manda igual que siempre.
-      if(num(n.menos)){ fila.menos = n.menos; fila.menos_que = n.menos_que || null; }
-      filas.push(fila);
+      filas.push(filaParaGuardar(n, tid, nivel, cuarto));
     }
     const out = await insertar(filas);
     soltarPendientes(tid);

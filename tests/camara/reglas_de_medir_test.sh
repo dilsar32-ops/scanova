@@ -312,7 +312,13 @@ ok('nunca negativo', M.calcular('Drywall', 3, 2, 50).sqft === 0);
 const g = M.agrupar(pe.map((x, i) => ({ ...x, id: 'x' + i, created_at: '' })), [], []);
 ok('los totales (y el PDF, que sale de agrupar) restan: Drywall 129.9 SF', g.partidas.find(x => x.material === 'Drywall').sqft === 129.9);
 const src = (await import('node:fs')).readFileSync(process.argv[2], 'utf8');
-ok('al guardar lo de la cámara, la resta va solo si la trae', src.includes("if(num(n.menos)){ fila.menos = n.menos; fila.menos_que = n.menos_que || null; }"));
+// Su prueba del 16-oct: la pared completa (con resta) + el techo (sin resta) en la MISMA tanda -> 400 "All object keys must match".
+const tanda = M.filasDeCamara([{ length: 20, width: 8.1, material: 'Drywall', companion: 'Insulation', nivel: 'First Floor', cuarto: 'Living Room', seccion: 'wall', menos: 32.1, menosQue: '1 door, 1 window' },
+  { length: 1.3, width: 0.8, material: 'Drywall', nivel: 'First Floor', cuarto: 'Living Room', seccion: 'ceiling' }], base).map((x, i) => M.filaParaGuardar({ ...x, id: 'id' + i }, 'T', null, null));
+const llaves = tanda.map(x => Object.keys(x).sort().join(','));
+ok('al guardar lo de la cámara, TODAS las filas de una tanda llevan los mismos campos (con y sin resta)', tanda.length === 3 && new Set(llaves).size === 1);
+ok('la que no tiene resta va con menos y menos_que en null', tanda[2].menos === null && tanda[2].menos_que === null && tanda[0].menos === 32.1 && tanda[0].menos_que === '1 door, 1 window');
+ok('guardarDeCamara usa esa fila', src.includes('filas.push(filaParaGuardar(n, tid, nivel, cuarto));'));
 ok('en el editor se puede quitar la resta', src.includes('id="medMenos"') && src.includes('fila.menos = null; fila.menos_que = null;'));
 ok("la página manda la bandera solo al manager, y de qué trabajo es", src.includes('porMovimiento: esManager(), trabajo: tid'));
 console.log(`\n  página: ${p} pasan, ${f} fallan`);
