@@ -92,9 +92,17 @@ struct ComparadorDeDemolicion {
     // quita antes de votar (igual que el desvío de la normal). Sin piso visto no hay número.
     private(set) var pisoRef: Float?
     private(set) var derivaV: Float = 0
+    // La deriva A LO LARGO de la pared (m), medida contra las orillas ya vistas (ver `corrimientoALoLargo`).
+    private(set) var derivaU: Float = 0
+    private var ultimoU: (corrimiento: Float, cuadro: Int)? = nil
+    private var ultimoBrincoU: (du: Float, cuadro: Int)? = nil, sinBrincosUHasta = 0
     // Lo del último cuadro, para los avisos.
     private(set) var ultimoLejos: Float = 0
     private(set) var ultimoVotantes = 0
+    // Cuántos brincos del rastreo se volvieron a registrar (ver `votar`), para el aviso.
+    private(set) var brincos = 0
+    // Lo que los brincos corrieron la cara a lo largo de la normal (in): los rayos se cruzan con la pared donde quedó.
+    private(set) var brincoNormal: Float = 0
 
     init() {
         let n = Self.columnas * Self.renglones
@@ -134,44 +142,56 @@ struct ComparadorDeDemolicion {
         if bajos.count >= 40, let piso = Self.capaMasBaja(&bajos) {
             if let ref = pisoRef { derivaV = piso - ref } else { pisoRef = piso; derivaV = 0 }
         }
-        var pares: [(Int, Float)] = []
-        pares.reserveCapacity(puntos.count)
-        var referencia: [(u: Float, s: Float)] = []
-        var lejos = 0, cerca = 0
-        let denominadorVotos = Float(1) / Self.pulgada
-        for p in puntos {
-            let d = p - camara
-            let dist = simd_length(d)
-            if dist > Self.distanciaMax {
-                lejos += 1
-                let sLejos = -simd_dot(p - cara.origen, cara.n) * denominadorVotos
-                guard dist <= Self.distanciaHonda, sLejos > Self.hondoDesde + 4 else { continue }
-            } else {
-                guard dist >= Self.distanciaMin else { continue }
-                cerca += 1
+        var (pares, banda, muestras, lejos, cerca) = proyectar(puntos, camara: camara, cara: cara)
+        pares.sort { $0.0 < $1.0 }
+        // La banda del drywall entero (por instrucción se fijó ARRIBA del corte): solo lo que cae cerca de la cara.
+        func cercaDeLaCara() -> [(u: Float, s: Float)] { banda.filter { abs($0.s - (desvio + pendiente * $0.u)) < 1.0 } }
+        var referencia = cercaDeLaCara()
+        // EL BRINCO DEL RASTREO (16 oct): si el mundo se corre 2.5-6 in hacia la pared y el ancla no, la banda ya no pasa
+        // la compuerta de 1 in, el desvío se congelaba y el drywall entero se leía como cavidad (inventaba 4-8 SF en una
+        // pared sin corte). Sin banda que pase, lo que este cuadro ve del drywall YA DECIDIDO (arriba del corte, a los lados)
+        // dice cuánto se corrió: si todo se corrió lo mismo, el cuadro se vuelve a registrar antes de votar.
+        if referencia.count < 30 {
+            if let d = corrimientoContraLoVisto(pares) {
+                // Solo un brinco HACIA la pared (0.6-8 in): es el que hace pasar drywall por cavidad. Hacia el cuarto el
+                // drywall sale "tapado" y nunca se cobra; y lo de delante (un vanity, un gabinete) también da negativo y
+                // corría la cara 21 in. Las diferencias chicas cuadro tras cuadro se acumulaban (cerca de una puerta subía
+                // 0.2 in por cuadro).
+                if d >= Self.brincoMin, d <= 8 {
+                    desvio += d
+                    brincoNormal += d
+                    brincos += 1
+                    (pares, banda, muestras, lejos, cerca) = proyectar(puntos, camara: camara, cara: cara)   // los rayos cruzan donde está la pared
+                    pares.sort { $0.0 < $1.0 }
+                    referencia = cercaDeLaCara()
+                }
             }
-            let dir = d / dist
-            let cosN = simd_dot(dir, cara.n)
-            guard cosN <= -Self.cosenoMin else { continue }      // el rayo tiene que ir HACIA la pared y no rasante
-            // Dónde cruza el rayo la cara de la pared (si pegó antes, se extiende el rayo).
-            let t = simd_dot(cara.origen - camara, cara.n) / cosN
-            guard t > 0 else { continue }
-            let x = camara + dir * t
-            var q = cara.enCara(x)
-            q.y -= derivaV
-            guard let c = Self.columnaDe(q.x), let r = Self.renglonDe(q.y) else { continue }
-            let s = -simd_dot(p - cara.origen, cara.n) * denominadorVotos     // pulgadas; + = más hondo que la cara
-            pares.append((Self.indice(c, r), s))
-            // La banda del drywall entero (por instrucción se fijó ARRIBA del corte): de 4 in abajo del punto fijado a
-            // 30 in arriba, a todo lo largo, y solo lo que cae cerca de la cara (una cavidad nunca entra).
-            if q.y > -0.10, q.y < 0.80, abs(s - (desvio + pendiente * q.x)) < 1.0 { referencia.append((q.x, s)) }
+        }
+        // Y A LO LARGO (u): el drywall parejo no lo ve, pero sí las orillas ya vistas (los studs dentro del corte, las puntas
+        // del corte). Un brinco de 3 in en u corría la punta 3 in (+3% en un corte de 8 ft). Lo que se mide contra lo de
+        // antes trae su sesgo (visto de lado, la huella del stud se corre ~1 in hacia el teléfono), así que solo cuenta el
+        // CAMBIO de 2 in o más contra el cuadro de antes: un brinco, nunca la deriva lenta.
+        if let est = corrimientoALoLargo(muestras) {
+            if let antes = ultimoU, cuadros - antes.cuadro <= 3, cuadros >= sinBrincosUHasta,
+               abs(est - antes.corrimiento) >= 1.9 * Self.pulgada, corridoParejo(muestras, est) {
+                var du = est - antes.corrimiento
+                // Si el cuadro siguiente pide OTRA vez lo mismo, la corrección no pegó (junto a un espejo lo de antes no
+                // alcanza para medirlo y se encadenaban 6 in): se deshace y no se corrige más por 6 s.
+                if let u = ultimoBrincoU, cuadros - u.cuadro <= 3, du * u.du > 0 { du = -u.du; sinBrincosUHasta = cuadros + 30; ultimoBrincoU = nil }
+                else { ultimoBrincoU = (du, cuadros) }
+                derivaU += du
+                brincos += 1
+                ultimoU = (antes.corrimiento, cuadros)
+                (pares, banda, muestras, lejos, cerca) = proyectar(puntos, camara: camara, cara: cara)
+                pares.sort { $0.0 < $1.0 }
+                referencia = cercaDeLaCara()
+            } else { ultimoU = (est, cuadros) }
         }
         ultimoLejos = (lejos + cerca) > 0 ? Float(lejos) / Float(lejos + cerca) : 0
         ultimoVotantes = pares.count
         ajustarCara(referencia)
         guard !pares.isEmpty else { return }
         // Un voto por cuadro y por cuadrito: la mediana de ese cuadro, ya corregida por el desvío.
-        pares.sort { $0.0 < $1.0 }
         var i = 0
         var grupo: [Float] = []
         while i < pares.count {
@@ -191,6 +211,143 @@ struct ComparadorDeDemolicion {
             let c = k % Self.columnas
             colMin = min(colMin, c); colMax = max(colMax, c)
         }
+    }
+
+    // Los puntos de este cuadro en la cara: (cuadrito, s en pulgadas) y la banda de arriba (u, s) sin compuerta. Después
+    // de un brinco el rayo se cruza con la pared donde quedó (la cara corrida lo que brincó): con 6 in de brinco y el rayo
+    // a 40°, el cruce con la cara vieja caía 5 in más arriba y el hueco se partía.
+    private func proyectar(_ puntos: [SIMD3<Float>], camara: SIMD3<Float>, cara: Cara)
+        -> (pares: [(Int, Float)], banda: [(u: Float, s: Float)], muestras: [SIMD3<Float>], lejos: Int, cerca: Int) {
+        var pares: [(Int, Float)] = []
+        pares.reserveCapacity(puntos.count)
+        var muestras: [SIMD3<Float>] = []         // (u, v, s) de cada punto que vota
+        muestras.reserveCapacity(puntos.count)
+        var banda: [(u: Float, s: Float)] = []
+        var lejos = 0, cerca = 0
+        let denominadorVotos = Float(1) / Self.pulgada
+        let origenAhora = cara.origen - cara.n * (brincoNormal * Self.pulgada)
+        for p in puntos {
+            let d = p - camara
+            let dist = simd_length(d)
+            if dist > Self.distanciaMax {
+                lejos += 1
+                let sLejos = -simd_dot(p - cara.origen, cara.n) * denominadorVotos
+                guard dist <= Self.distanciaHonda, sLejos > Self.hondoDesde + 4 else { continue }
+            } else {
+                guard dist >= Self.distanciaMin else { continue }
+                cerca += 1
+            }
+            let dir = d / dist
+            let cosN = simd_dot(dir, cara.n)
+            guard cosN <= -Self.cosenoMin else { continue }      // el rayo tiene que ir HACIA la pared y no rasante
+            // Dónde cruza el rayo la cara de la pared (si pegó antes, se extiende el rayo).
+            let t = simd_dot(origenAhora - camara, cara.n) / cosN
+            guard t > 0 else { continue }
+            let x = camara + dir * t
+            var q = cara.enCara(x)
+            q.y -= derivaV
+            q.x -= derivaU
+            guard let c = Self.columnaDe(q.x), let r = Self.renglonDe(q.y) else { continue }
+            let s = -simd_dot(p - cara.origen, cara.n) * denominadorVotos     // pulgadas; + = más hondo que la cara
+            pares.append((Self.indice(c, r), s))
+            muestras.append(SIMD3(q.x, q.y, s))
+            // La banda: de 4 in abajo del punto fijado a 30 in arriba, a todo lo largo.
+            if q.y > -0.10, q.y < 0.80 { banda.append((q.x, s)) }
+        }
+        return (pares, banda, muestras, lejos, cerca)
+    }
+
+    // ¿Cuánto más hondo (in) lee este cuadro lo que ya estaba decidido? La mediana, por cuadrito, contra lo que ese
+    // cuadrito ya tenía. nil = muy poco con qué comparar, o no se corrió todo junto (no es un brinco del rastreo).
+    static let brincoMin: Float = 0.6
+    private func corrimientoContraLoVisto(_ pares: [(Int, Float)]) -> Float? {
+        var difs: [Float] = []
+        var grupo: [Float] = []
+        var i = 0
+        while i < pares.count {
+            let k = pares[i].0
+            grupo.removeAll(keepingCapacity: true)
+            while i < pares.count, pares[i].0 == k { grupo.append(pares[i].1); i += 1 }
+            guard grupo.count >= 3, let antes = decididoEn(k) else { continue }
+            let cero = desvio + pendiente * Self.uDeColumna(k % Self.columnas)
+            difs.append(Self.mediana(&grupo) - cero - antes)
+        }
+        guard difs.count >= 25 else { return nil }
+        let d = Self.mediana(&difs)
+        let juntos = difs.reduce(0) { $0 + (abs($1 - d) < 0.5 ? 1 : 0) }
+        return Float(juntos) >= 0.6 * Float(difs.count) ? d : nil
+    }
+    // ¿Cuánto se corrió este cuadro a lo largo de la pared (m)? Se prueba de -6 a +6 in, cada 1/2 in, cuál corrimiento
+    // pone mejor lo hondo de este cuadro (más de 2 in detrás de la cara) sobre la fracción honda que ya tenía cada
+    // cuadrito. nil = no hay orillas vistas (pared entera) o no hay un mejor claro.
+    static let corrimientoUMax = 12      // medias pulgadas
+    // Un brinco corre TODO el cuadro: la mitad izquierda y la derecha tienen que pedir el mismo corrimiento (±1 in). Un
+    // secador o un air mover que entra por un lado cambia lo que se ve de ese lado nada más (corría 2-3 in en falso).
+    private func corridoParejo(_ muestras: [SIMD3<Float>], _ est: Float) -> Bool {
+        guard let lo = muestras.map({ $0.x }).min(), let hi = muestras.map({ $0.x }).max() else { return false }
+        let mitad = (lo + hi) / 2
+        guard let a = corrimientoALoLargo(muestras.filter { $0.x < mitad }), let b = corrimientoALoLargo(muestras.filter { $0.x >= mitad }) else { return false }
+        return abs(a - est) <= Self.pulgada && abs(b - est) <= Self.pulgada
+    }
+    private func corrimientoALoLargo(_ muestras: [SIMD3<Float>]) -> Float? {
+        guard muestras.count >= 300 else { return nil }
+        var c0 = Int.max, c1 = Int.min, r0 = Int.max, r1 = Int.min
+        for m in muestras {
+            guard let c = Self.columnaDe(m.x), let r = Self.renglonDe(m.y) else { continue }
+            c0 = min(c0, c); c1 = max(c1, c); r0 = min(r0, r); r1 = max(r1, r)
+        }
+        guard c0 <= c1 else { return nil }
+        c0 = max(0, c0 - 4); c1 = min(Self.columnas - 1, c1 + 4)
+        let w = c1 - c0 + 1
+        // Lo de antes: la fracción honda de cada cuadrito ya visto (-1 = sin ver).
+        var antes = [Float](repeating: -1, count: w * (r1 - r0 + 1))
+        var hayHueco = false
+        for r in r0...r1 { for c in c0...c1 {
+            let k = Self.indice(c, r)
+            guard Int(cuenta[k]) >= Self.votosMin else { continue }
+            let x = min(1, max(0, fraccionHonda[k] / Float(cuenta[k])))
+            antes[(r - r0) * w + (c - c0)] = x
+            if x > 0.5 { hayHueco = true }
+        } }
+        guard hayHueco else { return nil }
+        let n = 2 * Self.corrimientoUMax + 1, paso = Self.pulgada / 2
+        var costo = [Float](repeating: 0, count: n), cuantos = [Int](repeating: 0, count: n)
+        for m in muestras {
+            let rel = m.z - (desvio + pendiente * m.x)
+            // Lo de delante y lo MUY hondo (un espejo, un paso abierto) no dicen dónde está el stud.
+            guard rel > -1, rel < Self.hondoDesde, let r = Self.renglonDe(m.y) else { continue }
+            let hondo: Float = rel > 2 ? 1 : 0
+            let fila = (r - r0) * w
+            for j in 0..<n {
+                let c = Int(((m.x - Float(j - Self.corrimientoUMax) * paso - Self.uMin) / Self.celda).rounded(.down)) - c0
+                guard c >= 0, c < w else { continue }
+                let x = antes[fila + c]
+                guard x >= 0 else { continue }
+                costo[j] += (hondo - x) * (hondo - x); cuantos[j] += 1
+            }
+        }
+        let j0 = Self.corrimientoUMax
+        guard cuantos[j0] >= 200 else { return nil }
+        var cs = [Float](repeating: .infinity, count: n)
+        for j in 0..<n where cuantos[j] * 5 >= cuantos[j0] * 4 { cs[j] = costo[j] / Float(cuantos[j]) }
+        let validos = cs.filter { $0.isFinite }
+        guard validos.count >= n / 2, let minimo = validos.min() else { return nil }
+        let promedio = validos.reduce(0, +) / Float(validos.count)
+        // Un mínimo claro (la mitad del promedio o menos) y ANGOSTO: lo que queda cerca del mínimo cabe en 2 in y no toca la
+        // orilla de la búsqueda. Viendo solo la punta del corte, todo lo corrido hacia el drywall da cero y no dice nada.
+        let cerca = (0..<n).filter { cs[$0] <= minimo + 0.2 * (promedio - minimo) }
+        guard minimo <= 0.5 * promedio, let j1 = cerca.first, let j2 = cerca.last, j2 - j1 <= 4, j1 > 0, j2 < n - 1 else { return nil }
+        return (Float(j1 + j2) / 2 - Float(j0)) * paso
+    }
+
+    // El drywall ya decidido en un cuadrito (votos juntos a menos de 0.3 in de la cara): su mediana (in). El fondo de la
+    // cavidad no sirve: su lectura cambia con el ángulo (los lados del stud) y corría la cara media pulgada.
+    private func decididoEn(_ k: Int) -> Float? {
+        guard Int(cuenta[k]) >= Self.votosMin else { return nil }
+        var vs = votosDe(k)
+        let m = Self.mediana(&vs)
+        guard vs[(vs.count * 3) / 4] - vs[vs.count / 4] <= 0.5 else { return nil }
+        return abs(m) < Self.sigueHasta ? m : nil
     }
 
     // La recta del drywall entero en este cuadro: s = a + b·u. La pendiente se promedia en el tiempo (la de un solo cuadro
@@ -278,6 +435,10 @@ struct ComparadorDeDemolicion {
             }
             if primera != nil { break }
         }
+        // Drywall entero pegado al piso y el hueco empieza 8 in o más arriba: un corte que no llega al piso (antes se
+        // perdía entero sin aviso). Se sube como cualquier hueco, pero solo si se vio dónde empieza (abajoDelCorte): sin
+        // eso se cobraría desde el piso.
+        if primera == nil, let rb = inicioArribaDelPiso(c, piso: piso), abajoDelCorte(c, piso: piso) > 0 { primera = rb }
         guard let inicio = primera else {
             // No arranca ninguna cavidad pegada al piso: ¿qué hay ahí abajo? Se mira el PRIMER pie (16 oct: con los primeros
             // 2 ft, en un corte de 1 ft entraba el drywall entero de arriba del corte y la columna de la sombra del stud de la
@@ -351,6 +512,86 @@ struct ComparadorDeDemolicion {
         return .cortada(orilla - piso)
     }
 
+    // ---------------- EL CORTE QUE NO LLEGA AL PISO ----------------
+    // Abajo quedó drywall: una tira de 2-6 in, o el de detrás del zócalo (para salvarlo se corta arriba de él). El seguro
+    // solo paga lo quitado. Lo prueba un cuadrito PAREJO (sus votos caben en 0.3 in) en la cara del drywall o con algo
+    // pegado delante (el zócalo). Ojo con la solera: su cara mide 1.5 in y queda 1/2 in DETRÁS, pero con la cara de
+    // referencia corrida (corte de 6 ft, pared fuera de plomo) se lee "sigue" (16 oct, banco de ataques). Por eso lo que
+    // empieza a menos de 1.75 in del piso se juzga por el ESCALÓN hasta el fondo de la cavidad de junto: la tira es la
+    // misma hoja que la de arriba del corte (mismo escalón que allá); la solera, media pulgada menos. Son cuadritos
+    // vecinos, los ven los mismos cuadros: no les afecta que la cara de referencia se corra.
+    static let bandaAltaMax: Float = 48 * pulgada        // hasta dónde se busca dónde empieza el hueco
+    static let parejoMax: Float = 0.3                    // q3 - q1 de un cuadrito de una sola cara (pulgadas)
+    static let caraSolera: Float = 1.75 * pulgada        // hasta aquí se puede ver la cara de la solera
+    func medianaYAncho(_ c: Int, _ r: Int) -> (mediana: Float, ancho: Float)? {
+        var vs = votosDe(Self.indice(c, r))
+        guard vs.count >= Self.votosMin else { return nil }
+        let m = Self.mediana(&vs)
+        return (m, vs[(vs.count * 3) / 4] - vs[vs.count / 4])
+    }
+    // Dónde EMPIEZA el corte de la columna (m desde el piso; 0 = sale del piso). Antes siempre era el piso: con una tira
+    // de 4 in o el zócalo puesto se cobraba +20%. La orilla de abajo se integra como la de arriba: desde arriba del primer
+    // hueco se resta la fracción honda de cada cuadrito de la transición (el último drywall incluido). Sin drywall seguro
+    // a 3 cuadritos o menos debajo del hueco, o con algo tapado o muy hondo abajo, es el piso (lo de antes).
+    func abajoDelCorte(_ c: Int, piso: Float) -> Float {
+        guard let r0 = Self.renglonDe(piso), estado(c, r0) != .cavidad else { return 0 }
+        let rMax = min(Self.renglones - 1, Self.renglonDe(piso + Self.bandaAltaMax) ?? (Self.renglones - 1))
+        var rb = r0 + 1
+        while rb <= rMax {
+            let e = estado(c, rb)
+            if e == .cavidad { break }
+            if e == .tapado || e == .hondo { return 0 }
+            rb += 1
+        }
+        guard rb <= rMax else { return 0 }
+        // El escalón de arriba del corte: del drywall que sigue (sin la orilla) al fondo de la cavidad de debajo.
+        func medianaDe(_ rs: [Int], _ e: Estado) -> Float? {
+            var v = rs.compactMap { r in estado(c, r) == e ? medianaYAncho(c, r)?.mediana : nil }
+            return v.isEmpty ? nil : Self.mediana(&v)
+        }
+        var rc = rb
+        while rc < Self.renglones, estado(c, rc) != .sigue { rc += 1 }
+        let cara = rc + 1 < Self.renglones ? medianaDe(Array((rc + 1)..<min(Self.renglones, rc + 4)), .sigue) : nil
+        let fondoArriba = medianaDe(Array(max(rb, rc - 3)..<max(rb, rc)), .cavidad)
+        let fondoAbajo = medianaDe(Array(rb...min(rb + 2, Self.renglones - 1)), .cavidad)
+        // Lo de encima de la tira es el hueco o su orilla (votos revueltos). Algo PAREJO detrás de la cara y antes del fondo
+        // es la cara de arriba de la solera: abajo está su cara, revuelta con el piso (baño con vanity, 16 oct).
+        func caraDetras(_ r: Int) -> Bool {
+            guard r < rb, let (m, ancho) = medianaYAncho(c, r) else { return false }
+            return m > Self.sigueHasta && m < Self.cavidad2x4.lowerBound && ancho <= 0.4
+        }
+        var solido: Int? = nil
+        for r in (r0 + 1)..<rb {
+            guard let (m, ancho) = medianaYAncho(c, r), ancho <= Self.parejoMax, m > -Self.tapadoDesde else { continue }
+            if Self.vAbajo(r) - piso >= Self.caraSolera { if m < Self.sigueHasta { solido = r } }
+            else if let fa = fondoAbajo, let fb = fondoArriba, let a = cara, fa - m >= (fb - a) - 0.2, !caraDetras(r + 1) { solido = r }
+        }
+        guard let rs = solido, rb - rs <= 3 else { return 0 }
+        var orilla = Self.vAbajo(rb) + Self.celda
+        for rt in rs...rb { orilla -= Self.celda * min(1, max(0, fraccion(c, rt))) }
+        // Nunca fuera de los dos centros (el último drywall seguro y el primer hueco seguro).
+        orilla = min(max(orilla, Self.vAbajo(rs) + Self.celda / 2), Self.vAbajo(rb) + Self.celda / 2)
+        return max(0, orilla - piso)
+    }
+    // Sin hueco en los primeros 8 in: ¿empieza más arriba? Drywall entero ("sigue") desde el piso (3 cuadritos o más,
+    // nada delante ni muy hondo), su orilla de abajo vista (transición de 2 cuadritos o menos) y luego 6 in o más de
+    // cavidad: un cuadrito suelto o el repisón de una ventana no arrancan nada.
+    private func inicioArribaDelPiso(_ c: Int, piso: Float) -> Int? {
+        guard let r0 = Self.renglonDe(piso) else { return nil }
+        let rMax = min(Self.renglones - 1, Self.renglonDe(piso + Self.bandaAltaMax) ?? (Self.renglones - 1))
+        var sigue = 0, ultimo: Int? = nil
+        var r = r0 + 1
+        while r <= rMax {
+            let e = estado(c, r)
+            if e == .cavidad { break }
+            if e == .sigue { sigue += 1; ultimo = r } else if e != .ambiguo && e != .noVisto { return nil }
+            r += 1
+        }
+        guard r + 2 <= rMax, sigue >= 3, let u = ultimo, r - u <= 3,
+              (r...(r + 2)).allSatisfy({ estado(c, $0) == .cavidad }) else { return nil }
+        return r
+    }
+
     // El alto de un hueco que termina en una abertura: hasta arriba del último cuadrito hueco, más la fracción honda del
     // siguiente (la orilla). Nunca más que medio cuadrito arriba del último hueco.
     private func altoBajoAbertura(_ c: Int, _ tope: Int, piso: Float) -> Float {
@@ -385,8 +626,11 @@ struct ComparadorDeDemolicion {
         var area: Float                      // m², la suma de cada columna por su ancho
         var studs: Int
         var esquinaIni = false, esquinaFin = false   // llega a la esquina de la pared (con `limites`)
+        var abajo: Float = 0                 // dónde EMPIEZA el corte (m, desde el piso; 0 = sale del piso)
     }
-    enum Alarma: Equatable { case sinPiso, hondo(Int), tapadoAbajo, sinStuds, ambiguo(Int), sinOrilla(Int), bajoAbertura(Int) }
+    // noLlegaAlPiso: un hueco que empieza 8 in o más arriba y no se ve como corte (corto o sin dos studs: ¿nicho,
+    // botiquín, caja abierta?). No se cobra, pero no se pierde callado.
+    enum Alarma: Equatable { case sinPiso, hondo(Int), tapadoAbajo, sinStuds, ambiguo(Int), sinOrilla(Int), bajoAbertura(Int), noLlegaAlPiso(Int) }
     struct Resultado: Equatable {
         var tramos: [Tramo] = []
         var largo: Float = 0, area: Float = 0
@@ -394,6 +638,7 @@ struct ComparadorDeDemolicion {
         var vistoPct: Float = 0
         var alarmas: [Alarma] = []
         var columnas: [Columna] = []          // de colMin a colMax
+        var abajos: [Float] = []              // por columna: dónde empieza su corte (m desde el piso; 0 = el piso)
         var colIni = 0
         var patronStuds = false
         var separacionStuds: Float? = nil     // pulgadas (16 o 24)
@@ -405,6 +650,13 @@ struct ComparadorDeDemolicion {
     // de fuera (la pared de al lado) no cuenta ni avisa, y un tramo que llega a 12 in o menos de una esquina pasando solo
     // por la cara del stud de la esquina (visto, nunca drywall entero) se lleva hasta la esquina (casa 3D, 16 oct).
     static let esquinaHasta: Float = 12 * pulgada
+    // LA PRUEBA DE QUE HUBO DRYWALL (16 oct, puertas cerradas y nichos que se cobraban): un corte de verdad deja ver las
+    // caras de los studs cada 16 o 24 in. La hoja de una puerta cerrada, la de atrás de unas corredizas, la boca de un
+    // retorno o un nicho son un hueco PLANO sin studs. Entre dos studs caben 14.5 in: un pedazo de más de 16 in sin stud
+    // adentro, o una corrida sin ningún stud (ni la esquina), no se cuenta y avisa (sinStuds).
+    static let sinStudMax: Float = 16 * pulgada
+    // Junto a una puerta del plano (corrida unas pulgadas por la ubicación), lo hueco del alto de una puerta es la hoja.
+    static let altoDePuerta: Float = 60 * pulgada
     // `ventanas` / `puertas`: dónde están, en la cara (u, m), las del plano. Bajo una ventana el vidrio no devuelve nada
     // y la orilla de arriba nunca se ve: el hueco visto desde el piso (12 in o más) se cuenta hasta donde llega. En una
     // puerta no hay drywall: nada se cuenta ahí y lo muy hondo no avisa (ya se sabe que es la puerta).
@@ -430,6 +682,24 @@ struct ComparadorDeDemolicion {
             if case .bajoAbertura(let h) = col { abiertas += 1; bajoVentana.insert(i); return .cortada(h) }
             return col
         }
+        // La puerta del plano viene corrida unas pulgadas (la ubicación) y se toma 2 in más angosta: la hoja cerrada que
+        // asoma a su lado (hueco del alto de una puerta) es la misma puerta, no un corte. Se le junta hasta 12 in por lado.
+        var hojas: [Int] = []
+        for i in enPuerta {
+            for paso in [-1, 1] where !enPuerta.contains(i + paso) {
+                var x = i + paso, ultima: Int? = nil
+                while x >= 0, x < cols.count, abs(x - i) <= 6 {
+                    if case .cortada(let h) = cols[x], h >= Self.altoDePuerta { ultima = x }
+                    else if cols[x] != .noVista && !Self.esSinOrilla(cols[x]) { break }
+                    x += paso
+                }
+                if let u = ultima { hojas += Array(stride(from: i + paso, through: u, by: paso)) }
+            }
+        }
+        for x in hojas { enPuerta.insert(x); cols[x] = .noVista }
+        // Dónde empieza cada corte (0 = el piso). Lo que se puentea abajo (studs, una columna rara) lleva el MÁS ALTO de
+        // sus dos lados: nunca de más.
+        var abajos = cols.indices.map { i -> Float in Self.esCortada(cols[i]) ? abajoDelCorte(colMin + i, piso: piso) : 0 }
         // Bajo una ventana el tope del hueco es la solera de la ventana: una línea derecha. Una columna que se vio más
         // baja (visto de lado, el tope sale ambiguo) se sube a la mediana de las de su ventana; nunca más arriba.
         do {
@@ -460,30 +730,34 @@ struct ComparadorDeDemolicion {
             let ancho = j - i
             // Hasta 3 columnas (6 in): el stud mide 1.5 in, pero cae entre dos cuadritos y sus orillas salen borrosas.
             if i > 0, j < cols.count, ancho <= 3, case .cortada(let a) = cols[i - 1], case .cortada(let b) = cols[j],
-               (i..<j).allSatisfy({ Self.puedeSerStud(cols[$0]) && !enPuerta.contains($0) }) {
+               (i..<j).allSatisfy({ Self.puedeSerStud(cols[$0]) && !enPuerta.contains($0) }),
+               // Lo que está DELANTE de la cara (el casing de una puerta) no es un stud: el corte termina ahí.
+               !(i..<j).contains(where: { delante(colMin + $0, piso: piso, alto: min(a, b)) }) {
                 // Mismo alto: el promedio. Alto distinto (el lado de una ventana: stud rey y de apoyo entre el corte de 4 ft
                 // y el de bajo la ventana): el MÁS BAJO, nunca de más.
                 let h = Self.altoDelPuente(a, b, ventanaIzq: bajoVentana.contains(i - 1), ventanaDer: bajoVentana.contains(j))
                 // Solo es un stud si se vio su CARA (ambigua o "sigue"): una columna de hueco sin orilla o sin ver no lo es, y
                 // contarla ponía un stud falso a la mitad y rompía el patrón de 16 in (casa 3D, 16 oct).
                 let esStud = (i..<j).contains { cols[$0] == .ambigua || cols[$0] == .entera }
-                for k in i..<j { cols[k] = .cortada(h) }
+                for k in i..<j { cols[k] = .cortada(h); abajos[k] = max(abajos[i - 1], abajos[j]) }
                 if esStud { studs.append(Self.uDeColumna(colMin + i) + Float(ancho - 1) * Self.celda / 2) }
             } else if i > 0, j < cols.count, ancho == 1, case .cortada(let a) = cols[i - 1], case .cortada(let b) = cols[j],
                       abs(a - b) <= 3 * Self.pulgada, !enPuerta.contains(i) {
                 // UNA sola columna rara (2 in: un tubo delante, un cuadrito de ruido) en medio de un corte parejo no lo parte.
                 cols[i] = .cortada((a + b) / 2)
+                abajos[i] = max(abajos[i - 1], abajos[j])
             } else if i > 0, j < cols.count, ancho <= 5, case .cortada(let a) = cols[i - 1], case .cortada(let b) = cols[j],
                       !(i..<j).contains(where: { enPuerta.contains($0) }),
                       (i..<j).allSatisfy({ x in
                           switch cols[x] { case .ambigua, .noVista: return true
                           case .sinOrilla(let h): return h >= min(a, b) / 2
-                          default: return false } }) {
+                          default: return false } }),
+                      !(i..<j).contains(where: { delante(colMin + $0, piso: piso, alto: min(a, b)) }) {
                 // Hasta 10 in de caras de stud, hueco visto desde el piso sin su orilla (visto de lado) o sin ver, entre dos
                 // pedazos cortados y SIN drywall entero en medio: es el mismo corte (casa 3D, 16 oct: cerca de la esquina se
                 // partía; al lado de una ventana quedaban fuera el stud rey y el de apoyo). Al alto del más bajo.
                 let h = Self.altoDelPuente(a, b, ventanaIzq: bajoVentana.contains(i - 1), ventanaDer: bajoVentana.contains(j))
-                for k in i..<j { cols[k] = .cortada(h) }
+                for k in i..<j { cols[k] = .cortada(h); abajos[k] = max(abajos[i - 1], abajos[j]) }
             }
             i = j
         }
@@ -498,7 +772,8 @@ struct ComparadorDeDemolicion {
         // Los tramos: corridas de columnas cortadas.
         var altos: [Float] = []
         var k = 0
-        var sinOrilla = 0, ambiguas = 0, hondas = 0, tapadas = 0, decididas = 0, conVotos = 0
+        var sinOrilla = 0, ambiguas = 0, hondas = 0, tapadas = 0, decididas = 0, conVotos = 0, altas = 0
+        var sinPrueba = 0          // corridas o pedazos huecos que no se cuentan por no tener studs
         while k < cols.count {
             if fuera(k) { k += 1; continue }
             switch cols[k] {
@@ -514,6 +789,15 @@ struct ComparadorDeDemolicion {
             var f = k
             var colAltos: [Float] = []
             while f < cols.count, case .cortada(let a) = cols[f] { colAltos.append(a); f += 1 }
+            // Una punta de 6 in o menos del alto de una puerta pegada a un corte bajo es la hoja que asoma junto a la jamba
+            // (sin casing), no el mismo corte: se queda fuera. La del final queda como corrida aparte, que no tiene studs.
+            var medio = colAltos
+            if colAltos.count > 4, Self.mediana(&medio) < Self.altoDePuerta {
+                let a0 = colAltos.prefix(4).prefix { $0 >= Self.altoDePuerta }.count
+                let a1 = colAltos.suffix(4).reversed().prefix { $0 >= Self.altoDePuerta }.count
+                if a0 > 0, a0 <= 3 { k += a0; colAltos.removeFirst(a0); sinPrueba += 1 }
+                if a1 > 0, a1 <= 3 { f -= a1; colAltos.removeLast(a1); sinPrueba += 1 }
+            }
             let n = colAltos.count
             if n >= 2 {   // un solo cuadrito (2 in) no es un tramo
                 // Las puntas, igual que la orilla de arriba: a la mitad entre la última columna cortada y la primera
@@ -541,6 +825,7 @@ struct ComparadorDeDemolicion {
                     }
                     return total
                 }
+                let altoCorrida = colAltos.sorted()[colAltos.count / 2]
                 // ¿Llega a la esquina? Entre la punta y la esquina solo la cara del stud de la esquina (ambigua o sin
                 // orilla, VISTA; a lo más 2 columnas sin ver) y a 12 in o menos. La columna pegada a la esquina (la junta
                 // con la otra pared) no se juzga.
@@ -556,7 +841,9 @@ struct ComparadorDeDemolicion {
                     while x >= 0, x < cols.count, !fuera(x) {
                         if abs(Self.uDeColumna(colMin + x) - esquina) <= Self.celda * 1.25 { break }
                         switch cols[x] {
-                        case .ambigua, .sinOrilla: vistas += 1
+                        case .ambigua, .sinOrilla:
+                            if delante(colMin + x, piso: piso, alto: altoCorrida) { return nil }   // moldura o plástico, no el stud
+                            vistas += 1
                         case .noVista: sinVer += 1
                         default: return nil                     // drywall entero, algo delante o muy hondo: no
                         }
@@ -570,12 +857,18 @@ struct ComparadorDeDemolicion {
                     let paso = lado < 0 ? -1 : 1
                     var x = lado < 0 ? k - 1 : f
                     var n = 0
+                    // Pasado el marco (las caras de los studs, ambiguas), lo hueco que sigue ya es la puerta (la hoja cerrada):
+                    // la puerta del plano trae el error de la ubicación, así que la punta se queda en el marco.
+                    var vioMarco = false, finMarco: Int? = nil
                     while x >= 0, x < cols.count, n <= 4, !fuera(x) {
                         if enPuerta.contains(x) || cols[x] == .alarma {
-                            let borde = Self.uDeColumna(colMin + x) - Float(paso) * Self.celda / 2
+                            let borde = Self.uDeColumna(colMin + (finMarco ?? x)) - Float(paso) * Self.celda / 2
                             return lado < 0 ? (borde < punta ? borde : nil) : (borde > punta ? borde : nil)
                         }
                         switch cols[x] { case .ambigua, .sinOrilla, .noVista: break; default: return nil }
+                        // El casing o la moldura (delante de la cara): el corte llega hasta ahí, no hasta la puerta o el espejo.
+                        if cols[x] != .noVista, delante(colMin + x, piso: piso, alto: altoCorrida) { return nil }
+                        if cols[x] == .ambigua { vioMarco = true } else if vioMarco, finMarco == nil { finMarco = x }
                         x += paso; n += 1
                     }
                     return nil
@@ -583,6 +876,7 @@ struct ComparadorDeDemolicion {
                 // Escalones: el corte puede cambiar de alto (2 ft aquí, 4 ft allá). Se parte donde los 3 de un lado y los
                 // 3 del otro difieren en más de 3 in; cada pedazo con su propia recta de tiza.
                 let cortes = Self.escalones(colAltos)
+                var deLaCorrida: [(tramo: Tramo, altos: [Float])] = []
                 for z in 0..<(cortes.count - 1) {
                     let s0 = cortes[z], s1 = cortes[z + 1]
                     let pedazo = Array(colAltos[s0..<s1])
@@ -590,20 +884,42 @@ struct ComparadorDeDemolicion {
                     var uIni = Self.uDeColumna(colMin + k + s0) - Self.celda / 2 - eI
                     var uFin = Self.uDeColumna(colMin + k + s1 - 1) + Self.celda / 2 + eF
                     let recta = Self.rectaDeTiza(pedazo)
-                    var area = pedazo.reduce(0, +) * Self.celda + (eI + eF) * recta
+                    // Dónde empieza el pedazo: la mediana de sus columnas (la tira o el zócalo van a todo lo largo; unas
+                    // pocas columnas de menos de 8 in no mueven nada: ahí manda lo de antes). Si empieza arriba, ninguna
+                    // columna empieza más abajo que eso; una columna que empieza a 8 in o más nunca se cobra desde el piso.
+                    // El área es lo quitado: de abajo a la recta de tiza.
+                    var copia = Array(abajos[(k + s0)..<(k + s1)])
+                    let abajoT = Self.mediana(&copia)
+                    for x in (k + s0)..<(k + s1) { abajos[x] = abajoT > 0 ? max(abajos[x], abajoT) : (abajos[x] >= Self.solera ? abajos[x] : 0) }
+                    let bajos = Array(abajos[(k + s0)..<(k + s1)])
+                    let banda = max(0, recta - abajoT)
+                    var area = zip(pedazo, bajos).reduce(Float(0)) { $0 + max(0, $1.0 - $1.1) } * Self.celda + (eI + eF) * banda
+                    // Si quedaron columnas altas sueltas, el pedazo dice el promedio (así el plano no lo lleva a la medida
+                    // de corte desde el piso).
+                    let abajoTramo = abajoT > 0 ? abajoT : bajos.reduce(0, +) / Float(bajos.count)
                     var escI = false, escF = false
-                    if z == 0, let e = hastaEsquina(-1, uIni) { area += max(0, uIni - e) * recta; uIni = e; escI = true }
-                    else if z == 0, let e = hastaAbertura(-1, uIni) { area += (uIni - e) * recta; uIni = e }
-                    if z == cortes.count - 2, let e = hastaEsquina(1, uFin) { area += max(0, e - uFin) * recta; uFin = e; escF = true }
-                    else if z == cortes.count - 2, let e = hastaAbertura(1, uFin) { area += (e - uFin) * recta; uFin = e }
+                    if z == 0, let e = hastaEsquina(-1, uIni) { area += max(0, uIni - e) * banda; uIni = e; escI = true }
+                    else if z == 0, let e = hastaAbertura(-1, uIni) { area += (uIni - e) * banda; uIni = e }
+                    if z == cortes.count - 2, let e = hastaEsquina(1, uFin) { area += max(0, e - uFin) * banda; uFin = e; escF = true }
+                    else if z == cortes.count - 2, let e = hastaAbertura(1, uFin) { area += (e - uFin) * banda; uFin = e }
                     let ordenados = pedazo.sorted()
                     let m = pedazo.count
                     let tramoStuds = studs.filter { $0 >= uIni && $0 <= uFin }.count
-                    res.tramos.append(Tramo(uIni: uIni, uFin: uFin, largo: uFin - uIni, alto: recta,
-                                            altoMin: ordenados[Int(Float(m - 1) * 0.1)], altoMax: ordenados[Int(Float(m - 1) * 0.9)],
-                                            area: area, studs: tramoStuds, esquinaIni: escI, esquinaFin: escF))
+                    // Un hueco que empieza 8 in o más arriba solo es corte si se ve como uno: 3 ft o más con dos studs
+                    // adentro. Un nicho, un botiquín o una caja abierta no se cobran (quedan en ámbar) pero avisan.
+                    if abajoT >= Self.solera && (uFin - uIni < 3 * 12 * Self.pulgada || tramoStuds < 2) { altas += m; continue }
+                    // Un pedazo de más de 16 in sin stud adentro (ni la esquina), o uno del alto de una puerta, es un hueco
+                    // plano: la hoja de una puerta que sigue a un corte de verdad. No se cuenta.
+                    if tramoStuds == 0, !escI, !escF, Float(m) * Self.celda > Self.sinStudMax || recta >= Self.altoDePuerta { sinPrueba += 1; continue }
+                    deLaCorrida.append((Tramo(uIni: uIni, uFin: uFin, largo: uFin - uIni, alto: recta,
+                                              altoMin: ordenados[Int(Float(m - 1) * 0.1)], altoMax: ordenados[Int(Float(m - 1) * 0.9)],
+                                              area: area, studs: tramoStuds, esquinaIni: escI, esquinaFin: escF, abajo: abajoTramo), pedazo))
                 }
-                altos.append(contentsOf: colAltos)
+                // Y la corrida entera necesita un stud visto (o llegar a la esquina, que tiene el suyo): un retorno de aire,
+                // un nicho o el hueco del lavaplatos caben entre dos studs y no son corte.
+                if deLaCorrida.contains(where: { $0.tramo.studs > 0 || $0.tramo.esquinaIni || $0.tramo.esquinaFin }) {
+                    for t in deLaCorrida { res.tramos.append(t.tramo); altos.append(contentsOf: t.altos) }
+                } else if !deLaCorrida.isEmpty { sinPrueba += 1 }
             }
             k = f
         }
@@ -625,7 +941,7 @@ struct ComparadorDeDemolicion {
         }
         // Sin patrón de studs no se pinta naranja ni se cuenta (un sótano sin terminar, una puerta, un espejo...).
         let cortado = res.tramos.reduce(Float(0)) { $0 + $1.largo }
-        if !res.patronStuds && cortado >= 3 * 12 * Self.pulgada { res.alarmas.append(.sinStuds) }
+        if (!res.patronStuds && cortado >= 3 * 12 * Self.pulgada) || sinPrueba > 0 { res.alarmas.append(.sinStuds) }
         if res.patronStuds || cortado < 3 * 12 * Self.pulgada {
             res.largo = cortado
             res.area = res.tramos.reduce(0) { $0 + $1.area }
@@ -642,6 +958,8 @@ struct ComparadorDeDemolicion {
         if tapadas >= 3 { res.alarmas.append(.tapadoAbajo) }
         if ambiguas >= 6 { res.alarmas.append(.ambiguo(ambiguas)) }
         if sinOrilla >= 3 { res.alarmas.append(.sinOrilla(sinOrilla)) }
+        if altas >= 3 { res.alarmas.append(.noLlegaAlPiso(altas)) }
+        res.abajos = abajos
         res.vistoPct = conVotos > 0 ? Float(decididas) / Float(conVotos) : 0
         return res
     }
@@ -653,6 +971,20 @@ struct ComparadorDeDemolicion {
         switch c { case .ambigua, .entera, .noVista, .sinOrilla: return true; default: return false }
     }
     func columnaTieneVotos(_ c: Int) -> Bool { (0..<Self.renglones).contains { cuenta[Self.indice(c, $0)] > 0 } }
+    // ¿Esta columna está DELANTE de la cara (casing, moldura, plástico)? Sale "ambigua" igual que la cara del stud, pero el
+    // stud queda DETRÁS (+1/2 in) y la moldura delante (-1/2 a -3/4 in): un corte no pasa por encima de una moldura.
+    // Se mira la franja del corte (de la solera a `alto` del piso; 6 in por lo menos).
+    func delante(_ c: Int, piso: Float, alto: Float) -> Bool {
+        guard let ra = Self.renglonDe(piso + Self.solera), let rb = Self.renglonDe(piso + max(alto, Self.solera + 6 * Self.pulgada)) else { return false }
+        var ms: [Float] = []
+        for r in ra...rb {
+            let k = Self.indice(c, r)
+            guard Int(cuenta[k]) >= Self.votosMin else { continue }
+            var vs = votosDe(k)
+            ms.append(Self.mediana(&vs))
+        }
+        return ms.count >= 3 && Self.mediana(&ms) < -Self.sigueHasta
+    }
 
     // La recta de tiza: el corte va con línea, así que el alto del tramo es el de una recta ajustada a los topes de las
     // columnas (sin las que se salen más de 2 in de la mediana). Se reporta el alto de esa recta a la mitad del tramo.
@@ -813,7 +1145,13 @@ struct ComparadorDeDemolicion {
             switch col {
             case .cortada(let a):
                 let rTope = Self.renglonDe(piso + a - Self.celda / 2) ?? r0
-                for r in r0...max(r0, rTope) { llenar(c, r, seCuenta ? Self.naranja : Self.ambar) }
+                // Lo hueco que no quedó en ningún tramo (sin studs: una puerta cerrada, un nicho) va en ámbar.
+                let u = Self.uDeColumna(c)
+                let enTramo = res.tramos.contains { u >= $0.uIni - Self.celda / 2 && u <= $0.uFin + Self.celda / 2 }
+                // Desde donde empieza el corte: la tira de abajo (o lo de detrás del zócalo) no se pinta.
+                let b = i < res.abajos.count ? res.abajos[i] : 0
+                let rBase = b > 0 ? (Self.renglonDe(piso + b + Self.celda / 2) ?? r0) : r0
+                for r in rBase...max(rBase, rTope) { llenar(c, r, seCuenta && enTramo ? Self.naranja : Self.ambar) }
             case .alarma:
                 for r in r0...rBanda where estado(c, r) == .hondo || estado(c, r) == .cavidad { llenar(c, r, Self.amarillo) }
             case .noVista, .sinOrilla, .tapada:

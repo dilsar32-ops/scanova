@@ -9,7 +9,9 @@
 // tiras de las vigas que quedan en medio) en huecos, y un hueco cuenta solo si:
 //   - la mitad o más de su orilla es drywall ENTERO visto o la pared (si no, nunca tuvo drywall: un sótano sin terminar);
 //   - mide 8 in o más por lado y 0.75 SF o más (una lámpara empotrada o una rejilla del aire no son demolición);
-//   - si mide 3 ft o más de los dos lados, se le ven las vigas a 16 o 24 in.
+//   - se le ven las vigas por dentro (16 o 24 in) si mide 26 in o más de los dos lados, o 5 ft o menos de largo: otro
+//     nivel del techo (bandeja, plafón, inclinado) es liso, sin vigas, y una trampilla, un tragaluz o una rejilla sin
+//     vigas adentro no se cobran (se pregunta).
 // Swift puro (Foundation + simd): lo corre el teléfono y la prueba de la Mac (tests/demolicion_techo). Idéntico en las
 // dos apps. Unidades: metros por dentro, las bandas en pulgadas.
 
@@ -142,7 +144,8 @@ struct ComparadorDeTecho {
     func modelo(_ u: Float, _ v: Float) -> Float { desvio + pu * u + pv * v }
 
     // La cara medida con el drywall entero de este cuadro (lo que cae a 1 in o menos del modelo): un plano s = a + b·u + c·v.
-    // La inclinación se promedia en el tiempo y nunca pasa de 2°; el desvío es el de este cuadro.
+    // La inclinación se promedia en el tiempo y nunca pasa de 6° (un techo que cae 3 a 6°, de casa vieja o de addition, se
+    // sigue; uno más inclinado no, y sale sin vigas); el desvío es el de este cuadro.
     private mutating func ajustarCara(_ ref: [(u: Float, v: Float, s: Float)]) {
         guard ref.count >= 30 else { return }
         let n = Float(ref.count)
@@ -156,7 +159,7 @@ struct ComparadorDeTecho {
         let det = suu * svv - suv * suv
         if ref.count >= 60, suu > 0.05 * n * 0.09, svv > 0.05 * n * 0.09, abs(det) > 1e-6 {
             let b = (sus * svv - svs * suv) / det, c = (svs * suu - sus * suv) / det
-            let tope: Float = tan(2 * .pi / 180) / Self.pulgada
+            let tope: Float = tan(6 * .pi / 180) / Self.pulgada
             if abs(b) < tope { pu = pu * 0.85 + b * 0.15 }
             if abs(c) < tope { pv = pv * 0.85 + c * 0.15 }
         }
@@ -201,6 +204,15 @@ struct ComparadorDeTecho {
         let q25 = vs[vs.count / 4]
         return q25 > 0.15 && q25 < 1.8
     }
+    // Lo mismo pero desde -0.3 in: cuando se quitó todo el techo la cara se corre a la altura de las vigas y su cara de
+    // abajo ya no queda 1/2 in arriba. Solo sirve para buscar el armazón dentro de un hueco (no cambia el área).
+    func armazon(_ k: Int) -> Bool {
+        guard Int(cuenta[k]) >= Self.votosMin else { return false }
+        var vs = votosDe(k)
+        vs.sort()
+        let q25 = vs[vs.count / 4]
+        return q25 > -0.3 && q25 < 1.8
+    }
 
     // ---------------- LOS HUECOS ----------------
     struct Hueco: Equatable {
@@ -214,7 +226,9 @@ struct ComparadorDeTecho {
         var ancho: Float { u1 - u0 }
         var fondo: Float { v1 - v0 }
     }
-    enum Alarma: Equatable { case sinOrilla(Int), sinVigas(Int), tapado, ambiguo }
+    // `abertura`: un hueco chico sin vigas adentro (trampilla del ático, tragaluz, la caja del retorno o del extractor
+    // sin su rejilla): no se cobra, se pregunta.
+    enum Alarma: Equatable { case sinOrilla(Int), sinVigas(Int), tapado, ambiguo, abertura(Int) }
     struct Resultado: Equatable {
         var huecos: [Hueco] = []
         var area: Float = 0
@@ -227,7 +241,11 @@ struct ComparadorDeTecho {
 
     static let huecoMinLado: Float = 8 * pulgada
     static let huecoMinArea: Float = 0.75 * 0.3048 * 0.3048
-    static let vigasDesde: Float = 36 * pulgada
+    // Las vigas van a 24 in o menos: entre dos no cabe más de 22.5 in libres. Un hueco de 26 in o más de los dos lados
+    // tiene que enseñarlas por dentro, y uno de hasta 5 ft de largo también (si no, es una abertura).
+    static let bahiaMax: Float = 26 * pulgada
+    static let tramoLibreMax = 12                      // cuadritos (24 in) sin armazón en un renglón del hueco
+    static let aberturaMax: Float = 60 * pulgada
     static let paredHasta: Float = 7 * pulgada
     static let juntaDePared: Float = 4.5 * pulgada     // la placa de arriba de la pared (3.5 in) y la esquina del drywall
 
@@ -321,7 +339,8 @@ struct ComparadorDeTecho {
         // Los huecos: grupos conectados (4 vecinos).
         var marca = [Int32](repeating: -1, count: n * n)
         var grupo: Int32 = 0
-        var sinOrilla = 0, sinVigas = 0, soloEncima = 0
+        var sinOrilla = 0, sinVigas = 0, soloEncima = 0, aberturas = 0
+        var sinVigasAngostos: [Hueco] = []
         for k0 in 0..<(n * n) where en[k0] && marca[k0] < 0 {
             var pila = [k0]; marca[k0] = grupo
             var celdas: [Int] = []
@@ -425,31 +444,68 @@ struct ComparadorDeTecho {
                         return aLaPared > Self.juntaDePared
                     }.flatMap { x in porU ? filas.map { Self.indice(x, $0) } : cols.map { Self.indice($0, x) } }
                 }
+                // Pero en la junta misma (de 1.5 a 4.5 in de la pared): si algo cuelga debajo de la cara (la moldura de la
+                // corona, un bulkhead), o se ve drywall limpio a la altura de la cara mientras las vigas del hueco se ven más
+                // arriba (dejaron una tira; la placa se vería con las vigas), ahí sigue el techo: el hueco no llega a la pared.
+                var nv = celdas.filter { viga[$0] && armazon($0) }.map { k -> Float in let vs = votosDe(k).sorted(); return vs[vs.count / 4] }
+                let nivelViga: Float = nv.isEmpty ? 0 : Self.mediana(&nv)
+                func queda(_ pared: Float, porU: Bool) -> Bool {
+                    let lineas = porU ? filas : cols
+                    let cs = (0..<n).filter { x in let d = abs(Self.centro(x) - pared); return d > 1.5 * Self.pulgada && d <= Self.juntaDePared }
+                        .flatMap { x in lineas.map { porU ? Self.indice(x, $0) : Self.indice($0, x) } }.filter { est[$0] != .noVisto }
+                    let abajo = cs.filter { k in
+                        let vs = votosDe(k).sorted()
+                        if est[k] == .tapado || vs[vs.count / 2] < -0.8 { return true }
+                        return nivelViga >= 0.3 && est[k] == .sigue && vs.count >= 12 && vs[vs.count * 3 / 4] < 0.15
+                    }.count
+                    return abajo * 3 > cs.count
+                }
                 let largoV = v1 - v0
-                if u0 - l.u.lowerBound <= Self.paredHasta, libre(franja(l.u.lowerBound, u0, porU: true)) { area += (u0 - l.u.lowerBound) * largoV; u0 = l.u.lowerBound; aPared[0] = true }
-                if l.u.upperBound - u1 <= Self.paredHasta, libre(franja(u1, l.u.upperBound, porU: true)) { area += (l.u.upperBound - u1) * largoV; u1 = l.u.upperBound; aPared[1] = true }
-                if v0 - l.v.lowerBound <= Self.paredHasta, libre(franja(l.v.lowerBound, v0, porU: false)) { area += (v0 - l.v.lowerBound) * (u1 - u0); v0 = l.v.lowerBound; aPared[2] = true }
-                if l.v.upperBound - v1 <= Self.paredHasta, libre(franja(v1, l.v.upperBound, porU: false)) { area += (l.v.upperBound - v1) * (u1 - u0); v1 = l.v.upperBound; aPared[3] = true }
+                if u0 - l.u.lowerBound <= Self.paredHasta, libre(franja(l.u.lowerBound, u0, porU: true)), !queda(l.u.lowerBound, porU: true) { area += (u0 - l.u.lowerBound) * largoV; u0 = l.u.lowerBound; aPared[0] = true }
+                if l.u.upperBound - u1 <= Self.paredHasta, libre(franja(u1, l.u.upperBound, porU: true)), !queda(l.u.upperBound, porU: true) { area += (l.u.upperBound - u1) * largoV; u1 = l.u.upperBound; aPared[1] = true }
+                if v0 - l.v.lowerBound <= Self.paredHasta, libre(franja(l.v.lowerBound, v0, porU: false)), !queda(l.v.lowerBound, porU: false) { area += (v0 - l.v.lowerBound) * (u1 - u0); v0 = l.v.lowerBound; aPared[2] = true }
+                if l.v.upperBound - v1 <= Self.paredHasta, libre(franja(v1, l.v.upperBound, porU: false)), !queda(l.v.upperBound, porU: false) { area += (l.v.upperBound - v1) * (u1 - u0); v1 = l.v.upperBound; aPared[3] = true }
             }
             // Un corte en el techo es un rectángulo (se corta con línea): si lo visto llena el 92 % o más de su caja, el
             // área es largo x ancho con las orillas medidas (las muescas son la junta con la pared o un cuadrito sin ver).
             // Una L o un hueco raro no llena su caja y se queda con lo visto.
             let caja = (u1 - u0) * (v1 - v0)
             if caja > 0, area >= caja * 0.92 { area = max(area, caja) }
-            // Las vigas: las tiras (columnas o filas enteras de viga dentro del hueco) y su separación.
+            // Las vigas: las tiras (columnas o filas enteras de viga dentro del hueco) y su separación. Solo cuentan las de
+            // ADENTRO (lo quitado a los dos lados, de orilla a orilla, casi toda viga): junto a un escalón del techo
+            // (bandeja, plafón, viga decorativa), la pared o la caja de un tragaluz o un retorno los rayos pegan bajo en el
+            // costado y esa orilla se ve como viga.
             func separacion(_ porColumna: Bool) -> (Int, Float?) {
                 var centros: [Float] = []
                 let rango = porColumna ? Array(cMin...cMax) : Array(rMin...rMax)
                 let otro = porColumna ? Array(rMin...rMax) : Array(cMin...cMax)
+                func kk(_ x: Int, _ y: Int) -> Int { porColumna ? Self.indice(x, y) : Self.indice(y, x) }
+                func abierto(_ x: Int, _ y: Int) -> Bool { x >= 0 && x < n && enGrupo.contains(kk(x, y)) && !viga[kk(x, y)] }
+                func adentro(_ a: Int, _ b: Int) -> Bool {
+                    var filas = 0, ambos = 0
+                    for y in otro where (a...b).contains(where: { enGrupo.contains(kk($0, y)) && viga[kk($0, y)] }) {
+                        filas += 1
+                        if (abierto(a - 1, y) || abierto(a - 2, y)) && (abierto(b + 1, y) || abierto(b + 2, y)) { ambos += 1 }
+                    }
+                    // y en un tercio o más de sus cuadritos se ve la cara de abajo de la viga (la sombra del costado de una
+                    // caja no la tiene).
+                    let cs = (a...b).flatMap { x in otro.map { kk(x, $0) } }.filter { enGrupo.contains($0) && viga[$0] }
+                    return ambos >= 2 && ambos * 2 >= filas && cs.filter { armazon($0) }.count * 3 >= cs.count
+                }
+                // Una viga es una línea: en una de 2 ft o más, si a un cuadrito le falta pero a 2 o menos en la misma línea
+                // sí la tiene, cuenta (el láser no la ve en todos).
+                func vigaCerca(_ x: Int, _ y: Int, _ largo: Bool) -> Bool {
+                    (largo ? -2...2 : 0...0).contains { d in let yy = y + d; return yy >= 0 && yy < n && enGrupo.contains(kk(x, yy)) && viga[kk(x, yy)] }
+                }
                 var enTira = false, ini = 0
                 for x in rango {
-                    let ks = otro.map { porColumna ? Self.indice(x, $0) : Self.indice($0, x) }.filter { en[$0] }
-                    let vigas = ks.filter { viga[$0] }.count
-                    let esTira = ks.count >= 4 && Float(vigas) >= Float(ks.count) * 0.6
+                    let ys = otro.filter { enGrupo.contains(kk(x, $0)) }
+                    let vigas = ys.filter { vigaCerca(x, $0, ys.count >= 12) }.count
+                    let esTira = ys.count >= 4 && ys.count * 2 >= otro.count && Float(vigas) >= Float(ys.count) * 0.75
                     if esTira && !enTira { enTira = true; ini = x }
-                    if !esTira && enTira { enTira = false; centros.append((Self.centro(ini) + Self.centro(x - 1)) / 2) }
+                    if !esTira && enTira { enTira = false; if adentro(ini, x - 1) { centros.append((Self.centro(ini) + Self.centro(x - 1)) / 2) } }
                 }
-                if enTira, let ult = rango.last { centros.append((Self.centro(ini) + Self.centro(ult)) / 2) }
+                if enTira, let ult = rango.last, adentro(ini, ult) { centros.append((Self.centro(ini) + Self.centro(ult)) / 2) }
                 var sep: Float? = nil
                 if centros.count >= 2 {
                     for i in 1..<centros.count {
@@ -467,18 +523,61 @@ struct ComparadorDeTecho {
             if h.ancho < Self.huecoMinLado || h.fondo < Self.huecoMinLado || h.area < Self.huecoMinArea { res.chicos += 1; continue }
             let tocaPared = aPared.contains(true)
             if orilla == 0 || (Float(buena) < Float(orilla) * 0.5 && !tocaPared) { sinOrilla += 1; continue }
-            // Un hueco grande tiene que enseñar sus vigas: al menos una tira entera de viga (con vigas cada 24 in, un
-            // hueco de 4 ft enseña una sola). La separación (16 o 24 in) solo se informa.
-            if h.ancho >= Self.vigasDesde && h.fondo >= Self.vigasDesde && h.vigas == 0 { sinVigas += 1; continue }
+            // Un hueco tiene que enseñar sus vigas (o cerchas). Otro nivel del techo (bandeja, plafón, techo inclinado, la
+            // panza de un soffit) es drywall LISO más arriba de la cara: se ve igual de hondo y parejo que el subpiso, pero
+            // sin vigas. Si mide 26 in o más de los dos lados: al menos una tira de viga por dentro, y en 7 de cada 10
+            // renglones (o columnas) nada de más de 24 in sin armazón. La separación (16 o 24 in) solo se informa.
+            let corto = min(h.ancho, h.fondo), largo = max(h.ancho, h.fondo)
+            if corto >= Self.bahiaMax && (h.vigas == 0 || !conArmazon(enGrupo, cs: cMin...cMax, rs: rMin...rMax, viga: viga)) {
+                if largo <= Self.aberturaMax { aberturas += 1 } else { sinVigas += 1 }
+                continue
+            }
+            // Uno chico (hasta 5 ft de largo) sin una viga por dentro: una trampilla, un tragaluz o una caja sin su
+            // rejilla tienen ese tamaño y su orilla también se ve como viga. No se cobra, se pregunta.
+            if largo <= Self.aberturaMax && h.vigas == 0 { aberturas += 1; continue }
+            // Una tira larga y angosta sin vigas (entre dos vigas, a lo largo) cuenta, salvo que en el cuarto haya otro
+            // nivel sin vigas: entonces es parte de él (vigas decorativas con la cara en lo de abajo).
+            if h.vigas == 0 { sinVigasAngostos.append(h); continue }
             res.huecos.append(h)
         }
+        if sinVigas == 0 { res.huecos += sinVigasAngostos } else { sinVigas += sinVigasAngostos.count }
         res.huecos.sort { ($0.v0, $0.u0) < ($1.v0, $1.u0) }
         res.area = res.huecos.reduce(0) { $0 + $1.area }
         if sinOrilla > 0 { res.alarmas.append(.sinOrilla(sinOrilla)) }
         if sinVigas > 0 { res.alarmas.append(.sinVigas(sinVigas)) }
+        if aberturas > 0 { res.alarmas.append(.abertura(aberturas)) }
         if tapados >= 12 { res.alarmas.append(.tapado) }
         if (ambiguos >= 60 && res.huecos.isEmpty) || soloEncima > 0 { res.alarmas.append(.ambiguo) }
         return res
+    }
+
+    // ¿Se ve el armazón por todo el hueco? En 7 de cada 10 renglones (o columnas, según por dónde corran las vigas) lo
+    // más largo sin viga ni cara de viga mide 24 in o menos. Una bandeja o un techo inclinado tienen tramos lisos de orilla
+    // a orilla; un hueco de verdad, una viga cada 12 a 24 in.
+    private func conArmazon(_ enGrupo: Set<Int>, cs: ClosedRange<Int>, rs: ClosedRange<Int>, viga: [Bool]) -> Bool {
+        let marcos = Set(enGrupo.filter { viga[$0] || armazon($0) })
+        func parejo(_ porFila: Bool) -> Bool {
+            var lineas = 0, cortas = 0
+            for l in (porFila ? rs : cs) {
+                var mejor = 0, tramo = 0, cuantos = 0
+                for x in (porFila ? cs : rs) {
+                    let k = porFila ? Self.indice(x, l) : Self.indice(l, x)
+                    guard enGrupo.contains(k) else { tramo = 0; continue }
+                    cuantos += 1
+                    // El armazón de 2 renglones más allá también corta el tramo (la viga es una línea; a un cuadrito le
+                    // puede faltar).
+                    let marco = (max(0, l - 2)...min(Self.lado - 1, l + 2)).contains { y in
+                        marcos.contains(porFila ? Self.indice(x, y) : Self.indice(y, x))
+                    }
+                    if marco { tramo = 0 } else { tramo += 1; mejor = max(mejor, tramo) }
+                }
+                guard cuantos >= 6 else { continue }
+                lineas += 1
+                if mejor <= Self.tramoLibreMax { cortas += 1 }
+            }
+            return cortas * 10 >= lineas * 7
+        }
+        return parejo(true) || parejo(false)
     }
 
     // ---------------- LA PINTURA (la capa sobre el techo) ----------------

@@ -166,6 +166,7 @@ struct DemolicionEnPlano {
         var hastaEsquinaA: Bool, hastaEsquinaB: Bool
         var estandar = false                  // el alto se llevó a una medida de corte (1, 2, 3, 4, 6 ft o toda la pared)
         var altoMedido: Float = 0             // lo que midió el láser antes de llevarlo a la medida de corte
+        var abajo: Float = 0                  // m: dónde empieza el corte (0 = del piso): "de 4 in a 2 ft", área largo x (alto - abajo)
     }
 
     // LAS MEDIDAS DE CORTE (16 oct, lo que dijo: "en water damage siempre se corta un pie; si no, toda la pared, o 2, 4 o
@@ -230,13 +231,16 @@ struct DemolicionEnPlano {
                 let x0 = desdeA(t.uIni), x1 = desdeA(t.uFin)
                 // Desde la esquina del plano: sin afinar puede salir una pulgada antes de 0 o después del largo.
                 let lo = max(0, min(x0, x1)), hi = min(rep.largoPared, max(x0, x1))
-                if let std = alturaDeCorte(t.alto, altoPared: pared.alto > 0 ? Float(pared.alto * 0.3048) : nil) {
+                // La medida de corte es solo para el corte que sale del piso: el que empieza más arriba (la tira o el zócalo
+                // que se quedaron) se cobra como lo midió el láser, de su orilla de abajo a la de arriba.
+                if t.abajo <= 0, let std = alturaDeCorte(t.alto, altoPared: pared.alto > 0 ? Float(pared.alto * 0.3048) : nil) {
                     return Tramo(desde: lo, hasta: hi, alto: std, area: (t.uFin - t.uIni) * std,
                                  hastaEsquinaA: aEsMenor ? t.esquinaIni : t.esquinaFin, hastaEsquinaB: aEsMenor ? t.esquinaFin : t.esquinaIni,
                                  estandar: true, altoMedido: t.alto)
                 }
                 return Tramo(desde: lo, hasta: hi, alto: t.alto, area: t.area,
-                             hastaEsquinaA: aEsMenor ? t.esquinaIni : t.esquinaFin, hastaEsquinaB: aEsMenor ? t.esquinaFin : t.esquinaIni)
+                             hastaEsquinaA: aEsMenor ? t.esquinaIni : t.esquinaFin, hastaEsquinaB: aEsMenor ? t.esquinaFin : t.esquinaIni,
+                             abajo: t.abajo)
             }.sorted { $0.desde < $1.desde }
         }
         // Lo que falta ver: columnas dentro de la pared que no se decidieron (sin ver, o hueco sin su orilla de arriba),
