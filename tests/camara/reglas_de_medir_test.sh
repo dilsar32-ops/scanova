@@ -304,6 +304,14 @@ ok("medir primero no pone letrero de guardado (el mapa se pinta verde/amarillo)"
    and 'items.count > n.itemsVistos, !(medirPrimero && n.medirActivo), let u = items.last' in v)
 ok("los avisos de arriba nunca van debajo del mapa", 'n.columna.trailingAnchor.constraint(lessThanOrEqualTo: m.leadingAnchor, constant: -8)' in v
    and 'centroColumna.priority = .defaultHigh' in v and 'n.aviso.numberOfLines = 0' in v)
+# Su corrección del 16 oct: el aviso no es una franja amarilla arriba; es una tarjeta de vidrio enfrente que se va sola.
+ma = bloque(v, 'fileprivate func mostrarAvisoNuevo')
+ok("el aviso va en una tarjeta de vidrio enfrente (esquina 10 de Scanova), con ícono, título y explicación",
+   'let vidrioAviso = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialLight))' in v and 'vidrioAviso.layer.cornerRadius = 10' in v
+   and 'caja.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: -150)' in v and 'Self.partesDelAviso(' in ma and 'UIColor(red: 1.0, green: 0.95, blue: 0.82' not in ma)
+ok("el aviso entra suave y se desvanece solo al pasar sus segundos", 'caja.alpha = 1; caja.transform = .identity' in ma
+   and 'caja.alpha = 0; caja.transform = CGAffineTransform(scaleX: 0.97, y: 0.97)' in bloque(v, 'fileprivate func pintarAviso') and v.count('pintarAviso()') >= 2)
+ok("ya no hay franja de aviso en la columna de arriba", 'for v in [n.ficha, n.pista] { n.columna.addArrangedSubview(v) }' in v)
 ok("verde = completa, amarillo = parcial", 'static let verde' in v and 'static let amarillo' in v and 'colorPared' in v and 'colorPiso' in v)
 ok("el piso y el techo completos salen del área del cuarto en el plano (piso: área, largo, ancho, aprox)",
    'pisoPorCuarto.first(where: { Self.clave($0.key) == clave })' in bloque(v, 'fileprivate func datosPisoEntero')

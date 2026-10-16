@@ -8279,8 +8279,12 @@ fileprivate final class CamaraNueva {
     let fichaChica = UILabel()
     let fichaGrande = UILabel()
     let pista = UILabel()
-    let aviso = UILabel()
+    let aviso = UILabel()                         // el título del aviso (va dentro de su tarjeta de vidrio)
     var avisoHasta = Date.distantPast
+    let avisoCaja = UIView()                      // la tarjeta de vidrio del aviso, enfrente en la cámara
+    let avisoSub = UILabel()                      // la explicación, debajo del título
+    let avisoIcono = UIImageView()
+    var avisoSaliendo = false                     // se está desvaneciendo
     let muelle = VidrioCamara(radio: 20)
     let rielCuarto = UIControl(), rielParte = UIControl(), rielMaterial = UIControl()
     let deshacer = UIButton(type: .system)
@@ -8527,14 +8531,49 @@ extension ARMeasureViewController {
             n.terminar.centerYAnchor.constraint(equalTo: n.barra.centerYAnchor),
             n.terminar.heightAnchor.constraint(equalToConstant: 38)
         ])
-        // Los avisos (lo que antes salía en la casilla de arriba): una franja ámbar debajo de la barra.
-        n.aviso.translatesAutoresizingMaskIntoConstraints = false
-        n.aviso.font = .systemFont(ofSize: 14, weight: .semibold); n.aviso.textColor = UIColor(red: 0.06, green: 0.10, blue: 0.18, alpha: 1)
-        n.aviso.backgroundColor = UIColor(red: 1.0, green: 0.95, blue: 0.82, alpha: 0.97)
-        n.aviso.numberOfLines = 0; n.aviso.textAlignment = .center
-        n.aviso.layer.cornerRadius = 10; n.aviso.layer.cornerCurve = .continuous; n.aviso.clipsToBounds = true
-        n.aviso.isHidden = true
-        n.aviso.heightAnchor.constraint(greaterThanOrEqualToConstant: 34).isActive = true
+        // LOS AVISOS (16 oct, su corrección: "enfrente, en un cuadrito cristalino como el mapa, unos segundos y que se
+        // desaparezca"; antes era una franja amarilla arriba). Una tarjeta de vidrio en medio de la cámara, arriba de la
+        // mira: su ícono de línea, el título y la explicación; entra suave y se desvanece sola (ver pintarAviso()).
+        let caja = n.avisoCaja
+        caja.translatesAutoresizingMaskIntoConstraints = false
+        caja.isUserInteractionEnabled = false
+        caja.layer.shadowColor = UIColor.black.cgColor; caja.layer.shadowOpacity = 0.14; caja.layer.shadowRadius = 14
+        caja.layer.shadowOffset = CGSize(width: 0, height: 4)
+        let vidrioAviso = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialLight))
+        vidrioAviso.overrideUserInterfaceStyle = .light
+        vidrioAviso.translatesAutoresizingMaskIntoConstraints = false
+        // Las esquinas de Scanova (como los botones de la barra) y la orilla blanca fina del vidrio del mapa.
+        vidrioAviso.layer.cornerRadius = 10; vidrioAviso.layer.cornerCurve = .continuous; vidrioAviso.clipsToBounds = true
+        vidrioAviso.layer.borderWidth = 0.75; vidrioAviso.layer.borderColor = UIColor.white.withAlphaComponent(0.6).cgColor
+        let veloAviso = UIView(); veloAviso.backgroundColor = UIColor.white.withAlphaComponent(0.18)
+        veloAviso.translatesAutoresizingMaskIntoConstraints = false
+        vidrioAviso.contentView.addSubview(veloAviso)
+        caja.addSubview(vidrioAviso)
+        n.aviso.font = .systemFont(ofSize: 15, weight: .semibold); n.aviso.textColor = Claro.tinta
+        n.aviso.numberOfLines = 0; n.aviso.textAlignment = .left
+        n.avisoSub.font = .systemFont(ofSize: 13); n.avisoSub.textColor = Claro.gris; n.avisoSub.numberOfLines = 0
+        n.avisoIcono.contentMode = .scaleAspectFit
+        let textosAviso = UIStackView(arrangedSubviews: [n.aviso, n.avisoSub]); textosAviso.axis = .vertical; textosAviso.spacing = 2
+        let filaAviso = UIStackView(arrangedSubviews: [n.avisoIcono, textosAviso])
+        filaAviso.axis = .horizontal; filaAviso.spacing = 10; filaAviso.alignment = .center
+        filaAviso.translatesAutoresizingMaskIntoConstraints = false
+        vidrioAviso.contentView.addSubview(filaAviso)
+        view.addSubview(caja)
+        caja.isHidden = true; caja.alpha = 0
+        NSLayoutConstraint.activate([
+            vidrioAviso.leadingAnchor.constraint(equalTo: caja.leadingAnchor), vidrioAviso.trailingAnchor.constraint(equalTo: caja.trailingAnchor),
+            vidrioAviso.topAnchor.constraint(equalTo: caja.topAnchor), vidrioAviso.bottomAnchor.constraint(equalTo: caja.bottomAnchor),
+            veloAviso.leadingAnchor.constraint(equalTo: vidrioAviso.contentView.leadingAnchor), veloAviso.trailingAnchor.constraint(equalTo: vidrioAviso.contentView.trailingAnchor),
+            veloAviso.topAnchor.constraint(equalTo: vidrioAviso.contentView.topAnchor), veloAviso.bottomAnchor.constraint(equalTo: vidrioAviso.contentView.bottomAnchor),
+            filaAviso.leadingAnchor.constraint(equalTo: vidrioAviso.contentView.leadingAnchor, constant: 14),
+            filaAviso.trailingAnchor.constraint(equalTo: vidrioAviso.contentView.trailingAnchor, constant: -16),
+            filaAviso.topAnchor.constraint(equalTo: vidrioAviso.contentView.topAnchor, constant: 12),
+            filaAviso.bottomAnchor.constraint(equalTo: vidrioAviso.contentView.bottomAnchor, constant: -12),
+            n.avisoIcono.widthAnchor.constraint(equalToConstant: 22), n.avisoIcono.heightAnchor.constraint(equalToConstant: 22),
+            caja.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            caja.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: -150),
+            caja.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor, constant: -64)
+        ])
     }
 
     private func armarCentroNuevo() {
@@ -8562,8 +8601,7 @@ extension ARMeasureViewController {
         n.columna.axis = .vertical; n.columna.alignment = .center; n.columna.spacing = 8
         n.columna.translatesAutoresizingMaskIntoConstraints = false
         n.columna.isUserInteractionEnabled = false
-        n.aviso.removeFromSuperview()
-        for v in [n.ficha, n.pista, n.aviso] { n.columna.addArrangedSubview(v) }
+        for v in [n.ficha, n.pista] { n.columna.addArrangedSubview(v) }
         view.addSubview(n.columna)
         // Centrada como siempre, pero NUNCA debajo del mapa (su pregunta del 16 oct): con el mapa a la vista, lo que no
         // cabe centrado se corre a la izquierda y se parte en renglones (ver columnaJuntoAlMapa en pintarMinimapa).
@@ -8743,7 +8781,7 @@ extension ARMeasureViewController {
             if let u = items.last { n.sigueDonde = "\(u.nivel)|\(u.cuarto)|\(u.seccion)" }
         }
         if stage != .pickingMaterial || medidaEnCurso { n.acabaDeGuardar = false }
-        n.aviso.isHidden = Date() > n.avisoHasta
+        pintarAviso()
         // Panel o muelle: nunca los dos.
         let panel = panelQueToca()
         n.panel.isHidden = panel == nil
@@ -9047,8 +9085,8 @@ extension ARMeasureViewController {
         n.camAntesDelCorte = nil; n.ultimaCamBuena = nil
         n.cuadroCambioEn = Date()
         n.paredCandidata = nil; n.paredVista = nil
-        mostrarAvisoNuevo(aMedias ? "La cámara se reinició y la medida a medias se perdió. Apunte a las paredes para volver a ubicarse y mídala otra vez."
-                                  : "La cámara se reinició. Apunte a las paredes unos segundos para volver a ubicarse.", segundos: 6)
+        mostrarAvisoNuevo(aMedias ? "La cámara se reinició. La medida a medias se perdió: apunte a las paredes para volver a ubicarse y mídala otra vez."
+                                  : "La cámara se reinició. Apunte a las paredes unos segundos para volver a ubicarse.", segundos: 5, alerta: true)
     }
 
     // Una vez por segundo: ¿dónde estoy en el plano de este cuarto?
@@ -9652,15 +9690,61 @@ extension ARMeasureViewController {
         revisarParteQueApunta()
         ubicarseEnElPlano()
         pintarMinimapa()
-        nueva.aviso.isHidden = Date() > nueva.avisoHasta
+        pintarAviso()
     }
 
-    fileprivate func mostrarAvisoNuevo(_ texto: String, segundos: Double = 4.5, ok: Bool = false) {
+    /// El aviso en su tarjeta de vidrio: la primera frase es el título y lo demás la explicación (un texto sin frases va
+    /// solo de título). `alerta` = algo salió mal (ícono ámbar); si no, es un aviso (azul) o una confirmación (ok).
+    fileprivate func mostrarAvisoNuevo(_ texto: String, segundos: Double = 4.5, ok: Bool = false, alerta: Bool = false) {
         guard experienciaNueva, nueva.armada else { return }
-        nueva.aviso.backgroundColor = ok ? UIColor(red: 0.93, green: 0.95, blue: 1.0, alpha: 0.98) : UIColor(red: 1.0, green: 0.95, blue: 0.82, alpha: 0.98)
-        nueva.aviso.text = "  " + texto.replacingOccurrences(of: "⚠︎ ", with: "") + "  "
-        nueva.avisoHasta = Date().addingTimeInterval(segundos)
-        nueva.aviso.isHidden = false
+        let n = nueva, caja = n.avisoCaja
+        let alerta = alerta || texto.hasPrefix("⚠︎") || texto.hasPrefix("Ojo")
+        let partes = Self.partesDelAviso(texto.replacingOccurrences(of: "⚠︎ ", with: ""))
+        n.aviso.text = partes.titulo
+        n.avisoSub.text = partes.sub
+        n.avisoSub.isHidden = partes.sub.isEmpty
+        let icono = alerta ? "exclamationmark.triangle" : (ok ? "checkmark.circle" : "info.circle")
+        n.avisoIcono.image = UIImage(systemName: icono, withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .regular))
+        n.avisoIcono.tintColor = alerta ? Claro.ambar : Claro.azul
+        n.avisoHasta = Date().addingTimeInterval(segundos)
+        view.bringSubviewToFront(caja)
+        let entra = caja.isHidden || n.avisoSaliendo
+        n.avisoSaliendo = false
+        caja.layer.removeAllAnimations()
+        caja.isHidden = false
+        if entra {
+            caja.alpha = 0; caja.transform = CGAffineTransform(scaleX: 0.96, y: 0.96)
+            UIView.animate(withDuration: 0.25, delay: 0, options: [.curveEaseOut, .beginFromCurrentState]) {
+                caja.alpha = 1; caja.transform = .identity
+            }
+        } else { caja.alpha = 1; caja.transform = .identity }
+    }
+    /// Cada cuadro: al pasar sus segundos, la tarjeta se desvanece sola.
+    fileprivate func pintarAviso() {
+        let n = nueva, caja = n.avisoCaja
+        guard !caja.isHidden, !n.avisoSaliendo, Date() > n.avisoHasta else { return }
+        n.avisoSaliendo = true
+        UIView.animate(withDuration: 0.35, delay: 0, options: [.curveEaseIn, .beginFromCurrentState], animations: {
+            caja.alpha = 0; caja.transform = CGAffineTransform(scaleX: 0.97, y: 0.97)
+        }, completion: { _ in
+            guard n.avisoSaliendo else { return }
+            caja.isHidden = true; caja.transform = .identity; n.avisoSaliendo = false
+        })
+    }
+    /// "La cámara se reinició. Apunte a las paredes…" -> título "La cámara se reinició", explicación "Apunte a las paredes…".
+    /// Sin punto, los dos puntos parten igual ("El plano no trae el alto: márquelo…").
+    static func partesDelAviso(_ t: String) -> (titulo: String, sub: String) {
+        let texto = t.trimmingCharacters(in: .whitespaces)
+        for sep in [". ", ": "] {
+            if let r = texto.range(of: sep) {
+                let titulo = String(texto[..<r.lowerBound]).trimmingCharacters(in: .whitespaces)
+                var sub = String(texto[r.upperBound...]).trimmingCharacters(in: .whitespaces)
+                guard !titulo.isEmpty, !sub.isEmpty, titulo.count <= 60 else { continue }
+                sub = sub.prefix(1).uppercased() + sub.dropFirst()
+                return (titulo, sub)
+            }
+        }
+        return (texto.hasSuffix(".") ? String(texto.dropLast()) : texto, "")
     }
 
     // ---------------- LOS PANELES ----------------
@@ -12102,7 +12186,7 @@ extension ARMeasureViewController {
                 // la pinta amarilla, sin letrero arriba) y luego sale un aviso largo de verdad: va a la izquierda del mapa.
                 n.zonaVista = "wall"; n.paredCandidata = (0, CACurrentMediaTime()); n.paredVista = 0
                 revisarEleccion(); escogerParcial("wall", pared: 0); medida("wall", 6, 4); resolverPared("Drywall")
-                mostrarAvisoNuevo("La cámara se reinició. Apunte a las paredes unos segundos para volver a ubicarse.", segundos: 600)
+                mostrarAvisoNuevo("La cámara se reinició. Apunte a las paredes unos segundos para volver a ubicarse.", segundos: 600, alerta: true)
             case 43, 44, 45:
                 // FIJAR TECHO (43: la pregunta con el techo completo) y PISO en L (44: completo -> "20 × 12 − 40 = 200");
                 // 45: nada abierto, el teléfono ve el techo: el botón dice "Fijar techo".
