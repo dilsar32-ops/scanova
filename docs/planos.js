@@ -2,8 +2,8 @@
 // (el mismo escáner de Field Reports, que ya viene dentro de la app: plugin RoomScan) y se dibuja con el
 // mismo código de Field Reports (plano.js, copiado por tools/extraer_plano.py). Un escaneo por piso;
 // un escaneo nuevo no borra el anterior (queda de historial), se ve el más reciente.
-import * as plano from './plano.js?v=2026-10-15-14';
-import { authFetch, esAparato } from './app.js?v=2026-10-15-14';
+import * as plano from './plano.js?v=2026-10-15-15';
+import { authFetch, esAparato } from './app.js?v=2026-10-15-15';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
@@ -80,7 +80,10 @@ export async function paredesParaCamara(trabajoId, nivelId){
       if(paredes.length) out[nombre] = (out[nombre] || []).concat(paredes);
       // Y la forma del cuarto (15-oct): cada pared con sus dos puntas, y las ventanas y puertas. Con esto la cámara
       // se UBICA dentro del plano con lo que ve el LiDAR, y sabe en qué pared cae un corte aunque sea parcial.
-      const forma = { paredes: [], senas: [] };
+      // `marco`: en qué dibujo está el cuarto. Un plano juntado (lo normal) tiene TODOS sus cuartos en las mismas
+      // coordenadas (marco 0): ubicada una vez, la cámara sabe dónde está en toda la planta aunque cambie de cuarto
+      // (su pedido del 15-oct). Si los cuartos no se pudieron juntar, cada uno va en su propio dibujo.
+      const forma = { paredes: [], senas: [], marco: d.merged === false ? (d.rooms || []).indexOf(room) : 0 };
       (room.walls || []).forEach(w => {
         if(!w || !w.start || !w.end || w._ajena) return;
         if(Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y) < 1) return;

@@ -144,8 +144,10 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
             if let formas = call.getObject("planoPorCuarto") {
                 func num(_ x: Any?) -> Double? { (x as? Double) ?? (x as? NSNumber)?.doubleValue }
                 var mapa: [String: (paredes: [UbicadorEnPlano.ParedPlano], senas: [UbicadorEnPlano.SenaPlano])] = [:]
+                var marcos: [String: Int] = [:]
                 for (cuarto, valor) in formas {
                     guard let f = valor as? [String: Any] else { continue }
+                    if let m = num(f["marco"]) { marcos[cuarto] = Int(m) }
                     let paredes: [UbicadorEnPlano.ParedPlano] = ((f["paredes"] as? [[Any]]) ?? []).compactMap { w in
                         guard w.count >= 5, let x1 = num(w[0]), let y1 = num(w[1]), let x2 = num(w[2]), let y2 = num(w[3]) else { return nil }
                         return UbicadorEnPlano.ParedPlano(seg: UbicadorEnPlano.Segmento(a: SIMD2(x1, y1), b: SIMD2(x2, y2)), exterior: (num(w[4]) ?? 0) > 0.5)
@@ -157,6 +159,7 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
                     if paredes.count >= 3 { mapa[cuarto] = (paredes, senas) }
                 }
                 arVC.planoPorCuarto = mapa
+                arVC.marcoPorCuarto = marcos
             }
             if let areas = call.getObject("areasPorCuarto") {
                 var mapa: [String: Double] = [:]
@@ -241,7 +244,7 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
         arVC.modalPresentationStyle = .fullScreen
         arVC.experiencia = "nueva"
         arVC.maqueta = paso
-        arVC.laboratorio = paso >= 11
+        arVC.laboratorio = (11...13).contains(paso)
         arVC.modo = "recorrido"
         arVC.alcance = "nivel"
         arVC.nivelActual = "2nd Floor"
