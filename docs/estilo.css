@@ -1481,6 +1481,12 @@ body.ed-guardando #fvPanel .ed-accs, body.ed-guardando #fvPanel .ed-tiles, body.
 .pl-grande-lienzo{ flex:1; overflow:auto; padding:10px; }
 .pl-grande-lienzo svg{ display:block; width:100%; height:auto; min-width:700px; }
 #panel-plano .aviso.ok{ color:#15803d; }
+/* Planos esperando señal (16-oct, Aroldo en un sótano): el escaneo quedó en el teléfono y se sube solo. */
+#panel-plano .pl-pend{ display:flex; align-items:center; gap:10px; margin:10px 0 0; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:var(--card); font-size:14px; color:var(--ink); }
+#panel-plano .pl-pend .ic{ width:20px; height:20px; flex:none; color:var(--accent); }
+#panel-plano .pl-pend span{ flex:1; min-width:0; line-height:1.35; }
+#panel-plano .pl-pend small{ color:var(--ink-soft); font-size:12.5px; }
+#panel-plano .pl-pend .btn{ flex:none; min-height:36px; padding:0 12px; }
 @media (max-width:1180px) and (min-width:900px){ .pl-cuerpo{ grid-template-columns:190px minmax(0,1fr); } .pl-detalles{ grid-column:1 / -1; } }
 @media (max-width:899px){
   .pl-cab, .pl-niveles, .pl-detalles, .pl-visor-cab{ display:none; }

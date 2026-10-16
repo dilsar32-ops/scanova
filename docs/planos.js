@@ -2,8 +2,8 @@
 // (el mismo escáner de Field Reports, que ya viene dentro de la app: plugin RoomScan) y se dibuja con el
 // mismo código de Field Reports (plano.js, copiado por tools/extraer_plano.py). Un escaneo por piso;
 // un escaneo nuevo no borra el anterior (queda de historial), se ve el más reciente.
-import * as plano from './plano.js?v=2026-10-16-8';
-import { authFetch, esAparato } from './app.js?v=2026-10-16-8';
+import * as plano from './plano.js?v=2026-10-16-9';
+import { authFetch, esAparato } from './app.js?v=2026-10-16-9';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
@@ -212,6 +212,7 @@ async function cargar(){
     else { PLANOS = await r.json(); CARGADO = id; pintarConteo(pisosConPlano(PLANOS)); }
   }catch(e){ PLANOS = []; CARGADO = 'error'; }
   pintar();
+  subirPendientes();
 }
 // Cuántos pisos tienen plano, para la pestaña ("Floor Plan (2)"). Cada piso cuenta una vez aunque se haya guardado
 // varias veces; uno sin piso cuenta como uno. Se pinta al abrir el proyecto (consulta chiquita, sin los planos)
@@ -286,6 +287,7 @@ export function pintar(){
     </div>
   </div>
   ${AVISO ? `<p class="aviso${AVISO_OK ? ' ok' : ''}" id="plAviso">${esc(AVISO)}</p>` : ''}
+  ${bandaPendientes()}
   <div class="pl-tel-barra">
     <span class="pl-sel"></span>
     ${herrVista}
@@ -360,6 +362,14 @@ if(typeof window !== 'undefined') window.addEventListener('resize', () => medir(
 // La foto de la cabecera llega después y cambia el alto: se vuelve a medir para que todo siga cabiendo.
 if(typeof document !== 'undefined') document.addEventListener('load', (e) => { if(e.target && e.target.tagName === 'IMG' && e.target.closest && e.target.closest('#pTrabajo') && $('#panel-plano .pl-lienzo')) medir(); }, true);
 function avisar(t, ok){ AVISO = t || ''; AVISO_OK = !!ok; pintar(); }
+// Los planos de ESTE trabajo que esperan señal: una franja con "Upload now".
+function bandaPendientes(){
+  const mios = T ? leerPendientes().filter(x => x && x.fila && x.fila.trabajo_id === T.id) : [];
+  if(!mios.length) return '';
+  const niveles = [...new Set(mios.map(x => x.nivel || 'No level'))].join(', ');
+  const err = mios.find(x => x.error);
+  return `<div class="pl-pend" id="plPend">${IC('reloj')}<span><b>${mios.length === 1 ? '1 floor plan' : mios.length + ' floor plans'} waiting for signal</b> · ${esc(niveles)}${err ? ' · ' + esc(err.error) : ''}<br><small>Saved on this phone. It uploads by itself when there is signal.</small></span><button type="button" class="btn btn-outline" data-pl-subir${SUBIENDO ? ' disabled' : ''}>${SUBIENDO ? 'Uploading…' : 'Upload now'}</button></div>`;
+}
 
 // ---------- acercar con los dedos (su pedido 13-oct: sin + y − encima del plano) ----------
 // Dos dedos: abre/cierra y mueve. Un dedo con el plano acercado: lo mueve. Un dedo con el plano entero: la página se
@@ -411,6 +421,66 @@ function pellizco(caja, obj, e){
   }, { passive: true });
 }
 
+// ---------- planos esperando señal (16-oct, Aroldo en un sótano: "Load failed" y los dos escaneos se perdieron) ----------
+// El escaneo se guarda PRIMERO en el teléfono y después se sube. Sin señal se queda ahí y se sube solo al volver la señal
+// (al abrir Floor Plan, al regresar a la app, al reconectarse, o con "Upload now"). Cada plano lleva su id desde el
+// teléfono: si la primera subida sí llegó y solo se perdió la respuesta, el reintento no lo duplica.
+const PEND_LLAVE = 'scanova:planosPendientes:v1';
+export function leerPendientes(){ try{ const v = JSON.parse(localStorage.getItem(PEND_LLAVE) || '[]'); return Array.isArray(v) ? v : []; }catch(e){ return []; } }
+function escribirPendientes(l){ try{ localStorage.setItem(PEND_LLAVE, JSON.stringify(l)); return true; }catch(e){ return false; } }
+function quitarPendiente(id){ escribirPendientes(leerPendientes().filter(x => x.fila && x.fila.id !== id)); }
+export const esErrorDeRed = (e) => !!e && !e.permanente && (e.name === 'TypeError' || /load failed|failed to fetch|network ?error|internet|offline|timed out|cancelled|abort|HTTP 5\d\d/i.test(String(e.message || e)));
+const COLS_PLANO = 'id,nivel_id,created_at,area_sqft,cuartos,muros_ext_ft,techo_ft,data';
+async function subirFila(fila, intentos = 3){
+  let ultimo = null;
+  for(let i = 0; i < intentos; i++){
+    if(i) await new Promise(r => setTimeout(r, [0, 2000, 6000][i] || 6000));
+    try{
+      const g = await authFetch('/rest/v1/fotos_planos', { method:'POST', headers:{ Prefer:'return=representation' }, body: JSON.stringify(fila) });
+      if(g.ok){ const x = (await g.json())[0]; if(x && x.id) return x; }
+      if(g.status === 409){   // ya estaba: la vez anterior sí llegó
+        const r = await authFetch('/rest/v1/fotos_planos?id=eq.' + encodeURIComponent(fila.id) + '&select=' + COLS_PLANO);
+        if(r.ok){ const x = (await r.json())[0]; if(x) return x; }
+      }
+      const err = new Error(g.status === 404 ? 'falta correr sql/fotos-07-planos.sql' : 'HTTP ' + g.status);
+      err.permanente = g.status >= 400 && g.status < 500 && g.status !== 408 && g.status !== 429;
+      throw err;
+    }catch(e){ ultimo = e; if(!esErrorDeRed(e)) throw e; }
+  }
+  throw ultimo || new Error('Load failed');
+}
+let SUBIENDO = false;
+// Sube lo que quedó en el teléfono. `aMano` = tocó "Upload now" (también reintenta los que fallaron por otra razón).
+export async function subirPendientes(aMano){
+  if(SUBIENDO) return; const lista = leerPendientes(); if(!lista.length) return;
+  if(typeof navigator !== 'undefined' && navigator.onLine === false && !aMano) return;
+  SUBIENDO = true; let subidas = 0, falla = '';
+  try{
+    for(const x of lista){
+      if(!x || !x.fila) continue;
+      if(x.error && !aMano) continue;
+      try{
+        const g = await subirFila(x.fila, aMano ? 3 : 1);
+        quitarPendiente(x.fila.id); subidas++;
+        if(T && g.trabajo_id ? g.trabajo_id === T.id : (T && x.fila.trabajo_id === T.id)){
+          if(!PLANOS.some(p => p.id === g.id)) PLANOS = [g].concat(PLANOS);
+          pintarConteo(pisosConPlano(PLANOS));
+        }
+      }catch(e){
+        if(!esErrorDeRed(e)){ const l = leerPendientes(); const y = l.find(z => z.fila && z.fila.id === x.fila.id); if(y){ y.error = String(e && e.message || e); escribirPendientes(l); } falla = String(e && e.message || e); }
+        else { falla = 'red'; break; }
+      }
+    }
+  } finally { SUBIENDO = false; }
+  if(subidas) avisar(subidas === 1 ? 'The floor plan that was waiting for signal is uploaded.' : 'The ' + subidas + ' floor plans that were waiting for signal are uploaded.', true);
+  else if(aMano && falla) avisar(falla === 'red' ? 'Still no signal. The floor plan stays safe on this phone; it uploads by itself when there is signal.' : 'Could not upload the floor plan: ' + falla + '. It stays saved on this phone.');
+  else pintar();
+}
+if(typeof window !== 'undefined'){
+  window.addEventListener('online', () => subirPendientes());
+  document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible') subirPendientes(); });
+}
+
 // ---------- escanear ----------
 async function escanear(){
   if(OCUPADO) return;
@@ -439,19 +509,32 @@ async function escanear(){
     }).filter(x => x.res.cuartos);
     if(!partes.length){ OCUPADO = false; avisar('The scan came back without any room. Nothing was saved - try again walking slowly along the walls.'); return; }
     const guardadas = [];
-    for(const x of partes){
-      const fila = { trabajo_id: T.id, nivel_id: x.n && x.n.id !== SIN_NIVEL ? x.n.id : null, data: x.d, area_sqft: x.res.area, cuartos: x.res.cuartos, muros_ext_ft: x.res.murosExt, techo_ft: x.res.techo || null };
-      const g = await authFetch('/rest/v1/fotos_planos', { method:'POST', headers:{ Prefer:'return=representation' }, body: JSON.stringify(fila) });
-      const guardada = g.ok ? (await g.json())[0] : null;
-      if(!guardada || !guardada.id) throw new Error(g.status === 404 ? 'falta correr sql/fotos-07-planos.sql' : 'HTTP ' + g.status);
-      guardadas.push(guardada);
+    const filas = partes.map(x => ({ id: crypto.randomUUID(), trabajo_id: T.id, nivel_id: x.n && x.n.id !== SIN_NIVEL ? x.n.id : null, data: x.d, area_sqft: x.res.area, cuartos: x.res.cuartos, muros_ext_ft: x.res.murosExt, techo_ft: x.res.techo || null }));
+    // PRIMERO al teléfono: si no hay señal (un sótano), el escaneo no se pierde.
+    const pend = leerPendientes();
+    filas.forEach((f, i) => pend.push({ fila: f, nivel: partes[i].n ? partes[i].n.nombre : 'No level', guardado: new Date().toISOString() }));
+    const enTelefono = escribirPendientes(pend);
+    let sinSenal = 0;
+    for(const fila of filas){
+      try{ guardadas.push(await subirFila(fila)); quitarPendiente(fila.id); }
+      catch(e){
+        if(enTelefono && esErrorDeRed(e)){ sinSenal++; continue; }
+        // Otro error (no la señal): el escaneo se QUEDA en el teléfono con su razón; "Upload now" lo vuelve a intentar.
+        if(enTelefono){ const l = leerPendientes(); const y = l.find(z => z.fila && z.fila.id === fila.id); if(y){ y.error = String(e && e.message || e); escribirPendientes(l); } }
+        throw e;
+      }
     }
     PLANOS = guardadas.slice().reverse().concat(PLANOS); NIV_SEL = (partes[0].n || niv).id; OCUPADO = false; pintarConteo(pisosConPlano(PLANOS));
+    if(sinSenal){
+      avisar((sinSenal === filas.length ? 'No signal here. ' : 'Part of the scan could not upload (no signal). ')
+        + 'The floor plan is saved on this phone and uploads by itself when there is signal. You do not need to scan again.', true);
+      return;
+    }
     const res = partes[0].res;
     avisar(partes.length > 1
       ? 'Floor plans saved: ' + partes.map(x => (x.n ? x.n.nombre : 'No level') + ' (' + fmtPies(x.res.area) + ' sq ft)').join(', ') + '.'
       : 'Floor plan saved for ' + niv.nombre + ' (' + fmtPies(res.area) + ' sq ft, ' + res.cuartos + ' rooms).', true);
-  }catch(e){ OCUPADO = false; avisar('Could not save the floor plan. ' + String(e && e.message || e)); }
+  }catch(e){ OCUPADO = false; avisar('Could not save the floor plan. ' + String(e && e.message || e) + (T && leerPendientes().some(x => x.fila && x.fila.trabajo_id === T.id) ? ' The scan stays saved on this phone.' : '')); }
 }
 
 // ---------- exportar (PNG del plano, como la foto: hoja de compartir en el teléfono) ----------
@@ -544,6 +627,7 @@ export function conectar(){
     if((el = q('[data-pl-zoom]'))){ ZOOM = Math.max(0.5, Math.min(3, Math.round((ZOOM + Number(el.dataset.plZoom) * 0.25) * 100) / 100)); pintar(); return; }
     if(q('[data-pl-grande]')){ grande(); return; }
     if(q('[data-pl-escanear]')){ escanear(); return; }
+    if(q('[data-pl-subir]')){ const b = q('[data-pl-subir]'); b.disabled = true; b.textContent = 'Uploading…'; subirPendientes(true); return; }
     if(q('[data-pl-exportar]')){ exportar(); return; }
     if(q('[data-pl-mas-nivel]')){ if(AL_NIVEL) AL_NIVEL(); return; }
     if(q('[data-pl-editar]')){ avisar('Editing the plan (move walls, rename rooms, add doors) is the next step being built. For now you can scan, view, zoom and export.'); return; }

@@ -100,6 +100,7 @@ const sql = fs.readFileSync(new URL('../sql/fotos-07-planos.sql', import.meta.ur
 ok('SQL: tabla con candado, sin borrar filas, anon fuera, ASCII puro', /create table if not exists fotos_planos/.test(sql) && /enable row level security/.test(sql) && !/for delete/.test(sql) && /revoke all on fotos_planos from anon/.test(sql) && !/[^\x00-\x7F]/.test(sql));
 const js = fs.readFileSync(new URL('../docs/planos.js', import.meta.url), 'utf8');
 ok('escanea con el escáner del iPhone (RoomScan) y avisa si no hay LiDAR', /Plugins\.RoomScan/.test(js) && /isSupported/.test(js) && /no LiDAR/.test(js));
-ok('confirma que de verdad se guardó antes de decir "saved"', /return=representation/.test(js) && /if\(!guardada \|\| !guardada\.id\) throw/.test(js));
+// 16-oct: la subida va por subirFila (con reintentos); solo cuenta como guardado si el servidor devolvió la fila con su id.
+ok('confirma que de verdad se guardó antes de decir "saved"', /return=representation/.test(js) && /if\(g\.ok\)\{ const x = \(await g\.json\(\)\)\[0\]; if\(x && x\.id\) return x; \}/.test(js) && /guardadas\.push\(await subirFila\(fila\)\)/.test(js));
 console.log(`\nplanos: ${pass} ok, ${fail} fallas`);
 if(fail) process.exit(1);

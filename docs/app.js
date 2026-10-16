@@ -1,15 +1,15 @@
 // Scanova · arranque, sesión y navegación. Las pantallas viven en index.html; lo de trabajos en trabajos.js.
-import { SUPABASE_URL, ANON_KEY, APP_BUILD } from './config.js?v=2026-10-16-8';
-import { ESQUEMA_APARATO, urlEntrarGoogle } from './google.js?v=2026-10-16-8';
-import * as trabajos from './trabajos.js?v=2026-10-16-8';
-import * as personas from './personas.js?v=2026-10-16-8';
-import * as fotos from './fotos.js?v=2026-10-16-8';
-import * as panel from './panel.js?v=2026-10-16-8';
-import * as camara from './camara.js?v=2026-10-16-8';
-import * as direccion from './direccion.js?v=2026-10-16-8';
-import * as proyecto from './proyecto.js?v=2026-10-16-8';
-import * as foto from './foto.js?v=2026-10-16-8';
-import * as editor from './editor.js?v=2026-10-16-8';
+import { SUPABASE_URL, ANON_KEY, APP_BUILD } from './config.js?v=2026-10-16-9';
+import { ESQUEMA_APARATO, urlEntrarGoogle } from './google.js?v=2026-10-16-9';
+import * as trabajos from './trabajos.js?v=2026-10-16-9';
+import * as personas from './personas.js?v=2026-10-16-9';
+import * as fotos from './fotos.js?v=2026-10-16-9';
+import * as panel from './panel.js?v=2026-10-16-9';
+import * as camara from './camara.js?v=2026-10-16-9';
+import * as direccion from './direccion.js?v=2026-10-16-9';
+import * as proyecto from './proyecto.js?v=2026-10-16-9';
+import * as foto from './foto.js?v=2026-10-16-9';
+import * as editor from './editor.js?v=2026-10-16-9';
 
 export const $ = (s, r = document) => r.querySelector(s);
 export const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
