@@ -76,6 +76,8 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
             arVC.modo = call.getString("modo") ?? "unaSeccion"
             // La bandera de la cámara nueva (Fase 0): sin ella, la cámara de siempre.
             arVC.experiencia = call.getString("experiencia") ?? "hoy"
+            // "Probar lo demolido" (laboratorio): solo si la página lo manda (solo para el manager). Sin ella no existe.
+            arVC.laboratorio = call.getBool("laboratorio") ?? false
             // EL NIVEL YA VIENE RESUELTO DESDE LA PANTALLA. Se escoge con el
             // dedo en Medidas, una sola vez, antes de abrir la camara: adentro
             // ya no se pregunta y se estampa en cada medida del recorrido.
@@ -239,6 +241,7 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
         arVC.modalPresentationStyle = .fullScreen
         arVC.experiencia = "nueva"
         arVC.maqueta = paso
+        arVC.laboratorio = paso >= 11
         arVC.modo = "recorrido"
         arVC.alcance = "nivel"
         arVC.nivelActual = "2nd Floor"

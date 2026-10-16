@@ -3,6 +3,7 @@ import SceneKit
 import ARKit
 import AVFoundation
 import Speech
+import CoreImage
 
 // Los colores de la cámara por papel (ver "EL TEMA" en ARMeasureViewController). Los de aquí son los de siempre
 // (Field Reports); Scanova manda los suyos en hex ("#2563EB" o con transparencia "#0F1A2EBD").
@@ -325,6 +326,9 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
     fileprivate let nueva = CamaraNueva()
     // MODO MAQUETA: solo en el simulador, para las capturas (ARKit no corre ahí). 0 = cámara de verdad.
     var maqueta: Int = 0
+    // "PROBAR LO DEMOLIDO" (laboratorio, 15 oct 2026): solo si la página lo pide (solo para el manager). Ver el final.
+    var laboratorio: Bool = false
+    fileprivate let lab = LabDemolicion()
 
     // ============ EL ASISTENTE QUE HABLA ============
     //
@@ -5295,6 +5299,7 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        cerrarLaboratorioAlSalir()
         sceneView.session.pause()
         displayLink?.invalidate()
         displayLink = nil
@@ -7996,6 +8001,7 @@ extension ARMeasureViewController {
         listaVisible = false
         nueva.seccionConfirmada = !esRecorrido
         armarBarraNueva()
+        armarBotonLaboratorio()
         armarCentroNuevo()
         armarMuelleNuevo()
         armarTarjetaNueva()
@@ -8237,6 +8243,7 @@ extension ARMeasureViewController {
     // ---------------- PINTAR (corre después de cada updateUI) ----------------
     fileprivate func pintarCamaraNueva() {
         guard experienciaNueva, nueva.armada else { return }
+        if lab.activo { pintarLaboratorio(); return }
         let n = nueva
         // Lo viejo que tapaba (la lista y la ayuda de siempre) nunca se abre aquí: si se quedara "abierto" aunque no
         // se vea, la voz contestaría "primero cierre lo que tiene abierto".
@@ -8757,6 +8764,7 @@ extension ARMeasureViewController {
     // Lo que hace la mira cuadro por cuadro (se cuelga del tick que ya corría: ni un timer más).
     fileprivate func tickCamaraNueva() {
         guard experienciaNueva, nueva.armada else { return }
+        if lab.activo { tickLaboratorio(); return }
         let n = nueva
         if maqueta > 0 {
             n.vivo = n.maquetaVivo
@@ -9311,6 +9319,10 @@ extension ARMeasureViewController {
         }
         let p = SIMD3<Float>(0, 0, 0)
         switch maqueta {
+        case 11, 12:
+            roomName = "Living Room"; nueva.cuartoVisto = roomName
+            let paso = maqueta
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.maquetaLaboratorio(paso) }
         case 1:
             guardada("Kitchen", "wall", "Drywall", 12, 4); guardada("Kitchen", "floor", "Laminate", 12, 10)
             guardada("Kitchen", "kitchen", "Countertop", 14, 2); guardada("Kitchen", "kitchen", "Cabinets", 12, nil)
@@ -9540,5 +9552,593 @@ extension ARMeasureViewController {
     func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) { anotarPlanosVistos(anchors) }
     func session(_ session: ARSession, didRemove anchors: [ARAnchor]) {
         for a in anchors { nueva.planosVistos[a.identifier] = nil }
+    }
+}
+
+// MARK: - ============ PROBAR LO DEMOLIDO (laboratorio, solo manager) — 15 oct 2026 ============
+//
+// Su pedido: "que el láser pueda detectar que antes estaba una pared... si cortaron un solo pie... sacar las medidas".
+// La investigación (notas/demolicion/PLAN.md) dijo: primero una prueba que solo ve el manager, que conteste UNA pregunta:
+// ¿el láser de sus teléfonos ve el corte y lo mide bien? Esto es esa prueba. NO manda nada a Measurements, no usa el
+// plano y no cambia nada para la cuadrilla: el botón solo existe si la página manda `laboratorio` (solo para el manager).
+//
+// Cómo se usa: se apunta la mira al drywall ENTERO de arriba del corte y se toca "Fijar pared"; se camina despacio de
+// una esquina a la otra a 3-5 ft, con el teléfono a la cintura; sobre la pared se pinta naranja lo que el láser ve
+// quitado (y rayado lo que falta ver); abajo salen solo números. "Guardar grabación" saca el archivo por Compartir para
+// correr el MISMO comparador en la Mac (tools/leer_barrido.swift) y compararlo contra la cinta.
+//
+// El trabajo pesado (puntos, votos, grabar) va en una fila aparte; del cuadro de ARKit solo se COPIAN la profundidad,
+// la confianza, la pose y los intrínsecos, y el cuadro se suelta en el momento. La malla se apaga mientras dura el modo
+// (calor), y se pone como estaba al salir.
+fileprivate final class LabDemolicion {
+    var activo = false
+    var armado = false
+    var cara: ComparadorDeDemolicion.Cara?
+    var anclaID: UUID?
+    var caraLocal: (o: SIMD4<Float>, n: SIMD4<Float>)?     // la cara en el marco del ancla (viaja con sus correcciones)
+    var ultimoOrigen: SIMD3<Float>?
+    var comparador = ComparadorDeDemolicion()               // SOLO se toca dentro de `cola`
+    let cola = DispatchQueue(label: "scanova.probar-lo-demolido", qos: .userInitiated)
+    var generacion = 0
+    var procesando = false
+    var ultimoCuadro: CFTimeInterval = 0, ultimaFoto: CFTimeInterval = 0, ultimaSuave: CFTimeInterval = 0
+    var ultimosPlanos: CFTimeInterval = 0, ultimaPintura: CFTimeInterval = 0
+    var sinRastreoDesde: Date?
+    var resultado = ComparadorDeDemolicion.Resultado()
+    var derivaV: Float = 0
+    var pisoVisto = false
+    var lejos: Float = 0
+    var luz: Float = 1000
+    var pared = 0
+    var grabadora: GrabadoraDeBarrido?
+    var archivos: [URL] = []
+    var guardados = Set<URL>()
+    var micAntes = false
+    var avisoHasta = Date.distantPast
+    var aviso = ""
+    lazy var ci = CIContext()
+    // Vistas
+    let boton = UIButton(type: .system)
+    let pastilla = UILabel()
+    let tarjeta = VidrioCamara(radio: 20)
+    let numero = UILabel(), detalle = UILabel(), mensaje = UILabel(), grabando = UILabel()
+    let botones = UIStackView()
+    var firmaBotones = ""
+    var capa: SCNNode?
+    var vistaMaqueta: UIImageView?
+}
+
+extension ARMeasureViewController {
+
+    // ---------------- EL BOTÓN (en la barra de arriba, junto a la Luz) ----------------
+    fileprivate func armarBotonLaboratorio() {
+        guard experienciaNueva, laboratorio, !lab.armado else { return }
+        lab.armado = true
+        let b = lab.boton, n = nueva
+        b.translatesAutoresizingMaskIntoConstraints = false
+        b.setImage(UIImage(systemName: "testtube.2"), for: .normal)
+        b.tintColor = Claro.tinta
+        b.backgroundColor = Claro.boton
+        b.layer.cornerRadius = 10; b.layer.cornerCurve = .continuous
+        b.layer.shadowColor = UIColor.black.cgColor; b.layer.shadowOpacity = 0.12; b.layer.shadowRadius = 6; b.layer.shadowOffset = CGSize(width: 0, height: 2)
+        b.accessibilityLabel = "Probar lo demolido (laboratorio)"
+        b.addTarget(self, action: #selector(laboratorioTocado), for: .touchUpInside)
+        n.barra.addSubview(b)
+        NSLayoutConstraint.activate([
+            b.leadingAnchor.constraint(equalTo: n.luz.trailingAnchor, constant: 8),
+            b.centerYAnchor.constraint(equalTo: n.barra.centerYAnchor),
+            b.widthAnchor.constraint(equalToConstant: 38), b.heightAnchor.constraint(equalToConstant: 38)
+        ])
+    }
+
+    @objc private func laboratorioTocado() { entrarLaboratorio() }
+
+    // ---------------- ENTRAR Y SALIR ----------------
+    fileprivate func entrarLaboratorio() {
+        let L = lab
+        guard !L.activo else { return }
+        if maqueta == 0 && !ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
+            mostrarAvisoNuevo("Este teléfono no tiene el láser (LiDAR): la prueba necesita un iPhone Pro.", segundos: 5)
+            return
+        }
+        L.activo = true
+        // El asistente se calla y deja de escuchar mientras dura la prueba (nada de órdenes por voz aquí).
+        L.micAntes = micApagadoPorElUsuario
+        micApagadoPorElUsuario = true
+        speech.stopSpeaking(at: .immediate)
+        dejarDeEscuchar()
+        if maqueta == 0 {
+            let c = ARWorldTrackingConfiguration()
+            c.planeDetection = [.horizontal, .vertical]
+            var sem: ARConfiguration.FrameSemantics = [.sceneDepth]
+            if ARWorldTrackingConfiguration.supportsFrameSemantics(.smoothedSceneDepth) { sem.insert(.smoothedSceneDepth) }
+            c.frameSemantics = sem
+            // Sin malla: la prueba no la usa y es lo que más calienta. Sin reset: se conservan el rastreo y las anclas.
+            sceneView.session.run(c)
+        }
+        limpiarBarridosViejos()
+        armarVistasLaboratorio()
+        for v in [nueva.barra, nueva.columna, nueva.muelle, nueva.panel, nueva.tarjeta, nueva.minimapa] { v.isHidden = true }
+        L.pastilla.isHidden = false; L.tarjeta.isHidden = false
+        nueva.mira.isHidden = false
+        L.cara = nil
+        L.resultado = ComparadorDeDemolicion.Resultado()
+        pintarLaboratorio()
+    }
+
+    private func salirLaboratorio() {
+        let L = lab
+        cerrarGrabacion()
+        let sinGuardar = L.archivos.filter { !L.guardados.contains($0) }
+        if !sinGuardar.isEmpty {
+            let a = UIAlertController(title: "¿Salir sin guardar la grabación?",
+                                      message: "La grabación sirve para revisar la prueba en la computadora. Si sale sin guardarla, se borra.",
+                                      preferredStyle: .alert)
+            a.addAction(UIAlertAction(title: "Guardar grabación", style: .default) { [weak self] _ in self?.guardarGrabacion() })
+            a.addAction(UIAlertAction(title: "Salir sin guardar", style: .destructive) { [weak self] _ in
+                for u in sinGuardar { try? FileManager.default.removeItem(at: u) }
+                self?.lab.archivos.removeAll(); self?.salirLaboratorio()
+            })
+            a.addAction(UIAlertAction(title: "Seguir probando", style: .cancel))
+            present(a, animated: true)
+            return
+        }
+        L.activo = false
+        L.generacion += 1
+        L.cara = nil; L.anclaID = nil; L.caraLocal = nil; L.ultimoOrigen = nil
+        L.cola.async { L.comparador.reiniciar() }
+        L.capa?.removeFromParentNode(); L.capa = nil
+        L.vistaMaqueta?.removeFromSuperview(); L.vistaMaqueta = nil
+        L.pastilla.isHidden = true; L.tarjeta.isHidden = true
+        nueva.barra.isHidden = false; nueva.columna.isHidden = false
+        if maqueta == 0 {
+            // La configuración de siempre (la de viewWillAppear), sin reset.
+            let c = ARWorldTrackingConfiguration()
+            c.planeDetection = [.horizontal, .vertical]
+            if ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) { c.sceneReconstruction = .mesh }
+            sceneView.session.run(c)
+        }
+        micApagadoPorElUsuario = L.micAntes
+        if !micApagadoPorElUsuario && maqueta == 0 { empezarAEscuchar() }
+        nueva.firmaPanel = ""
+        pintarCamaraNueva()
+    }
+
+    // ---------------- LAS VISTAS ----------------
+    private func armarVistasLaboratorio() {
+        let L = lab
+        guard L.pastilla.superview == nil else { return }
+        L.pastilla.translatesAutoresizingMaskIntoConstraints = false
+        L.pastilla.text = "  Laboratorio · no se manda nada  "
+        L.pastilla.font = .systemFont(ofSize: 13, weight: .bold)
+        L.pastilla.textColor = UIColor(red: 0.06, green: 0.10, blue: 0.18, alpha: 1)
+        L.pastilla.backgroundColor = UIColor(red: 1.0, green: 0.86, blue: 0.45, alpha: 0.97)
+        L.pastilla.layer.cornerRadius = 9; L.pastilla.layer.cornerCurve = .continuous; L.pastilla.clipsToBounds = true
+        view.addSubview(L.pastilla)
+        L.tarjeta.repintar()
+        L.tarjeta.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(L.tarjeta)
+        L.numero.font = .monospacedDigitSystemFont(ofSize: 30, weight: .bold); L.numero.textColor = Claro.tinta
+        L.detalle.font = .systemFont(ofSize: 14, weight: .medium); L.detalle.textColor = Claro.tinta; L.detalle.numberOfLines = 3
+        L.mensaje.font = .systemFont(ofSize: 14, weight: .semibold); L.mensaje.numberOfLines = 2
+        L.mensaje.textColor = UIColor(red: 0.62, green: 0.36, blue: 0.0, alpha: 1)
+        L.grabando.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium); L.grabando.textColor = Claro.gris
+        L.botones.axis = .vertical; L.botones.spacing = 6
+        let pila = UIStackView(arrangedSubviews: [L.numero, L.detalle, L.mensaje, L.grabando, L.botones])
+        pila.axis = .vertical; pila.spacing = 6
+        pila.setCustomSpacing(10, after: L.grabando)
+        pila.translatesAutoresizingMaskIntoConstraints = false
+        L.tarjeta.contenido.addSubview(pila)
+        NSLayoutConstraint.activate([
+            L.pastilla.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            L.pastilla.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            L.pastilla.heightAnchor.constraint(equalToConstant: 30),
+            L.tarjeta.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 10),
+            L.tarjeta.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10),
+            L.tarjeta.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -4),
+            pila.leadingAnchor.constraint(equalTo: L.tarjeta.contenido.leadingAnchor, constant: 14),
+            pila.trailingAnchor.constraint(equalTo: L.tarjeta.contenido.trailingAnchor, constant: -14),
+            pila.topAnchor.constraint(equalTo: L.tarjeta.contenido.topAnchor, constant: 14),
+            pila.bottomAnchor.constraint(equalTo: L.tarjeta.contenido.bottomAnchor, constant: -12)
+        ])
+    }
+
+    // ---------------- LO QUE SE VE (después de cada resultado) ----------------
+    fileprivate func pintarLaboratorio() {
+        let L = lab, r = L.resultado
+        guard L.activo else { return }
+        if L.cara == nil {
+            L.numero.text = "Fije la pared"
+            L.detalle.text = "Apunte la mira al drywall ENTERO de arriba del corte y toque Fijar pared. Luego camine despacio de una esquina a la otra, a 3-5 ft, con el teléfono a la cintura."
+        } else {
+            L.numero.text = String(format: "%.1f SF", r.area / (0.3048 * 0.3048))
+            var d = "Quitado: \(Self.piesPulgadas(r.largo)) de largo"
+            if let a = r.alto {
+                d += " · \(Self.piesPulgadas(a)) de alto"
+                // El rango solo si dice algo (el corte no salió parejo).
+                if let lo = r.altoMin, let hi = r.altoMax, hi - lo >= 0.5 * 0.0254 { d += " (\(Self.piesPulgadas(lo)) a \(Self.piesPulgadas(hi)))" }
+            }
+            d += String(format: " · visto %.0f%% de lo barrido", r.vistoPct * 100)
+            L.detalle.text = d
+        }
+        let m = mensajeLaboratorio()
+        L.mensaje.text = m; L.mensaje.isHidden = m == nil
+        if let g = L.grabadora, !g.cerrada {
+            let s = Int(g.segundos)
+            L.grabando.text = String(format: "● Grabando %d:%02d · %.0f MB", s / 60, s % 60, Double(g.bytes) / 1_048_576) + (g.llena ? " · llena (3 min)" : "")
+        } else if !L.archivos.isEmpty {
+            let n = L.archivos.filter { !L.guardados.contains($0) }.count
+            L.grabando.text = n > 0 ? "\(n) grabación\(n == 1 ? "" : "es") sin guardar" : "Grabación guardada"
+        } else { L.grabando.text = " " }
+        // Los botones (cuadrícula pareja), solo cuando cambia lo que se puede hacer.
+        let firma = "\(L.cara != nil)|\(L.archivos.count)|\(L.grabadora != nil)"
+        guard firma != L.firmaBotones else { return }
+        L.firmaBotones = firma
+        L.botones.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        var losetas: [LosetaCamara] = []
+        func loseta(_ icono: String, _ t: String, marcada: Bool = false, _ accion: @escaping () -> Void) {
+            let l = LosetaCamara(icono: icono, titulo: t, sub: nil, extra: nil, etiqueta: nil, centrada: true, alto: 54)
+            l.marcada = marcada; l.accion = accion; losetas.append(l)
+        }
+        if L.cara == nil {
+            loseta("scope", "Fijar pared", marcada: true) { [weak self] in self?.fijarPared() }
+        } else {
+            loseta("arrow.right.square", "Otra pared") { [weak self] in self?.otraPared() }
+        }
+        if !L.archivos.isEmpty || L.grabadora != nil {
+            loseta("square.and.arrow.up", "Guardar grabación") { [weak self] in self?.guardarGrabacion() }
+        }
+        loseta("xmark", "Salir") { [weak self] in self?.salirLaboratorio() }
+        L.botones.addArrangedSubview(rejilla(losetas, columnas: 3))
+    }
+
+    private func mensajeLaboratorio() -> String? {
+        let L = lab
+        if Date() < L.avisoHasta { return L.aviso }
+        let t = ProcessInfo.processInfo.thermalState
+        if t == .critical { return "El teléfono está muy caliente: la prueba se pausó." }
+        if t == .serious { return "El teléfono está caliente: voy más despacio." }
+        guard L.cara != nil else { return nil }
+        if L.luz < 150 { return "Poca luz." }
+        if !L.pisoVisto { return "Apunte un momento al piso frente a la pared." }
+        if L.lejos > 0.6 { return "Más cerca: de 3 a 5 ft de la pared." }
+        for a in L.resultado.alarmas {
+            switch a {
+            case .tapadoAbajo: return "Algo tapa abajo: muévalo o barra desde otro lado."
+            case .hondo: return "Algo muy hondo (¿puerta, paso o espejo?): no cuenta."
+            case .sinStuds: return "No veo los studs: no cuenta."
+            case .ambiguo: return "Se ve la cara del stud o insulación: eso no cuenta solo."
+            case .sinOrilla: return "Falta ver la orilla de arriba del corte."
+            case .sinPiso: return "Apunte un momento al piso frente a la pared."
+            }
+        }
+        return nil
+    }
+
+    private func avisoLaboratorio(_ s: String) {
+        lab.aviso = s; lab.avisoHasta = Date().addingTimeInterval(4)
+        pintarLaboratorio()
+    }
+
+    static func piesPulgadas(_ m: Float) -> String {
+        let p = Int((m / 0.0254).rounded())
+        return p >= 12 ? "\(p / 12) ft \(p % 12) in" : "\(p) in"
+    }
+
+    // ---------------- FIJAR LA PARED ----------------
+    private func fijarPared() {
+        let L = lab
+        guard maqueta == 0, let frame = sceneView.session.currentFrame else { return }
+        let centro = CGPoint(x: sceneView.bounds.midX, y: sceneView.bounds.midY)
+        var golpe: ARRaycastResult?
+        if let q = sceneView.raycastQuery(from: centro, allowing: .existingPlaneGeometry, alignment: .vertical) { golpe = sceneView.session.raycast(q).first }
+        if golpe == nil, let q = sceneView.raycastQuery(from: centro, allowing: .estimatedPlane, alignment: .vertical) { golpe = sceneView.session.raycast(q).first }
+        guard let g = golpe else { avisoLaboratorio("No veo una pared en la mira. Apunte al drywall entero de arriba del corte."); return }
+        let punto = SIMD3<Float>(g.worldTransform.columns.3.x, g.worldTransform.columns.3.y, g.worldTransform.columns.3.z)
+        // La normal: la del ancla de la pared si la hay (la del plano de ARKit), si no la del golpe.
+        var t = g.worldTransform
+        if let a = g.anchor as? ARPlaneAnchor { t = a.transform }
+        let normal = SIMD3<Float>(t.columns.1.x, t.columns.1.y, t.columns.1.z)
+        let tel = SIMD3<Float>(frame.camera.transform.columns.3.x, frame.camera.transform.columns.3.y, frame.camera.transform.columns.3.z)
+        guard let cara = ComparadorDeDemolicion.Cara.desde(punto: punto, normal: normal, telefono: tel) else {
+            avisoLaboratorio("Eso no es una pared. Apunte al drywall entero de arriba del corte."); return
+        }
+        L.generacion += 1
+        L.cara = cara
+        L.ultimoOrigen = cara.origen
+        if let a = g.anchor as? ARPlaneAnchor {
+            let inv = a.transform.inverse
+            L.anclaID = a.identifier
+            L.caraLocal = (inv * SIMD4(cara.origen, 1), inv * SIMD4(cara.n, 0))
+        } else { L.anclaID = nil; L.caraLocal = nil }
+        L.cola.async { L.comparador.reiniciar() }
+        L.pared += 1
+        empezarGrabacion(cara: cara, t: frame.timestamp)
+        L.resultado = ComparadorDeDemolicion.Resultado()
+        pintarLaboratorio()
+    }
+
+    private func otraPared() {
+        let L = lab
+        cerrarGrabacion()
+        L.generacion += 1
+        L.cara = nil; L.anclaID = nil; L.caraLocal = nil; L.ultimoOrigen = nil
+        L.cola.async { L.comparador.reiniciar() }
+        L.capa?.removeFromParentNode(); L.capa = nil
+        L.resultado = ComparadorDeDemolicion.Resultado()
+        pintarLaboratorio()
+    }
+
+    // La pared se movió en el mapa (el ancla brincó más de 1 in) o se perdió el rastreo: los votos ya no cuadran.
+    private func reiniciarPared(_ porque: String) {
+        let L = lab
+        guard let cara = L.cara else { return }
+        L.generacion += 1
+        L.cola.async { L.comparador.reiniciar() }
+        if let g = L.grabadora { let t = sceneView.session.currentFrame?.timestamp ?? 0; L.cola.async { g.evento(t: t, ["evento": "reiniciar", "porque": porque]) } }
+        L.ultimoOrigen = cara.origen
+        L.resultado = ComparadorDeDemolicion.Resultado()
+        avisoLaboratorio(porque)
+    }
+
+    // ---------------- GRABAR ----------------
+    private func carpetaBarridos() -> URL {
+        let u = FileManager.default.temporaryDirectory.appendingPathComponent("barridos", isDirectory: true)
+        try? FileManager.default.createDirectory(at: u, withIntermediateDirectories: true)
+        return u
+    }
+    private func limpiarBarridosViejos() {
+        let fm = FileManager.default, ayer = Date().addingTimeInterval(-86400)
+        for u in (try? fm.contentsOfDirectory(at: carpetaBarridos(), includingPropertiesForKeys: [.contentModificationDateKey])) ?? [] {
+            if let d = try? u.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate, d < ayer { try? fm.removeItem(at: u) }
+        }
+    }
+    private func empezarGrabacion(cara: ComparadorDeDemolicion.Cara, t: TimeInterval) {
+        let L = lab
+        cerrarGrabacion()
+        let f = DateFormatter(); f.dateFormat = "yyyyMMdd-HHmmss"
+        let url = carpetaBarridos().appendingPathComponent("barrido-\(f.string(from: Date()))-pared\(L.pared).scb")
+        var modelo = "iPhone"
+        var sis = utsname(); uname(&sis)
+        modelo = withUnsafePointer(to: &sis.machine) { $0.withMemoryRebound(to: CChar.self, capacity: 1) { String(cString: $0) } }
+        let meta: [String: Any] = ["modelo": modelo, "ios": UIDevice.current.systemVersion, "paso": 2, "confianzaMin": 2,
+                                   "pared": L.pared, "creado": ISO8601DateFormatter().string(from: Date()), "version": 1]
+        guard let g = GrabadoraDeBarrido(url: url, meta: meta) else { return }
+        g.evento(t: t, ["evento": "fijar", "cara": LectorDeBarrido.caraComoLista(cara)])
+        L.grabadora = g
+        L.archivos.append(url)
+    }
+    // La cámara se cierra con la prueba abierta: la grabación se cierra bien (queda en tmp hasta mañana, sin guardar).
+    fileprivate func cerrarLaboratorioAlSalir() {
+        guard lab.activo else { return }
+        cerrarGrabacion()
+        lab.activo = false
+    }
+    private func cerrarGrabacion() {
+        let L = lab
+        guard let g = L.grabadora else { return }
+        L.grabadora = nil
+        let texto = "\(L.numero.text ?? "") · \(L.detalle.text ?? "")"
+        let t = sceneView.session.currentFrame?.timestamp ?? 0
+        // En la misma fila que los cuadros: se cierra DESPUÉS del último cuadro que ya iba en camino.
+        L.cola.sync { g.evento(t: t, ["evento": "resumen", "texto": texto]); g.cerrar() }
+    }
+    private func guardarGrabacion() {
+        let L = lab
+        cerrarGrabacion()
+        let lista = L.archivos.filter { FileManager.default.fileExists(atPath: $0.path) }
+        guard !lista.isEmpty else { avisoLaboratorio("Todavía no hay grabación."); return }
+        let hoja = UIActivityViewController(activityItems: lista, applicationActivities: nil)
+        hoja.completionWithItemsHandler = { [weak self] _, completado, _, _ in
+            guard let self = self, completado else { return }
+            for u in lista { self.lab.guardados.insert(u) }
+            self.pintarLaboratorio()
+        }
+        if let pop = hoja.popoverPresentationController { pop.sourceView = L.tarjeta; pop.sourceRect = L.tarjeta.bounds }
+        present(hoja, animated: true)
+        pintarLaboratorio()
+    }
+
+    // ---------------- CADA CUADRO (desde el tick que ya corría) ----------------
+    fileprivate func tickLaboratorio() {
+        let L = lab
+        guard maqueta == 0, let frame = sceneView.session.currentFrame else { return }
+        if case .normal = frame.camera.trackingState {
+            L.sinRastreoDesde = nil
+            nueva.mira.estado = .lista
+        } else {
+            nueva.mira.estado = .buscando
+            if L.cara != nil {
+                if let d = L.sinRastreoDesde {
+                    if Date().timeIntervalSince(d) > 0.5 { L.sinRastreoDesde = nil; reiniciarPared("Se perdió el rastreo: empiezo esta pared otra vez.") }
+                } else { L.sinRastreoDesde = Date() }
+            }
+            return
+        }
+        guard var cara = L.cara else { return }
+        let tel = SIMD3<Float>(frame.camera.transform.columns.3.x, frame.camera.transform.columns.3.y, frame.camera.transform.columns.3.z)
+        // La cara viaja con su ancla (ARKit la corrige mientras afina el mapa); un brinco de más de 1 in = empezar otra vez.
+        if let id = L.anclaID, let loc = L.caraLocal, let a = frame.anchors.first(where: { $0.identifier == id }) {
+            let o = a.transform * loc.o, nn = a.transform * loc.n
+            if let c = ComparadorDeDemolicion.Cara.desde(punto: SIMD3(o.x, o.y, o.z), normal: SIMD3(nn.x, nn.y, nn.z), telefono: tel) {
+                if let u = L.ultimoOrigen, simd_distance(u, c.origen) > 0.0254 {
+                    L.ultimoOrigen = c.origen; L.cara = c
+                    reiniciarPared("La pared se movió en el mapa: empiezo otra vez.")
+                    return
+                }
+                L.ultimoOrigen = c.origen
+                cara = c; L.cara = c
+            }
+        }
+        let termico = ProcessInfo.processInfo.thermalState
+        let intervalo: CFTimeInterval = termico == .serious ? 0.5 : 0.2
+        let ahora = CACurrentMediaTime()
+        guard termico != .critical, !L.procesando, ahora - L.ultimoCuadro >= intervalo, let prof = frame.sceneDepth else { return }
+        L.ultimoCuadro = ahora
+        // Se COPIA lo necesario y el cuadro se suelta (nunca se guarda un ARFrame).
+        let (metros, w, h) = Self.copiarProfundidad(prof.depthMap)
+        guard w > 0 else { return }
+        let conf = prof.confidenceMap.map { Self.copiarConfianza($0) }
+        let K = frame.camera.intrinsics, res = frame.camera.imageResolution
+        let esc = Float(w) / Float(res.width)
+        let fx = K[0][0] * esc, fy = K[1][1] * esc, cx = K[2][0] * esc, cy = K[2][1] * esc
+        let pose = frame.camera.transform
+        L.luz = Float(frame.lightEstimate?.ambientIntensity ?? 1000)
+        var suave: ([Float], Int, Int)? = nil
+        if ahora - L.ultimaSuave >= 1, let s = frame.smoothedSceneDepth { suave = Self.copiarProfundidad(s.depthMap); L.ultimaSuave = ahora }
+        var planos: [[String: Any]]? = nil
+        if ahora - L.ultimosPlanos >= 1 {
+            L.ultimosPlanos = ahora
+            planos = frame.anchors.compactMap { a -> [String: Any]? in
+                guard let p = a as? ARPlaneAnchor else { return nil }
+                let m = p.transform
+                return ["id": p.identifier.uuidString, "vertical": p.alignment == .vertical, "clase": Self.nombreDeClase(p.classification),
+                        "transform": (0..<4).flatMap { c in (0..<4).map { Double(m[c][$0]) } },
+                        "extension": [Double(p.planeExtent.width), Double(p.planeExtent.height)]]
+            }
+        }
+        var foto: CGImage? = nil
+        if ahora - L.ultimaFoto >= 1, L.grabadora != nil {
+            L.ultimaFoto = ahora
+            let img = CIImage(cvPixelBuffer: frame.capturedImage).transformed(by: CGAffineTransform(scaleX: 0.25, y: 0.25))
+            foto = L.ci.createCGImage(img, from: img.extent)
+        }
+        let t = frame.timestamp
+        let pintar = ahora - L.ultimaPintura >= 0.5
+        if pintar { L.ultimaPintura = ahora }
+        let extra: [String: Any] = ["cara": LectorDeBarrido.caraComoLista(cara), "rastreo": "normal", "luz": Double(L.luz), "termico": termico.rawValue]
+        let gen = L.generacion, grab = L.grabadora
+        L.procesando = true
+        L.cola.async { [weak self] in
+            let pts = ComparadorDeDemolicion.puntos(profundidad: metros, confianza: conf, ancho: w, alto: h, fx: fx, fy: fy, cx: cx, cy: cy,
+                                                    camaraAMundo: pose, paso: 2, confianzaMin: 2)
+            L.comparador.votar(camara: SIMD3(pose.columns.3.x, pose.columns.3.y, pose.columns.3.z), puntos: pts, cara: cara)
+            if let g = grab, !g.cerrada {
+                g.profundidad(t: t, ancho: w, alto: h, metros: metros, confianza: conf, pose: pose, fx: fx, fy: fy, cx: cx, cy: cy, extra: extra)
+                if let s = suave {
+                    let e2 = Float(s.1) / Float(w)
+                    g.profundidad(t: t, ancho: s.1, alto: s.2, metros: s.0, confianza: nil, pose: pose, fx: fx * e2, fy: fy * e2, cx: cx * e2, cy: cy * e2, extra: extra, suavizada: true)
+                }
+                if let p = planos { g.planos(t: t, p) }
+                if let f = foto, let jpg = UIImage(cgImage: f).jpegData(compressionQuality: 0.5) { g.foto(t: t, jpeg: jpg) }
+            }
+            let r = L.comparador.resultado()
+            let img = pintar ? L.comparador.pintar(r, px: 4) : nil
+            let deriva = L.comparador.derivaV, piso = L.comparador.pisoRef != nil, lejos = L.comparador.ultimoLejos
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                L.procesando = false
+                guard L.activo, gen == L.generacion else { return }
+                L.resultado = r; L.derivaV = deriva; L.pisoVisto = piso; L.lejos = lejos
+                if let img = img { self.ponerCapa(img, cara: cara, deriva: deriva) }
+                self.pintarLaboratorio()
+            }
+        }
+    }
+
+    private static func nombreDeClase(_ c: ARPlaneAnchor.Classification) -> String {
+        switch c {
+        case .wall: return "wall"
+        case .floor: return "floor"
+        case .ceiling: return "ceiling"
+        case .table: return "table"
+        case .seat: return "seat"
+        case .window: return "window"
+        case .door: return "door"
+        default: return "none"
+        }
+    }
+
+    static func copiarProfundidad(_ pb: CVPixelBuffer) -> ([Float], Int, Int) {
+        guard CVPixelBufferGetPixelFormatType(pb) == kCVPixelFormatType_DepthFloat32 else { return ([], 0, 0) }
+        CVPixelBufferLockBaseAddress(pb, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pb, .readOnly) }
+        let w = CVPixelBufferGetWidth(pb), h = CVPixelBufferGetHeight(pb), bpr = CVPixelBufferGetBytesPerRow(pb)
+        guard let base = CVPixelBufferGetBaseAddress(pb) else { return ([], 0, 0) }
+        var out = [Float](repeating: 0, count: w * h)
+        out.withUnsafeMutableBufferPointer { dst in
+            for y in 0..<h { memcpy(dst.baseAddress! + y * w, base + y * bpr, w * 4) }
+        }
+        return (out, w, h)
+    }
+    static func copiarConfianza(_ pb: CVPixelBuffer) -> [UInt8] {
+        CVPixelBufferLockBaseAddress(pb, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pb, .readOnly) }
+        let w = CVPixelBufferGetWidth(pb), h = CVPixelBufferGetHeight(pb), bpr = CVPixelBufferGetBytesPerRow(pb)
+        guard let base = CVPixelBufferGetBaseAddress(pb) else { return [] }
+        var out = [UInt8](repeating: 0, count: w * h)
+        out.withUnsafeMutableBufferPointer { dst in
+            for y in 0..<h { memcpy(dst.baseAddress! + y * w, base + y * bpr, w) }
+        }
+        return out
+    }
+
+    // ---------------- LA CAPA SOBRE LA PARED ----------------
+    // Un plano de SceneKit del tamaño de la rejilla, puesto en la cara (con la deriva vertical de ahora), pintado con la
+    // misma imagen que da el comparador: naranja = quitado y contado, amarillo = raro, rayado = falta ver.
+    private func ponerCapa(_ img: (ancho: Int, alto: Int, rgba: [UInt8]), cara: ComparadorDeDemolicion.Cara, deriva: Float) {
+        let L = lab
+        guard let prov = CGDataProvider(data: Data(img.rgba) as CFData),
+              let cg = CGImage(width: img.ancho, height: img.alto, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: img.ancho * 4,
+                               space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue),
+                               provider: prov, decode: nil, shouldInterpolate: false, intent: .defaultIntent) else { return }
+        typealias C = ComparadorDeDemolicion
+        if L.capa == nil {
+            let plano = SCNPlane(width: CGFloat(C.uMax - C.uMin), height: CGFloat(C.vMax - C.vMin))
+            let mat = SCNMaterial()
+            mat.lightingModel = .constant
+            mat.isDoubleSided = true
+            mat.diffuse.magnificationFilter = .nearest
+            mat.writesToDepthBuffer = false
+            plano.materials = [mat]
+            let nodo = SCNNode(geometry: plano)
+            nodo.renderingOrder = 100
+            sceneView.scene.rootNode.addChildNode(nodo)
+            L.capa = nodo
+        }
+        L.capa?.geometry?.firstMaterial?.diffuse.contents = UIImage(cgImage: cg)
+        let centro = cara.origen + cara.u * ((C.uMin + C.uMax) / 2) + cara.v * ((C.vMin + C.vMax) / 2 + deriva) + cara.n * 0.004
+        var m = matrix_identity_float4x4
+        m.columns.0 = SIMD4(cara.u, 0); m.columns.1 = SIMD4(cara.v, 0); m.columns.2 = SIMD4(cara.n, 0); m.columns.3 = SIMD4(centro, 1)
+        L.capa?.simdTransform = m
+    }
+
+    // ---------------- MAQUETA (simulador): una grabación de verdad, corrida por el mismo comparador ----------------
+    // Documents/maqueta-barrido.scb (la que deja tests/demolicion_test.sh). 11 = después de barrer; 12 = recién entrando.
+    fileprivate func maquetaLaboratorio(_ paso: Int) {
+        entrarLaboratorio()
+        guard paso == 11 else { return }
+        let L = lab
+        guard let doc = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first?.appendingPathComponent("maqueta-barrido.scb"),
+              let regs = try? LectorDeBarrido.leer(doc), let p = LectorDeBarrido.repetir(regs).first else {
+            avisoLaboratorio("Falta Documents/maqueta-barrido.scb"); return
+        }
+        let r = p.comparador.resultado()
+        L.cara = p.cara; L.resultado = r; L.pisoVisto = true; L.lejos = 0
+        L.archivos = [doc]
+        L.firmaBotones = ""
+        // La capa, en 2D sobre la foto (en el simulador no hay ARKit que la ponga en la pared): solo lo barrido.
+        let img = p.comparador.pintar(r, px: 4)
+        if let prov = CGDataProvider(data: Data(img.rgba) as CFData),
+           let cg = CGImage(width: img.ancho, height: img.alto, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: img.ancho * 4,
+                            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue),
+                            provider: prov, decode: nil, shouldInterpolate: false, intent: .defaultIntent),
+           let piso = p.comparador.pisoRef {
+            typealias C = ComparadorDeDemolicion
+            let c0 = max(0, r.colIni - 2), c1 = min(C.columnas - 1, r.colIni + r.columnas.count + 1)
+            let rTop = C.renglonDe(piso + 4 * 0.3048) ?? (C.renglones - 1), rBot = max(0, (C.renglonDe(piso) ?? 0) - 1)
+            let recorte = CGRect(x: c0 * 4, y: (C.renglones - 1 - rTop) * 4, width: (c1 - c0 + 1) * 4, height: (rTop - rBot + 1) * 4)
+            if let parte = cg.cropping(to: recorte) {
+                let v = UIImageView(image: UIImage(cgImage: parte))
+                v.contentMode = .scaleToFill
+                v.layer.magnificationFilter = .nearest
+                v.frame = CGRect(x: 0, y: view.bounds.height * 0.355, width: view.bounds.width, height: view.bounds.height * 0.12)
+                v.isUserInteractionEnabled = false
+                view.insertSubview(v, belowSubview: L.tarjeta)
+                L.vistaMaqueta = v
+            }
+        }
+        pintarLaboratorio()
+        L.grabando.text = "\(p.cuadros) cuadros grabados · lista para guardar"
     }
 }
