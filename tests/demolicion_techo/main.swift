@@ -230,3 +230,24 @@ if modo == "perfil" {
         t += 2 * pulg
     }
 }
+if modo == "dibujo" {
+    var salida: [[String: Any]] = []
+    for c in casos {
+        semilla = UInt64(0x7EC0 + 301 * 7919)
+        let cara = caraDelTecho(c.cu)
+        let r = barrerTecho(c.cu, camino: c.camino, cara: cara).resultado(limites: ((0 - cara.origen.x)...(c.cu.L - cara.origen.x), (0 - cara.origen.z)...(c.cu.D - cara.origen.z)))
+        let o = cara.origen
+        salida.append(["nombre": c.nombre, "L": Double(c.cu.L / pie), "D": Double(c.cu.D / pie),
+                       "verdad": c.cu.huecos.map { [Double($0.x0 / pie), Double($0.x1 / pie), Double($0.z0 / pie), Double($0.z1 / pie)] },
+                       "medido": r.huecos.map { [Double((($0.u0 + o.x) / pie)), Double(($0.u1 + o.x) / pie), Double(($0.v0 + o.z) / pie), Double(($0.v1 + o.z) / pie), Double($0.area / (pie * pie))] },
+                       "celdas": r.huecos.filter { $0.area < $0.ancho * $0.fondo * 0.92 }.flatMap { h in h.celdas.map { k in [Double((T.centro(Int(k) % T.lado) + o.x) / pie), Double((T.centro(Int(k) / T.lado) + o.z) / pie)] } },
+                       "empotradas": c.cu.empotradas.map { [Double($0.x / pie), Double($0.y / pie)] },
+                       "rejillas": c.cu.rejillas.map { [Double($0.x0 / pie), Double($0.x1 / pie), Double($0.z0 / pie), Double($0.z1 / pie)] },
+                       "abanico": c.cu.cajas.map { [Double($0.lo.x / pie), Double($0.hi.x / pie), Double($0.lo.z / pie), Double($0.hi.z / pie)] },
+                       "mancha": c.cu.mancha.map { [Double($0.x / pie), Double($0.y / pie)] } ?? [],
+                       "sfVerdad": Double(areaVerdad(c) / (pie * pie)), "sfMedido": Double(r.area / (pie * pie)), "atico": c.cu.atico,
+                       "vigasEnX": c.cu.vigasEnX, "sep": Double(c.cu.separacion / pulg)])
+    }
+    let d = try! JSONSerialization.data(withJSONObject: salida, options: [])
+    FileManager.default.createFile(atPath: CommandLine.arguments[2], contents: d)
+}
