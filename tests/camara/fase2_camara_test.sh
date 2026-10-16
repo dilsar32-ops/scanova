@@ -114,7 +114,7 @@ ok("la cámara junta las paredes verticales que ve el LiDAR (solo con plano y en
 ok("cada segundo se ubica contra el cuarto escogido, y una dudosa no tumba una segura", 'Date().timeIntervalSince(n.ultimoUbicar) > 1' in v and 'if ac.seguro || !(n.acomodo?.seguro ?? false)' in v)
 ok("las ventanas y puertas que reconoce el iPhone sirven de señas", 'case .window: clase = .ventana' in v and 'case .door: clase = .puerta' in v)
 ok("la sugerencia usa primero la ubicación (sirve con cortes parciales) y luego el largo", v.index('UbicadorEnPlano.paredMedida(ac') < v.index('// 2. Sin ubicarse: por el largo'))
-ok("el minimapa sale con cualquier plano (aunque haya un panel abierto), y dice cuando todavía no se ubica", 'guard !planoPorCuarto.isEmpty else { m.isHidden = true; return }' in bloque(v, 'private func pintarMinimapa') and 'n.panel.isHidden' not in bloque(v, 'private func pintarMinimapa') and '"Buscando paredes…"' in v)
+ok("el minimapa sale con cualquier plano (aunque haya un panel abierto), y dice cuando todavía no se ubica", 'guard !planoPorCuarto.isEmpty else { m.isHidden = true; n.columnaJuntoAlMapa?.isActive = false; return }' in bloque(v, 'private func pintarMinimapa') and 'n.panel.isHidden' not in bloque(v, 'private func pintarMinimapa') and '"Buscando paredes…"' in v)
 ok("el puente recibe la forma de cada cuarto", 'call.getObject("planoPorCuarto")' in plg)
 ok("Scanova le manda a la cámara la forma de cada cuarto", 'paredesPorCuarto, planoPorCuarto' in med)
 # ---- 15 oct: PROBAR LO DEMOLIDO (laboratorio, solo manager) ----

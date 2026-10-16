@@ -240,7 +240,7 @@ ok("la ayuda del panel del piso habla de underlayment o padding", 'debajo del ca
 ok("lo contestado con la pregunta vieja no cuenta: la llave del nivel es v2", 'private static let llaveAjuste = "scanova.medirPrimero.ajuste.v2"' in v)
 ok("la maqueta 37 guarda el carpet por las reglas de verdad (resolverPiso)", 'resolverPiso("Carpet")' in bloque(v, 'private func maquetaMedirPrimeroPaso') and 'ReglasDeMedir.alfombra(' not in v[:v.index('struct ReglasDeMedir {')])
 ok("lo contestado del nivel se guarda por trabajo y nivel", 'Self.llaveAjuste + "|" + trabajoId + "|" + nivelActual' in v and 'arVC.trabajoId = call.getString("trabajo")' in plg)
-ok("las maquetas 24-46 no se enciman con las del laboratorio (18-23)", 'arVC.porMovimiento = (24...46).contains(paso)' in plg and '(18...23).contains(paso)' in plg)
+ok("las maquetas 24-47 no se enciman con las del laboratorio (18-23)", 'arVC.porMovimiento = (24...47).contains(paso)' in plg and '(18...23).contains(paso)' in plg)
 # ---- LA VENTANA "¿COMPLETO O PARCIAL?" SALE SOLA (16 oct, su pedido: "que ya no pregunte fijar; mira la pared y le da las
 # opciones, mira arriba techo completo o parcial, abajo piso; al escoger, engancha") ----
 rm = bloque(v, 'fileprivate func revisarMedirPrimero')
@@ -299,6 +299,11 @@ ok("el mapita va sobre un vidrio que desenfoca, solo hasta donde llega el mapa (
    mc.count('UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialLight))') == 2
    and 'g.dibujo.insetBy(dx: -Self.orillaVidrio, dy: -Self.orillaVidrio)' in mc and 'dueno?.dibujar(bounds)' in v)
 ok("el plano grande de la fase de ubicarse no lleva vidrio (ya va sobre su tarjeta)", 'n.mapaGrande.conVidrio = false' in v)
+# Su pregunta del 16 oct: el letrero "✓ ... guardado" de arriba se metía debajo del mapa.
+ok("medir primero no pone letrero de guardado (el mapa se pinta verde/amarillo)", 'mostrarAvisoNuevo(ReglasDeMedir.aviso(g' not in bloque(v, 'fileprivate func guardarMedir')
+   and 'items.count > n.itemsVistos, !(medirPrimero && n.medirActivo), let u = items.last' in v)
+ok("los avisos de arriba nunca van debajo del mapa", 'n.columna.trailingAnchor.constraint(lessThanOrEqualTo: m.leadingAnchor, constant: -8)' in v
+   and 'centroColumna.priority = .defaultHigh' in v and 'n.aviso.numberOfLines = 0' in v)
 ok("verde = completa, amarillo = parcial", 'static let verde' in v and 'static let amarillo' in v and 'colorPared' in v and 'colorPiso' in v)
 ok("el piso y el techo completos salen del área del cuarto en el plano (piso: área, largo, ancho, aprox)",
    'pisoPorCuarto.first(where: { Self.clave($0.key) == clave })' in bloque(v, 'fileprivate func datosPisoEntero')

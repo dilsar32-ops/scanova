@@ -8377,6 +8377,7 @@ fileprivate final class CamaraNueva {
     var lejanoCandidato: UbicadorEnPlano.Acomodo? // re-ubicarse LEJOS de lo de antes: 3 respuestas seguidas en el mismo lugar
     var lejanoSeguidas = 0
     var observadorCaptura: NSObjectProtocol?
+    var columnaJuntoAlMapa: NSLayoutConstraint?   // la columna de arriba termina antes del mapa (solo con el mapa a la vista)
     // ---- MEDIR PRIMERO, EL MATERIAL AL FINAL (16 oct; ver el bloque con ese nombre) ----
     var medirActivo = false                       // ya contestó lo del nivel: se mide
     var ajusteAbierto = false
@@ -8530,7 +8531,7 @@ extension ARMeasureViewController {
         n.aviso.translatesAutoresizingMaskIntoConstraints = false
         n.aviso.font = .systemFont(ofSize: 14, weight: .semibold); n.aviso.textColor = UIColor(red: 0.06, green: 0.10, blue: 0.18, alpha: 1)
         n.aviso.backgroundColor = UIColor(red: 1.0, green: 0.95, blue: 0.82, alpha: 0.97)
-        n.aviso.numberOfLines = 3; n.aviso.textAlignment = .center
+        n.aviso.numberOfLines = 0; n.aviso.textAlignment = .center
         n.aviso.layer.cornerRadius = 10; n.aviso.layer.cornerCurve = .continuous; n.aviso.clipsToBounds = true
         n.aviso.isHidden = true
         n.aviso.heightAnchor.constraint(greaterThanOrEqualToConstant: 34).isActive = true
@@ -8564,12 +8565,17 @@ extension ARMeasureViewController {
         n.aviso.removeFromSuperview()
         for v in [n.ficha, n.pista, n.aviso] { n.columna.addArrangedSubview(v) }
         view.addSubview(n.columna)
+        // Centrada como siempre, pero NUNCA debajo del mapa (su pregunta del 16 oct): con el mapa a la vista, lo que no
+        // cabe centrado se corre a la izquierda y se parte en renglones (ver columnaJuntoAlMapa en pintarMinimapa).
+        let centroColumna = n.columna.centerXAnchor.constraint(equalTo: view.centerXAnchor)
+        centroColumna.priority = .defaultHigh
         NSLayoutConstraint.activate([
             n.mira.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             n.mira.centerYAnchor.constraint(equalTo: view.centerYAnchor),
             n.mira.widthAnchor.constraint(equalToConstant: 56), n.mira.heightAnchor.constraint(equalToConstant: 56),
             n.columna.topAnchor.constraint(equalTo: n.barra.bottomAnchor, constant: 12),
-            n.columna.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            centroColumna,
+            n.columna.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 16),
             n.columna.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor, constant: -32),
             pila.leadingAnchor.constraint(equalTo: n.ficha.leadingAnchor, constant: 14),
             pila.trailingAnchor.constraint(equalTo: n.ficha.trailingAnchor, constant: -14),
@@ -8747,7 +8753,7 @@ extension ARMeasureViewController {
         pintarMuelleNuevo()
         pintarCentroNuevo()
         // Al guardar, se dice en la pantalla qué se guardó (2.5 s, en azul: no es un problema).
-        if n.itemsVistos >= 0, items.count > n.itemsVistos, let u = items.last {
+        if n.itemsVistos >= 0, items.count > n.itemsVistos, !(medirPrimero && n.medirActivo), let u = items.last {
             var que = Self.nombreDeBoton(valor: u.material, etiqueta: u.material)
             if let w = u.width { que += " \(Self.pies(u.length * w)) pies²" } else { que += " \(Self.pies(u.length)) pies lin." }
             if let c = u.companion { que += " + " + c }
@@ -9166,15 +9172,20 @@ extension ARMeasureViewController {
 
     private func pintarMinimapa() {
         let n = nueva, m = n.minimapa, g = n.mapaGrande
-        guard !planoPorCuarto.isEmpty else { m.isHidden = true; return }
+        guard !planoPorCuarto.isEmpty else { m.isHidden = true; n.columnaJuntoAlMapa?.isActive = false; return }
         // La planta entera (los otros cuartos del mismo dibujo, claritos) y, si ya escogió, su cuarto en negro.
         let forma = formaDelCuarto()
         let marco = marcoDe(roomName) ?? n.acomodoMarco ?? marcoPorCuarto.values.min()
         let fuertes = forma?.paredes ?? []
         let otras = marco.map { mc in cuartosDelMarco(mc).filter { $0.nombre.lowercased() != roomName.lowercased() }.flatMap { $0.paredes } } ?? []
-        guard !(fuertes.isEmpty && otras.isEmpty) else { m.isHidden = true; return }
+        guard !(fuertes.isEmpty && otras.isEmpty) else { m.isHidden = true; n.columnaJuntoAlMapa?.isActive = false; return }
         // Arriba, siempre (aunque haya un panel abierto); en la fase de ubicarse se ve el grande en su lugar.
         m.isHidden = n.ubicandose && !lab.activo
+        // Los avisos y la ficha de arriba no se meten debajo del mapa mientras se ve.
+        if n.columnaJuntoAlMapa == nil, m.superview === view, n.columna.superview === view {
+            n.columnaJuntoAlMapa = n.columna.trailingAnchor.constraint(lessThanOrEqualTo: m.leadingAnchor, constant: -8)
+        }
+        if let c = n.columnaJuntoAlMapa, c.isActive == m.isHidden { c.isActive = !m.isHidden }
         // En el laboratorio: la pared que se mide (naranja clarito) y lo que el láser ve cortado (naranja).
         if lab.activo, let ctx = lab.enPlano, let cara = lab.cara {
             m.resaltada = (ctx.pared.a, ctx.pared.b)
@@ -10194,7 +10205,7 @@ extension ARMeasureViewController {
             roomName = "Living Room"; nueva.cuartoVisto = roomName
             _ = cambiarSeccion("wall"); nueva.seccionConfirmada = true
             guardada("Living Room", "floor", "Laminate", 9.8, 10)
-        case 24...46:
+        case 24...47:
             // MEDIR PRIMERO (16 oct): se arma en maquetaMedirPrimero(), al final.
             break
         default:
@@ -11587,7 +11598,9 @@ extension ARMeasureViewController {
         n.parteAMano = false
         n.enganchada = false
         stage = .measuringLength
-        mostrarAvisoNuevo(ReglasDeMedir.aviso(g, parte: parte) + avisoBase, segundos: 3.8, ok: true)
+        // Sin letrero de "✓ guardado" arriba (su pregunta del 16 oct: se metía debajo del mapa): lo guardado ya se ve en el
+        // mapa (la pared o el piso se pintan verde o amarillo) y en la hoja del cuarto. Queda en la bitácora.
+        _ = avisoBase
         anotarMedir("guardar", ["parte": parte, "material": g.material, "unidad": g.unidad, "largo": (g.largo * 10).rounded() / 10,
                                 "ancho": g.ancho.map { ($0 * 10).rounded() / 10 } ?? 0, "companero": g.companero ?? "",
                                 "menos": (g.menos * 10).rounded() / 10, "menos_que": g.menosQue])
@@ -11979,7 +11992,7 @@ extension ARMeasureViewController {
     // molding; 29 el material de la pared; 30 insulación "mixto"; 31 el piso; 32 el carpet "mixto" (padding); 33 underlayment "mixto"; 34 el
     // techo; 35 el techo "mixto"; 36 "¿Ya terminó con esta pared?"; 37 la hoja del cuarto (con medidas guardadas de verdad).
     fileprivate func maquetaMedirPrimero() {
-        guard (24...46).contains(maqueta), medirPrimero else { return }
+        guard (24...47).contains(maqueta), medirPrimero else { return }
         let n = nueva
         func w(_ a: Double, _ b: Double, _ c: Double, _ d: Double, _ e: Bool) -> UbicadorEnPlano.ParedPlano {
             UbicadorEnPlano.ParedPlano(seg: UbicadorEnPlano.Segmento(a: SIMD2(a, b), b: SIMD2(c, d)), exterior: e) }
@@ -12084,6 +12097,12 @@ extension ARMeasureViewController {
                 n.zonaVista = "floor"; escogerParcial("floor", pared: nil); medida("floor", 6, 5); resolverPiso("Carpet")
                 n.zonaVista = "wall"; n.paredCandidata = (0, CACurrentMediaTime()); n.paredVista = 0
                 revisarEleccion()
+            case 47:
+                // SIN LETRERO DE GUARDADO Y NADA DEBAJO DEL MAPA (16 oct, su pregunta): se guarda un pedazo de pared (el mapa
+                // la pinta amarilla, sin letrero arriba) y luego sale un aviso largo de verdad: va a la izquierda del mapa.
+                n.zonaVista = "wall"; n.paredCandidata = (0, CACurrentMediaTime()); n.paredVista = 0
+                revisarEleccion(); escogerParcial("wall", pared: 0); medida("wall", 6, 4); resolverPared("Drywall")
+                mostrarAvisoNuevo("La cámara se reinició. Apunte a las paredes unos segundos para volver a ubicarse.", segundos: 600)
             case 43, 44, 45:
                 // FIJAR TECHO (43: la pregunta con el techo completo) y PISO en L (44: completo -> "20 × 12 − 40 = 200");
                 // 45: nada abierto, el teléfono ve el techo: el botón dice "Fijar techo".
