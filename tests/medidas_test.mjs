@@ -112,6 +112,18 @@ ok('una línea por unidad: SF y LF en dos renglones, nunca uno cortado', JSON.st
     const FRV = new URL('../../field-report-ios-app/ios/App/App/ARMeasureViewController.swift', import.meta.url), FRP = new URL('../../field-report-ios-app/ios/App/App/ARMeasurePlugin.swift', import.meta.url);
     if(fs.existsSync(FRV)) ok('la cámara es IDÉNTICA en Field Reports y en Scanova', fs.readFileSync(FRV, 'utf8') === swV && fs.readFileSync(FRP, 'utf8') === swP); }
   ok('SQL: candado (RLS), anon fuera, solo agrega', /enable row level security/.test(sql) && /revoke all on fotos_medidas\s+from anon/.test(sql) && !/drop table/i.test(sql)); }
+// ---- 16-oct (su pedido): cada nivel se abre y se cierra, el manager borra las medidas de un nivel, y la pestaña dice cuántas ----
+{ const src = fs.readFileSync(new URL('../docs/medidas.js', import.meta.url), 'utf8'), pro = fs.readFileSync(new URL('../docs/proyecto.js', import.meta.url), 'utf8'),
+    dl = fs.readFileSync(new URL('../docs/drylog.js', import.meta.url), 'utf8'), pl = fs.readFileSync(new URL('../docs/planos.js', import.meta.url), 'utf8');
+  ok('cada nivel de Measurements es una tarjeta que se abre y se cierra (uno solo: abierto; varios: cerrados; se recuerda)',
+     /<details class="med-niv" data-med-niv=/.test(src) && /ABIERTO_NIV\.has\(N\.clave\) \? ABIERTO_NIV\.get\(N\.clave\) : solo/.test(src) && /addEventListener\('toggle'/.test(src));
+  ok('solo el manager ve "Delete all N on <nivel>"', /esManager\(\) && cuantas \? `<button type="button" class="btn btn-outline btn-rojo med-borrar-nivel"/.test(src));
+  ok('borrar un nivel pregunta antes, borra en el servidor y lo COMPRUEBA volviendo a leer', /preguntar\(\{ titulo: 'Delete all measurements on '/.test(src)
+     && /method: 'DELETE', headers: \{ Prefer: 'return=representation' \}/.test(src) && /CARGADO = null; await cargar\(\);\s*const quedan/.test(src));
+  ok('la pestaña dice cuántas medidas hay, y Dry Logs cuántos días', /id="medidasConteo"/.test(pro) && /id="secadoConteo"/.test(pro)
+     && /drylog\.contarDias\(t\.id\); medidas\.contar\(t\.id\);/.test(pro) && /export async function contarDias/.test(dl) && /export async function contar\(/.test(src));
+  ok('Floor Plan en el teléfono: cada nivel es una tarjeta; la abierta enseña su plano y tocarla la cierra',
+     /data-pl-tel-niv=/.test(pl) && /if\(id === nivelElegido\(\)\.id && !PL_CERRADO\) PL_CERRADO = true;/.test(pl) && /caja\.classList\.toggle\('pl-cerrado', PL_CERRADO\)/.test(pl)); }
 
 console.log(`\nmedidas: ${pass} ok, ${fail} fallas`);
 if(fail) process.exit(1);
