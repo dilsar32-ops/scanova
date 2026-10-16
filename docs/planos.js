@@ -2,8 +2,8 @@
 // (el mismo escáner de Field Reports, que ya viene dentro de la app: plugin RoomScan) y se dibuja con el
 // mismo código de Field Reports (plano.js, copiado por tools/extraer_plano.py). Un escaneo por piso;
 // un escaneo nuevo no borra el anterior (queda de historial), se ve el más reciente.
-import * as plano from './plano.js?v=2026-10-16-9';
-import { authFetch, esAparato } from './app.js?v=2026-10-16-9';
+import * as plano from './plano.js?v=2026-10-16-10';
+import { authFetch, esAparato, esManager, preguntar } from './app.js?v=2026-10-16-10';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
@@ -284,6 +284,7 @@ export function pintar(){
       <button type="button" class="btn btn-outline" data-pl-escanear>${IC('escanear')}Scan New Plan</button>
       <button type="button" class="btn btn-outline" data-pl-exportar${p ? '' : ' disabled'}>${IC('compartir')}Export</button>
       <button type="button" class="btn btn-accent" data-pl-editar${p ? '' : ' disabled'}>${IC('lapiz')}Edit Floor Plan</button>
+      ${esManager() && p ? `<button type="button" class="btn btn-outline btn-rojo" data-pl-borrar>${IC('basura')}Delete Plan</button>` : ''}
     </div>
   </div>
   ${AVISO ? `<p class="aviso${AVISO_OK ? ' ok' : ''}" id="plAviso">${esc(AVISO)}</p>` : ''}
@@ -292,7 +293,7 @@ export function pintar(){
     <span class="pl-sel"></span>
     ${herrVista}
     <div class="pl-mas-wrap"><button type="button" class="pl-mas-btn" data-pl-menu aria-label="More options" aria-expanded="${MENU ? 'true' : 'false'}">•••</button>
-      <div class="pl-menu"${MENU ? '' : ' hidden'}><button type="button" data-pl-mas-nivel>${IC('mas')}Add Level</button><button type="button" data-pl-rejilla>${IC('cuadros')}${REJILLA ? 'Hide grid' : 'Show grid'}</button><button type="button" data-pl-ajustes>${IC('engrane')}Plan Settings</button></div></div>
+      <div class="pl-menu"${MENU ? '' : ' hidden'}><button type="button" data-pl-mas-nivel>${IC('mas')}Add Level</button><button type="button" data-pl-rejilla>${IC('cuadros')}${REJILLA ? 'Hide grid' : 'Show grid'}</button><button type="button" data-pl-ajustes>${IC('engrane')}Plan Settings</button>${esManager() && p ? `<button type="button" class="pl-menu-rojo" data-pl-borrar>${IC('basura')}Delete floor plan</button>` : ''}</div></div>
   </div>
   <div class="pl-tel-niveles">${nivArriba}</div>
   <div class="pl-cuerpo">
@@ -419,6 +420,33 @@ function pellizco(caja, obj, e){
       poner();
     } else ultimoToque = ahora;
   }, { passive: true });
+}
+
+// ---------- borrar el plano de un nivel (16-oct, su pedido: "solo los managers... borrar planos, en este momento de los testeos") ----------
+// Solo el manager. Se marca borrado (borrado_at; la fila no se destruye) el plano del nivel escogido Y sus escaneos anteriores
+// (si no, al borrar el último aparecería el de antes). Las medidas no se tocan. Se COMPRUEBA volviendo a leer.
+async function borrarPlano(){
+  if(!T || OCUPADO || !esManager()) return;
+  const tid = T.id, niv = nivelElegido();
+  const mios = PLANOS.filter(p => (p.nivel_id || SIN_NIVEL) === (niv.id || SIN_NIVEL));
+  if(!mios.length) return;
+  const ok = await preguntar({ titulo: 'Delete the floor plan of ' + niv.nombre + '?',
+    texto: (mios.length === 1 ? 'The floor plan' : 'The floor plan and its ' + (mios.length - 1) + (mios.length === 2 ? ' earlier scan' : ' earlier scans')) + ' of ' + niv.nombre + ' will be removed from this project. Measurements are not touched.',
+    si: 'Delete plan', no: 'Keep it' });
+  if(!ok || !T || T.id !== tid) return;
+  const ids = mios.map(p => p.id);
+  OCUPADO = true; avisar('Deleting the floor plan…', true);
+  let fallo = '';
+  try{
+    const r = await authFetch('/rest/v1/fotos_planos?id=in.(' + ids.join(',') + ')&borrado_at=is.null', { method:'PATCH', headers:{ Prefer:'return=representation' }, body: JSON.stringify({ borrado_at: new Date().toISOString() }) });
+    if(!r.ok) fallo = 'HTTP ' + r.status;
+  }catch(e){ fallo = String(e && e.message || e); }
+  OCUPADO = false;
+  if(!T || T.id !== tid) return;
+  CARGADO = ''; await cargar();
+  const quedan = PLANOS.filter(p => ids.includes(p.id)).length;
+  if(!quedan) avisar('Floor plan of ' + niv.nombre + ' deleted.', true);
+  else avisar('Could not delete the floor plan' + (fallo ? ' (' + fallo + ')' : '') + '. Only the manager can delete plans.');
 }
 
 // ---------- planos esperando señal (16-oct, Aroldo en un sótano: "Load failed" y los dos escaneos se perdieron) ----------
@@ -627,6 +655,7 @@ export function conectar(){
     if((el = q('[data-pl-zoom]'))){ ZOOM = Math.max(0.5, Math.min(3, Math.round((ZOOM + Number(el.dataset.plZoom) * 0.25) * 100) / 100)); pintar(); return; }
     if(q('[data-pl-grande]')){ grande(); return; }
     if(q('[data-pl-escanear]')){ escanear(); return; }
+    if(q('[data-pl-borrar]')){ borrarPlano(); return; }
     if(q('[data-pl-subir]')){ const b = q('[data-pl-subir]'); b.disabled = true; b.textContent = 'Uploading…'; subirPendientes(true); return; }
     if(q('[data-pl-exportar]')){ exportar(); return; }
     if(q('[data-pl-mas-nivel]')){ if(AL_NIVEL) AL_NIVEL(); return; }

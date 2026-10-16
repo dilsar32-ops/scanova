@@ -11,7 +11,7 @@
 //    del trabajo por partida; las notas; y el PDF "Measurements & Demo" (lo arma Documents).
 // Lo que cambia contra Field Reports: aquí el trabajo ya es el proyecto (cliente, dirección y fecha ya están), y los
 // niveles y cuartos son los del proyecto (los mismos de Photos y Dry Logs).
-import { $, authFetch, esAparato, esManager, preguntar, PERFIL } from './app.js?v=2026-10-16-9';
+import { $, authFetch, esAparato, esManager, preguntar, PERFIL } from './app.js?v=2026-10-16-10';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -406,7 +406,7 @@ function pintarEditor(){
     ${comp ? `<label class="med-acomp"><input type="checkbox" id="medAcomp"${ED.acomp ? ' checked' : ''}><span>Also add <b>${esc(comp)}</b> with the same size</span></label>` : ''}
     ${ED.id && num(ED.menos) && sup ? `<label class="med-acomp"><input type="checkbox" id="medMenos"${ED.restar ? ' checked' : ''}><span>Subtract <b>${esc(String(r2(num(ED.menos))))} sq ft</b>${ED.menos_que ? ': ' + esc(ED.menos_que) : ''} (the whole wall, from the floor plan)</span></label>` : ''}
     <p class="aviso" id="medEdAviso"></p>
-    <div class="fila-botones">${ED.id ? '<button type="button" class="btn btn-outline btn-rojo" data-med-borrar>Delete</button>' : ''}<button type="button" class="btn btn-outline" data-med-cerrar>Cancel</button><button type="button" class="btn btn-accent" data-med-guardar>Save</button></div>
+    <div class="fila-botones">${ED.id && esManager() ? '<button type="button" class="btn btn-outline btn-rojo" data-med-borrar>Delete</button>' : ''}<button type="button" class="btn btn-outline" data-med-cerrar>Cancel</button><button type="button" class="btn btn-accent" data-med-guardar>Save</button></div>
     ${ED.id ? '' : '<button type="button" class="btn btn-block med-otra" data-med-guardar="otra">Save and add another</button>'}`;
 }
 // Lo que se resta de la medida que se edita (la pared entera), si sigue marcada "Subtract".
@@ -464,7 +464,7 @@ async function insertar(filas){
   return out;
 }
 async function borrarEditor(){
-  if(!ED || !ED.id || !T) return; const ed = ED, id = ED.id, tid = T.id;
+  if(!ED || !ED.id || !T || !esManager()) return; const ed = ED, id = ED.id, tid = T.id;   // solo el manager borra (16-oct)
   if(GUARDANDO){ avisoEditor(ed, 'Still saving…'); return; }
   const ok = await preguntar({ titulo: 'Delete this measurement?', texto: materialDe(ed) + ' · ' + medidaTexto({ material: materialDe(ed), largo: ed.largo, ancho: ed.ancho }), si: 'Delete', no: 'Keep it' });
   if(!ok || GUARDANDO) return;

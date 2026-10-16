@@ -117,6 +117,7 @@ ok('una línea por unidad: SF y LF en dos renglones, nunca uno cortado', JSON.st
     dl = fs.readFileSync(new URL('../docs/drylog.js', import.meta.url), 'utf8'), pl = fs.readFileSync(new URL('../docs/planos.js', import.meta.url), 'utf8');
   ok('cada nivel de Measurements es una tarjeta que se abre y se cierra (uno solo: abierto; varios: cerrados; se recuerda)',
      /<details class="med-niv" data-med-niv=/.test(src) && /ABIERTO_NIV\.has\(N\.clave\) \? ABIERTO_NIV\.get\(N\.clave\) : solo/.test(src) && /addEventListener\('toggle'/.test(src));
+  ok('16-oct: solo el manager ve Delete en una medida, y la función también lo exige', /\$\{ED\.id && esManager\(\) \? '<button type="button" class="btn btn-outline btn-rojo" data-med-borrar>Delete<\/button>'/.test(src) && /if\(!ED \|\| !ED\.id \|\| !T \|\| !esManager\(\)\) return;/.test(src));
   ok('solo el manager ve "Delete all N on <nivel>"', /esManager\(\) && cuantas \? `<button type="button" class="btn btn-outline btn-rojo med-borrar-nivel"/.test(src));
   ok('borrar un nivel pregunta antes, borra en el servidor y lo COMPRUEBA volviendo a leer', /preguntar\(\{ titulo: 'Delete all measurements on '/.test(src)
      && /method: 'DELETE', headers: \{ Prefer: 'return=representation' \}/.test(src) && /CARGADO = null; await cargar\(\);\s*const quedan/.test(src));

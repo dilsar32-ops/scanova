@@ -1555,6 +1555,7 @@ body.ed-guardando #fvPanel .ed-accs, body.ed-guardando #fvPanel .ed-tiles, body.
 .pl-menu[hidden]{ display:none; }
 .pl-menu button{ display:flex; align-items:center; gap:10px; font:inherit; font-size:14px; font-weight:600; color:var(--ink); background:none; border:0; border-radius:8px; padding:11px 12px; text-align:left; cursor:pointer; }
 .pl-menu button:hover{ background:var(--bg2); }
+.pl-menu button.pl-menu-rojo{ color:var(--danger); border-top:1px solid var(--line); border-radius:0 0 8px 8px; margin-top:4px; }
 .pl-menu .ic{ width:17px; height:17px; color:var(--ink-soft); }
 @media (max-width:899px){
   .pl-mas-wrap{ display:block; }

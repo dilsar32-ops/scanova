@@ -60,5 +60,8 @@ const fs = await import('node:fs');
 const src = fs.readFileSync(new URL('../docs/planos.js', import.meta.url), 'utf8');
 ok('al escanear, el plano va PRIMERO al teléfono y después al servidor', src.indexOf('const enTelefono = escribirPendientes(pend);') < src.indexOf('guardadas.push(await subirFila(fila))') && src.includes('id: crypto.randomUUID(), trabajo_id: T.id'));
 ok('se vuelve a intentar al reconectarse, al regresar a la app y al abrir Floor Plan', /addEventListener\('online'/.test(src) && /visibilitychange/.test(src) && /pintar\(\);\n  subirPendientes\(\);\n\}/.test(src));
+// 16-oct, su pedido: "solo los managers... borrar planos". Se marca borrado (no se destruye), con sus escaneos anteriores, y se comprueba.
+ok('borrar plano: solo el manager lo ve (botón en la compu y en el menú ••• del teléfono)', /esManager\(\) && p \? `<button type="button" class="btn btn-outline btn-rojo" data-pl-borrar>/.test(src) && /esManager\(\) && p \? `<button type="button" class="pl-menu-rojo" data-pl-borrar>/.test(src));
+ok('borrar plano: pregunta antes, marca borrado_at (no destruye la fila) a todos los escaneos de ese nivel, y lo comprueba volviendo a leer', /if\(!T \|\| OCUPADO \|\| !esManager\(\)\) return;/.test(src) && /preguntar\(\{ titulo: 'Delete the floor plan of '/.test(src) && /method:'PATCH'[^\n]*borrado_at: new Date\(\)\.toISOString\(\)/.test(src) && /CARGADO = ''; await cargar\(\);\n  const quedan = PLANOS\.filter\(p => ids\.includes\(p\.id\)\)\.length;/.test(src) && !/method:'DELETE'/.test(src));
 console.log(`\nplanos pendientes: ${pass} ok, ${fail} fallas`);
 process.exit(fail ? 1 : 0);
