@@ -253,6 +253,11 @@ ok("'No era toda la pared' y Deshacer la quitan completa (nunca una guardada)", 
 ok("los totales de la cámara restan lo de la pared entera", 'max(0, w * largo - menos)' in bloque(v, 'private func cuentaDe') and 'menos: x.menos' in bloque(v, 'private func totalesTexto'))
 ok("tocar MEDIDA vuelve a preguntar (si contestó 'Una parte' por error)", 'if let i = paredEnteraAMano() { abrirParedEntera(i)' in bloque(v, '@objc fileprivate func rielMaterialTocado'))
 ok("las maquetas 39-42 enseñan la pregunta, el material, la guardada y un plano sin alto", 'case 39, 40, 41, 42:' in v)
+pm2 = bloque(v, 'fileprivate func armarPanelMedir')
+ok("la pregunta con SU diseño: '¿Qué extensión se retiró?', tarjetas Pared completa (plano) y Área parcial (puntos)",
+   '"¿Qué extensión se retiró?"' in pm2 and 'TarjetaParedEntera(parcial: false, titulo: "Pared completa"' in pm2
+   and 'TarjetaParedEntera(parcial: true, titulo: "Área parcial", sub: "Marcar puntos y altura"' in pm2
+   and 'completa.accion = { [weak self] in self?.aceptarParedEntera() }' in pm2 and 'parcial.accion = { [weak self] in self?.unaParteDeLaPared() }' in pm2)
 ok("las puertas que solo vio el cuarto de al lado también se restan", 'cuartosDelMarco(m).filter { Self.clave($0.nombre) != Self.clave(roomName) }.flatMap { $0.senas }' in bloque(v, 'fileprivate func datosParedEntera'))
 try:
     web = rd(fr + '/www/index.html')

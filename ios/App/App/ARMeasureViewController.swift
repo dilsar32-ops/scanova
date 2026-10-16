@@ -7876,6 +7876,116 @@ fileprivate final class LosetaCamara: UIControl {
     }
 }
 
+// "¿Qué extensión se retiró?" (16 oct, con SU diseño: dos tarjetas con el dibujo de la pared de studs). Pared completa:
+// toda la pared en azul punteado con su puerta. Área parcial: el marco en gris y un corte abajo en azul con sus dos puntos.
+fileprivate final class DibujoParedEntera: UIView {
+    let parcial: Bool
+    init(parcial: Bool) { self.parcial = parcial; super.init(frame: .zero); backgroundColor = .clear; isOpaque = false; isUserInteractionEnabled = false }
+    required init?(coder: NSCoder) { fatalError("init(coder:) no se usa") }
+    override func draw(_ rect: CGRect) {
+        guard let g = UIGraphicsGetCurrentContext() else { return }
+        let w = rect.width, h = rect.height
+        // La pared en perspectiva: arriba sube hacia la derecha, abajo baja hacia la izquierda.
+        let tl = CGPoint(x: 0.06 * w, y: 0.26 * h), tr = CGPoint(x: 0.76 * w, y: 0.10 * h)
+        let br = CGPoint(x: 0.76 * w, y: 0.74 * h), bl = CGPoint(x: 0.06 * w, y: 0.96 * h)
+        func punto(_ u: CGFloat, _ v: CGFloat) -> CGPoint {
+            let a = CGPoint(x: tl.x + u * (tr.x - tl.x), y: tl.y + u * (tr.y - tl.y))
+            let b = CGPoint(x: bl.x + u * (br.x - bl.x), y: bl.y + u * (br.y - bl.y))
+            return CGPoint(x: a.x + v * (b.x - a.x), y: a.y + v * (b.y - a.y))
+        }
+        let grosor = CGPoint(x: 0.05 * w, y: -0.035 * h)
+        func atras(_ p: CGPoint) -> CGPoint { CGPoint(x: p.x + grosor.x, y: p.y + grosor.y) }
+        let azul = Claro.azul, gris = Claro.apagado
+        let puerta: (u0: CGFloat, u1: CGFloat, v: CGFloat) = (0.36, 0.56, 0.42)
+        // La pared sin el hueco de la puerta.
+        let pared = UIBezierPath()
+        for (k, q) in [tl, tr, br, punto(puerta.u1, 1), punto(puerta.u1, puerta.v), punto(puerta.u0, puerta.v), punto(puerta.u0, 1), bl].enumerated() {
+            if k == 0 { pared.move(to: q) } else { pared.addLine(to: q) }
+        }
+        pared.close()
+        let lineaFrente = parcial ? gris : azul
+        // El grosor (la cara de atrás y las orillas), más clarito.
+        let fondoGrosor = UIBezierPath()
+        fondoGrosor.move(to: tl); fondoGrosor.addLine(to: atras(tl)); fondoGrosor.addLine(to: atras(tr)); fondoGrosor.addLine(to: atras(br)); fondoGrosor.addLine(to: br)
+        lineaFrente.withAlphaComponent(0.45).setStroke(); fondoGrosor.lineWidth = 1; fondoGrosor.stroke()
+        if !parcial { azul.withAlphaComponent(0.12).setFill(); pared.fill() }
+        // Los studs (solo dentro de la pared, nunca en el hueco de la puerta).
+        g.saveGState(); pared.addClip()
+        let pasos = 7
+        for k in 0...pasos {
+            let u = CGFloat(k) / CGFloat(pasos)
+            for du in [-0.012, 0.012] as [CGFloat] {
+                let l = UIBezierPath(); l.move(to: punto(min(max(u + du, 0), 1), 0)); l.addLine(to: punto(min(max(u + du, 0), 1), 1))
+                l.lineWidth = 1; lineaFrente.withAlphaComponent(parcial ? 0.9 : 0.55).setStroke(); l.stroke()
+            }
+        }
+        g.restoreGState()
+        // El cabezal de la puerta.
+        let cab = UIBezierPath(); cab.move(to: punto(puerta.u0, puerta.v - 0.05)); cab.addLine(to: punto(puerta.u1, puerta.v - 0.05))
+        cab.lineWidth = 1; lineaFrente.withAlphaComponent(0.6).setStroke(); cab.stroke()
+        // La orilla: azul punteada (pared completa) o gris fina (el marco, en el área parcial).
+        pared.lineWidth = parcial ? 1 : 1.8
+        if !parcial { pared.setLineDash([5, 3], count: 2, phase: 0) }
+        lineaFrente.setStroke(); pared.stroke()
+        guard parcial else { return }
+        // El corte: abajo, del inicio hasta pasar la puerta, con sus dos puntos marcados.
+        let (u0, u1, v0, v1): (CGFloat, CGFloat, CGFloat, CGFloat) = (0.03, 0.66, 0.62, 0.94)
+        let corte = UIBezierPath()
+        corte.move(to: punto(u0, v0)); corte.addLine(to: punto(u1, v0)); corte.addLine(to: punto(u1, v1)); corte.addLine(to: punto(u0, v1)); corte.close()
+        azul.withAlphaComponent(0.18).setFill(); corte.fill()
+        corte.lineWidth = 1.8; corte.setLineDash([5, 3], count: 2, phase: 0); azul.setStroke(); corte.stroke()
+        for q in [punto(u0, (v0 + v1) / 2), punto(u1, v0 + 0.06)] {
+            let o = UIBezierPath(ovalIn: CGRect(x: q.x - 4.5, y: q.y - 4.5, width: 9, height: 9))
+            azul.setFill(); o.fill(); UIColor.white.setStroke(); o.lineWidth = 1.5; o.stroke()
+        }
+    }
+}
+fileprivate final class TarjetaParedEntera: UIControl {
+    var accion: (() -> Void)?
+    init(parcial: Bool, titulo: String, sub: String, chip: (icono: String, texto: String), sugerida: Bool) {
+        super.init(frame: .zero)
+        backgroundColor = Claro.loseta
+        layer.cornerRadius = 14; layer.cornerCurve = .continuous
+        layer.borderWidth = sugerida ? 1.5 : 1; layer.borderColor = (sugerida ? Claro.azul : Claro.linea).cgColor
+        let dibujo = DibujoParedEntera(parcial: parcial)
+        dibujo.heightAnchor.constraint(equalToConstant: 92).isActive = true
+        let t = UILabel(); t.text = titulo; t.font = .systemFont(ofSize: 16, weight: .bold); t.textColor = Claro.tinta
+        t.adjustsFontSizeToFitWidth = true; t.minimumScaleFactor = 0.8
+        let s = UILabel(); s.text = sub; s.font = .systemFont(ofSize: 12.5); s.textColor = Claro.gris; s.numberOfLines = 3
+        let icono = UIImageView(image: UIImage(systemName: chip.icono, withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .semibold)))
+        icono.tintColor = Claro.azul; icono.contentMode = .scaleAspectFit
+        icono.setContentHuggingPriority(.required, for: .horizontal)
+        let c = UILabel(); c.text = chip.texto; c.font = .systemFont(ofSize: 12, weight: .semibold); c.textColor = Claro.azul
+        c.adjustsFontSizeToFitWidth = true; c.minimumScaleFactor = 0.75
+        let chipFila = UIStackView(arrangedSubviews: [icono, c]); chipFila.spacing = 5; chipFila.alignment = .center
+        chipFila.isLayoutMarginsRelativeArrangement = true; chipFila.layoutMargins = UIEdgeInsets(top: 6, left: 8, bottom: 6, right: 8)
+        chipFila.backgroundColor = Claro.azulSuave; chipFila.layer.cornerRadius = 8; chipFila.layer.cornerCurve = .continuous
+        let chipCaja = UIStackView(arrangedSubviews: [chipFila, UIView()]); chipCaja.axis = .horizontal
+        let pila = UIStackView(arrangedSubviews: [dibujo, t, s, chipCaja])
+        pila.axis = .vertical; pila.spacing = 4; pila.setCustomSpacing(8, after: dibujo); pila.setCustomSpacing(8, after: s)
+        pila.isUserInteractionEnabled = false; pila.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(pila)
+        // El circulito de escoger, arriba a la derecha (como en su diseño).
+        let circulo = UIView(); circulo.translatesAutoresizingMaskIntoConstraints = false; circulo.isUserInteractionEnabled = false
+        circulo.layer.cornerRadius = 10; circulo.layer.borderWidth = 1.5
+        circulo.layer.borderColor = (sugerida ? Claro.azul : Claro.apagado).cgColor
+        addSubview(circulo)
+        NSLayoutConstraint.activate([
+            pila.topAnchor.constraint(equalTo: topAnchor, constant: 12),
+            pila.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            pila.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            pila.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -12),
+            circulo.topAnchor.constraint(equalTo: topAnchor, constant: 10), circulo.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            circulo.widthAnchor.constraint(equalToConstant: 20), circulo.heightAnchor.constraint(equalToConstant: 20)
+        ])
+        addTarget(self, action: #selector(tocada), for: .touchUpInside)
+        isAccessibilityElement = true; accessibilityLabel = titulo + ", " + sub; accessibilityTraits = .button
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) no se usa") }
+    @objc private func tocada() { accion?() }
+    override var isHighlighted: Bool { didSet { alpha = isHighlighted ? 0.55 : 1 } }
+}
+
 // La mira: un anillo de 40 pt que dice qué está viendo.
 fileprivate final class MiraCamara: UIView {
     enum Estado: Equatable { case buscando, lista, equivocada, sinSuperficie, lejos }
@@ -11139,19 +11249,26 @@ extension ARMeasureViewController {
                                 s.nueva.cierreCallado = true
                                 s.cerrarPregunta() }], columnas: 2))
         case .paredEntera:
+            // SU DISEÑO (16 oct): "¿Qué extensión se retiró?" con dos tarjetas de dibujo; los números del plano, abajo.
             guard let i = n.paredActual, let d = datosParedEntera(i) else { poner(corregir); break }
             let menos = d.alto.map { ReglasDeMedir.restaDeLaPared(largo: d.largo, alto: $0, aberturas: d.aberturas) } ?? 0
-            let cuanto = d.alto.map { numero([(pies(d.largo), true), (" × ", false), (pies($0), true), (" pies · del plano", false)]) }
-                ?? numero([(pies(d.largo), true), (" pies de largo · el plano no trae el alto", false)])
-            let nombres = ReglasDeMedir.nombreDeAberturas(d.aberturas, ingles: false)
-            var ayuda = d.alto == nil ? "Con «Toda la pared» el largo sale del plano y usted marca solo el alto con +."
-                                      : "Con «Toda la pared» las medidas salen del plano."
-            if !d.aberturas.isEmpty { ayuda += d.alto == nil ? " Se restan \(nombres)." : " Se restan \(nombres) (\(pies(menos)) pies²)." }
-            if d.sinMedida > 0 { ayuda += d.sinMedida == 1 ? " 1 abertura sin medida en el plano: no se resta." : " \(d.sinMedida) aberturas sin medida en el plano: no se restan." }
-            cabeza(dondeMedir(conMedida: false), cuanto, "¿Es toda la pared o una parte?", ayuda)
             let neto = d.alto.map { max(0, d.largo * $0 - menos) }
-            poner(rejilla([loseta("Toda la pared", neto.map { "\(pies($0)) pies²" + (menos > 0 ? " · ya restado" : "") } ?? "marcar solo el alto") { s in s.aceptarParedEntera() },
-                           loseta("Una parte", "medirla con +") { s in s.unaParteDeLaPared() }], columnas: 2), 4)
+            let nombres = ReglasDeMedir.nombreDeAberturas(d.aberturas, ingles: false)
+            let medidas = d.alto.map { "\(pies(d.largo)) × \(pies($0)) pies" } ?? "\(pies(d.largo)) pies de largo"
+            poner(etiqueta(dondeMedir(conMedida: false) + " · " + medidas, 13, .medium, Claro.gris, lineas: 1), 4)
+            poner(etiqueta("¿Qué extensión se retiró?", 20, .bold, Claro.tinta), 3)
+            poner(etiqueta("Seleccione cómo calcular la superficie de esta pared.", 14, .regular, Claro.gris), 12)
+            let subCompleta = neto.map { "Medidas del plano original · \(pies($0)) pies²" } ?? "El largo del plano; usted marca solo el alto"
+            let completa = TarjetaParedEntera(parcial: false, titulo: "Pared completa", sub: subCompleta, chip: ("doc.text", "Plano pre-demolición"), sugerida: d.alto != nil)
+            completa.accion = { [weak self] in self?.aceptarParedEntera() }
+            let parcial = TarjetaParedEntera(parcial: true, titulo: "Área parcial", sub: "Marcar puntos y altura", chip: ("mappin", "Puntos marcados"), sugerida: false)
+            parcial.accion = { [weak self] in self?.unaParteDeLaPared() }
+            let dos = UIStackView(arrangedSubviews: [completa, parcial]); dos.axis = .horizontal; dos.spacing = 8; dos.distribution = .fillEqually; dos.alignment = .fill
+            poner(dos, 8)
+            var nota: [String] = []
+            if !d.aberturas.isEmpty { nota.append("Pared completa ya resta \(nombres)" + (d.alto == nil ? "." : " (\(pies(menos)) pies²).")) }
+            if d.sinMedida > 0 { nota.append(d.sinMedida == 1 ? "1 abertura sin medida en el plano: no se resta." : "\(d.sinMedida) aberturas sin medida en el plano: no se restan.") }
+            if !nota.isEmpty { poner(etiqueta(nota.joined(separator: " "), 12.5, .regular, Claro.gris, lineas: 3)) }
         case .cuarto:
             armarHojaDelCuarto()
         }
