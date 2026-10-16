@@ -246,7 +246,7 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
         arVC.modalPresentationStyle = .fullScreen
         arVC.experiencia = "nueva"
         arVC.maqueta = paso
-        arVC.laboratorio = (11...13).contains(paso) || (18...22).contains(paso)
+        arVC.laboratorio = (11...13).contains(paso) || (18...23).contains(paso)
         arVC.modo = "recorrido"
         arVC.alcance = "nivel"
         arVC.nivelActual = "2nd Floor"

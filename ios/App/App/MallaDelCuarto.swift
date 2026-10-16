@@ -342,6 +342,63 @@ enum MallaDelCuarto {
         return mejor.map { ($0.0, $0.1) }
     }
 
+    // ---------------- EL TECHO (16 oct: "hace falta la malla para el techo") ----------------
+    // El contorno del cuarto (metros, piso del AR): las paredes ya acomodadas, encadenadas por sus puntas (a 35 cm o
+    // menos) hasta volver a la primera. nil = no cierra (falta una pared): el techo va con la caja de las paredes.
+    static func contorno(_ paredes: [ParedAR]) -> [SIMD2<Double>]? {
+        let segs = paredes.map { ($0.a, $0.b) }.filter { simd_distance($0.0, $0.1) > 0.1 }
+        guard segs.count >= 3 else { return nil }
+        var usados: Set<Int> = [0]
+        var pts = [segs[0].0, segs[0].1]
+        while usados.count < segs.count {
+            if pts.count >= 4, simd_distance(pts.last!, pts.first!) <= 0.35 { break }
+            let fin = pts.last!
+            var mejor: (i: Int, alReves: Bool, d: Double)? = nil
+            for (i, sg) in segs.enumerated() where !usados.contains(i) {
+                let da = simd_distance(sg.0, fin), db = simd_distance(sg.1, fin)
+                if da <= 0.35, mejor == nil || da < mejor!.d { mejor = (i, false, da) }
+                if db <= 0.35, mejor == nil || db < mejor!.d { mejor = (i, true, db) }
+            }
+            guard let m = mejor else { break }
+            usados.insert(m.i)
+            pts.append(m.alReves ? segs[m.i].0 : segs[m.i].1)
+        }
+        guard pts.count >= 4, simd_distance(pts.first!, pts.last!) <= 0.35 else { return nil }
+        pts.removeLast()
+        var area = 0.0
+        for i in 0..<pts.count { let a = pts[i], b = pts[(i + 1) % pts.count]; area += a.x * b.y - b.x * a.y }
+        return abs(area) / 2 >= 0.5 ? pts : nil
+    }
+    // La dirección de la pared más larga (la malla del techo va a escuadra con ella).
+    static func ejeLargo(_ paredes: [ParedAR]) -> SIMD2<Double> {
+        guard let w = paredes.max(by: { simd_distance($0.a, $0.b) < simd_distance($1.a, $1.b) }), simd_distance(w.a, w.b) > 0.01 else { return SIMD2(1, 0) }
+        return simd_normalize(w.b - w.a)
+    }
+    // ¿El punto está dentro del contorno? (rayo a la derecha, par-impar)
+    static func dentro(_ p: SIMD2<Double>, _ poli: [SIMD2<Double>]) -> Bool {
+        var adentro = false, j = poli.count - 1
+        for i in 0..<poli.count {
+            let a = poli[i], b = poli[j]
+            if (a.y > p.y) != (b.y > p.y), p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x { adentro.toggle() }
+            j = i
+        }
+        return adentro
+    }
+    // Los huecos del techo que ya se sabían y los de ahora (pedazos de 4 puntas, pies del plano): si ahora se vio casi
+    // todo el techo (60% o más), manda lo de ahora; si no, se juntan (lo de antes que choca con algo de ahora se quita).
+    static func mezclarTecho(viejos: [[SIMD2<Double>]], nuevos: [[SIMD2<Double>]], visto: Double) -> [[SIMD2<Double>]] {
+        if visto >= 0.6 { return nuevos }
+        func caja(_ q: [SIMD2<Double>]) -> (SIMD2<Double>, SIMD2<Double>) {
+            (SIMD2(q.map { $0.x }.min() ?? 0, q.map { $0.y }.min() ?? 0), SIMD2(q.map { $0.x }.max() ?? 0, q.map { $0.y }.max() ?? 0))
+        }
+        let cajas = nuevos.map(caja)
+        let quedan = viejos.filter { v in
+            let c = caja(v)
+            return !cajas.contains { n in c.0.x < n.1.x && n.0.x < c.1.x && c.0.y < n.1.y && n.0.y < c.1.y }
+        }
+        return quedan + nuevos
+    }
+
     // ---------------- LA MEMORIA DE CADA PARED (16 oct: "si ya había una pared demolida… la tele") ----------------
     // Lo quitado de una pared, en pies desde su punta `a`: lo que ya se sabía se queda, MENOS donde el láser acaba de ver
     // (ahí manda lo de ahora). Así, si ayer la tele tapaba un pedazo y hoy se movió, lo de detrás se agrega y lo demás no

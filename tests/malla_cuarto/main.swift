@@ -162,6 +162,26 @@ do {
     let ok3 = u.count == 2 && u[0] == (0, 3) && u[1] == (5, 8)
     print("\(ok3 ? "OK  " : "FALLA") memoria · unir lo visto: \(u)"); if !ok3 { fallas += 1 }
 }
+// EL TECHO: el contorno del cuarto sale de las paredes ya acomodadas (en cualquier orden y sentido), en rect y en L.
+do {
+    func enAR(_ ps: [Pared]) -> [MallaDelCuarto.ParedAR] { ps.map { MallaDelCuarto.ParedAR(a: MallaDelCuarto.ar($0.a, verdad), b: MallaDelCuarto.ar($0.b, verdad)) } }
+    func area(_ p: [SIMD2<Double>]) -> Double { var a = 0.0; for i in 0..<p.count { let x = p[i], y = p[(i + 1) % p.count]; a += x.x * y.y - y.x * x.y }; return abs(a) / 2 * 10.7639 }
+    var revuelto = enAR(r); revuelto.swapAt(0, 2); let t = revuelto[1].a; revuelto[1].a = revuelto[1].b; revuelto[1].b = t
+    let c1 = MallaDelCuarto.contorno(revuelto), c2 = MallaDelCuarto.contorno(enAR(l))
+    let ok1 = c1 != nil && abs(area(c1!) - 168) < 1, ok2 = c2 != nil && abs(area(c2!) - (16 * 8 + 9 * 7)) < 1
+    print(String(format: "%@ techo · contorno del cuarto revuelto: %.1f SF (14x12 = 168) · en L: %.1f SF (191)", ok1 && ok2 ? "OK  " : "FALLA", c1.map(area) ?? -1, c2.map(area) ?? -1)); if !(ok1 && ok2) { fallas += 1 }
+    var falta = enAR(r); falta.remove(at: 1)
+    let ok3 = MallaDelCuarto.contorno(falta) == nil
+    print("\(ok3 ? "OK  " : "FALLA") techo · si falta una pared no inventa el contorno (usa la caja)"); if !ok3 { fallas += 1 }
+    let ok4 = MallaDelCuarto.dentro(SIMD2(0.5, 0.5), [SIMD2(0, 0), SIMD2(1, 0), SIMD2(1, 1), SIMD2(0, 1)]) && !MallaDelCuarto.dentro(SIMD2(1.5, 0.5), [SIMD2(0, 0), SIMD2(1, 0), SIMD2(1, 1), SIMD2(0, 1)])
+    print("\(ok4 ? "OK  " : "FALLA") techo · dentro/fuera del contorno"); if !ok4 { fallas += 1 }
+    func q(_ x0: Double, _ x1: Double, _ y0: Double, _ y1: Double) -> [SIMD2<Double>] { [SIMD2(x0, y0), SIMD2(x1, y0), SIMD2(x1, y1), SIMD2(x0, y1)] }
+    let viejos = [q(0, 4, 0, 4), q(8, 10, 8, 10)]
+    let poco = MallaDelCuarto.mezclarTecho(viejos: viejos, nuevos: [q(3, 6, 3, 6)], visto: 0.3)
+    let mucho = MallaDelCuarto.mezclarTecho(viejos: viejos, nuevos: [q(3, 6, 3, 6)], visto: 0.8)
+    let ok5 = poco.count == 2 && mucho.count == 1
+    print("\(ok5 ? "OK  " : "FALLA") techo · memoria: viendo poco se junta con lo de antes (\(poco.count) pedazos), viendo casi todo manda lo de ahora (\(mucho.count))"); if !ok5 { fallas += 1 }
+}
 extension SystemRandomNumberGenerator { static var shared = SystemRandomNumberGenerator() }
 print(fallas == 0 ? "TODO BIEN" : "FALLAS: \(fallas)")
 exit(fallas == 0 ? 0 : 1)

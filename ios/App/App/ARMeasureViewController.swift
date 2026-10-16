@@ -9565,7 +9565,7 @@ extension ARMeasureViewController {
             roomName = "Living Room"; nueva.cuartoVisto = roomName
             let paso = maqueta
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.maquetaLaboratorio(paso) }
-        case 18, 19, 20, 21, 22:
+        case 18, 19, 20, 21, 22, 23:
             // El laboratorio CON el plano (16 oct); 20 = el techo de la cocina con un hueco de 6 x 4 ft (15 oct): la cocina de 14 x 12 ft al lado de la sala; su pared sur (la de la
             // grabación de la maqueta 11) es de afuera. Ya ubicado. 18 = midiendo; 19 = apuntando, antes de fijar.
             func w(_ a: Double, _ b: Double, _ c: Double, _ d: Double, _ e: Bool) -> UbicadorEnPlano.ParedPlano {
@@ -10022,6 +10022,11 @@ fileprivate final class LabDemolicion {
     var paredMidiendo: String?
     var vistosAhora: [String: [(Double, Double)]] = [:]
     var ultimoGuardado: CFTimeInterval = 0
+    // LA MALLA DEL TECHO (16 oct: "hace falta la malla para el techo"): una por cuarto, con sus huecos en naranja.
+    var mallaTecho: SCNNode?
+    var mallaTechoFirma = ""
+    var memoriaTecho: [String: (tiras: [[SIMD2<Double>]], fecha: Date)] = [:]   // por cuarto, pies del plano
+    var techoAhora: (cuarto: String, tiras: [[SIMD2<Double>]], visto: Double)?
 }
 
 // Los toques del laboratorio (pellizco = zoom, un toque = marcar una esquina, dos toques = sin zoom): solo los que caen en
@@ -10752,6 +10757,7 @@ extension ARMeasureViewController {
                 }
             }
         }
+        if L.techoAhora != nil, CACurrentMediaTime() - L.ultimoGuardado >= 10 { L.ultimoGuardado = CACurrentMediaTime(); anotarTechoEnLaMemoria(seguir: true) }
         // La malla: solo las paredes del cuarto donde está.
         guard let cuarto = cuartoDado ?? L.cuartoMalla, let c = cuartos.first(where: { $0.nombre == cuarto }) else {
             if !L.malla.isEmpty { quitarMallaDeLaCasa() }
@@ -10812,6 +10818,138 @@ extension ARMeasureViewController {
         }
         // Las de otros cuartos se quitan (su memoria se queda: al regresar se vuelven a poner).
         for (k, n) in L.malla where !usadas.contains(k) { n.removeFromParentNode(); L.malla[k] = nil; L.mallaFirma[k] = nil }
+        let altos = lista.compactMap { L.mallaParedes[$0.clave]?.alto }.sorted()
+        pintarMallaDelTecho(cuarto: cuarto, enAR: enAR, altoPies: altos.isEmpty ? 8 : altos[altos.count / 2], ac: ac, piso: piso)
+    }
+
+    // ---------------- LA MALLA DEL TECHO ----------------
+    // El techo del cuarto donde está: el contorno de sus paredes (ya pegadas al láser) a la altura del techo, con
+    // cuadritos de 6 in (3 in con zoom) a escuadra con la pared más larga, y los huecos en naranja: los que se están
+    // midiendo ahora y los que ya se sabían (la memoria de la casa). La altura: la del plano, afinada con el techo que ve
+    // ARKit (o el que se está midiendo).
+    private func pintarMallaDelTecho(cuarto: String, enAR: [MallaDelCuarto.ParedAR], altoPies: Double, ac: DemolicionEnPlano.Acomodo2D, piso: Float) {
+        let L = lab
+        guard enAR.count >= 3 else { L.mallaTecho?.removeFromParentNode(); L.mallaTecho = nil; return }
+        let e = MallaDelCuarto.ejeLargo(enAR), pe = MallaDelCuarto.perp(e)
+        let poli: [SIMD2<Double>] = MallaDelCuarto.contorno(enAR) ?? {
+            let pts = enAR.flatMap { [$0.a, $0.b] }, c = pts.reduce(.zero, +) / Double(pts.count)
+            let xs = pts.map { simd_dot($0 - c, e) }, ys = pts.map { simd_dot($0 - c, pe) }
+            return [(xs.min()!, ys.min()!), (xs.max()!, ys.min()!), (xs.max()!, ys.max()!), (xs.min()!, ys.max()!)].map { c + e * $0.0 + pe * $0.1 }
+        }()
+        // La altura.
+        var techoY = piso + Float(altoPies * 0.3048)
+        if let tt = L.techo, (tt.cuarto ?? "").lowercased() == cuarto.lowercased() {
+            techoY = tt.cara.origen.y
+        } else if maqueta == 0, let f = sceneView.session.currentFrame {
+            let arriba = f.anchors.compactMap { $0 as? ARPlaneAnchor }.filter { a in
+                guard a.alignment == .horizontal else { return false }
+                let c = a.transform * SIMD4<Float>(a.center, 1)
+                return abs(c.y - techoY) < 0.35 && MallaDelCuarto.dentro(SIMD2(Double(c.x), Double(c.z)), poli)
+            }
+            if let mejor = arriba.max(by: { $0.planeExtent.width * $0.planeExtent.height < $1.planeExtent.width * $1.planeExtent.height }) {
+                techoY = (mejor.transform * SIMD4<Float>(mejor.center, 1)).y
+            }
+        }
+        // Los huecos (pedazos de 4 puntas, metros del piso del AR): los de la memoria y los de ahora.
+        var tiras: [[SIMD2<Double>]] = (L.memoriaTecho[cuarto]?.tiras ?? []).map { $0.map { MallaDelCuarto.ar($0, ac) } }
+        if let ahora = L.techoAhora, ahora.cuarto == cuarto {
+            let nuevas = ahora.tiras.map { $0.map { MallaDelCuarto.ar($0, ac) } }
+            tiras = MallaDelCuarto.mezclarTecho(viejos: tiras, nuevos: nuevas, visto: ahora.visto)
+        }
+        // El marco del dibujo: x a lo largo de la pared más larga, y de lado.
+        let c0 = poli.reduce(.zero, +) / Double(poli.count)
+        let lx = poli.map { simd_dot($0 - c0, e) }, ly = poli.map { simd_dot($0 - c0, pe) }
+        let x0 = lx.min()!, x1 = lx.max()!, y0 = ly.min()!, y1 = ly.max()!
+        let ancho = x1 - x0, fondo = y1 - y0
+        guard ancho > 0.3, fondo > 0.3 else { return }
+        func local(_ q: SIMD2<Double>) -> SIMD2<Double> { SIMD2(simd_dot(q - c0, e) - x0, y1 - simd_dot(q - c0, pe)) }   // metros desde la esquina de arriba a la izquierda del dibujo
+        let poliL = poli.map(local), tirasL = tiras.map { $0.map(local) }
+        let firma = String(format: "%.2f|%.2f|%d|", ancho, fondo, L.mallaFina ? 1 : 0) + poliL.map { String(format: "%.2f,%.2f", $0.x, $0.y) }.joined(separator: ";")
+            + "|" + tirasL.map { $0.map { String(format: "%.2f,%.2f", $0.x, $0.y) }.joined(separator: ";") }.joined(separator: "/")
+        let nodo: SCNNode
+        if let n0 = L.mallaTecho { nodo = n0 } else {
+            let plano = SCNPlane(width: CGFloat(ancho), height: CGFloat(fondo))
+            let mat = SCNMaterial()
+            mat.lightingModel = .constant; mat.isDoubleSided = true; mat.writesToDepthBuffer = false
+            plano.materials = [mat]
+            nodo = SCNNode(geometry: plano)
+            nodo.renderingOrder = 89
+            sceneView.scene.rootNode.addChildNode(nodo)
+            L.mallaTecho = nodo
+        }
+        if let pl = nodo.geometry as? SCNPlane, abs(Double(pl.width) - ancho) > 0.01 || abs(Double(pl.height) - fondo) > 0.01 {
+            pl.width = CGFloat(ancho); pl.height = CGFloat(fondo)
+        }
+        if firma != L.mallaTechoFirma {
+            L.mallaTechoFirma = firma
+            nodo.geometry?.firstMaterial?.diffuse.contents = Self.texturaDelTecho(ancho: ancho, fondo: fondo, contorno: poliL, huecos: tirasL, fina: L.mallaFina)
+        }
+        // Mirando para arriba se ve la cara de enfrente: z del dibujo hacia abajo; x a lo largo; y de lado (hacia pe).
+        let centro = c0 + e * ((x0 + x1) / 2) + pe * ((y0 + y1) / 2)
+        var mt = matrix_identity_float4x4
+        mt.columns.0 = SIMD4(Float(e.x), 0, Float(e.y), 0)
+        mt.columns.1 = SIMD4(Float(pe.x), 0, Float(pe.y), 0)
+        mt.columns.2 = SIMD4(0, -1, 0, 0)
+        mt.columns.3 = SIMD4(Float(centro.x), techoY - 0.01, Float(centro.y), 1)
+        nodo.simdTransform = mt
+    }
+    // El dibujo del techo: dentro del contorno, cuadritos clarito (líneas cada 6 in, más marcadas cada 2 ft; con zoom,
+    // cada 3 in y marcadas cada pie), los huecos en naranja y la orilla blanca. Fuera del contorno, nada.
+    static func texturaDelTecho(ancho: Double, fondo: Double, contorno: [SIMD2<Double>], huecos: [[SIMD2<Double>]], fina: Bool) -> UIImage {
+        var ppm = Double(mallaPxPorPie) * MallaDelCuarto.k * (fina ? 2 : 1)
+        ppm = min(ppm, 2048 / max(ancho, fondo))
+        let tam = CGSize(width: max(8, ancho * ppm), height: max(8, fondo * ppm))
+        func pt(_ q: SIMD2<Double>) -> CGPoint { CGPoint(x: q.x * ppm, y: q.y * ppm) }
+        let camino = CGMutablePath()
+        if let f = contorno.first { camino.move(to: pt(f)); for q in contorno.dropFirst() { camino.addLine(to: pt(q)) }; camino.closeSubpath() }
+        return UIGraphicsImageRenderer(size: tam).image { c in
+            let g = c.cgContext
+            g.saveGState()
+            g.addPath(camino); g.clip()
+            g.setFillColor(UIColor(white: 1, alpha: 0.08).cgColor); g.fill(CGRect(origin: .zero, size: tam))
+            for h in huecos where h.count >= 3 {
+                g.beginPath(); g.move(to: pt(h[0])); for q in h.dropFirst() { g.addLine(to: pt(q)) }; g.closePath()
+                g.setFillColor(UIColor(red: 1, green: 0.47, blue: 0, alpha: 0.55).cgColor); g.fillPath()
+            }
+            let paso = CGFloat(ppm * 0.3048 / (fina ? 4 : 2))
+            var x: CGFloat = 0, i = 0
+            while x <= tam.width + 0.5 {
+                g.setStrokeColor(UIColor(white: 1, alpha: i % 4 == 0 ? 0.45 : 0.22).cgColor); g.setLineWidth(i % 4 == 0 ? 1.5 : 1)
+                g.move(to: CGPoint(x: x, y: 0)); g.addLine(to: CGPoint(x: x, y: tam.height)); g.strokePath()
+                x += paso; i += 1
+            }
+            var y: CGFloat = 0; i = 0
+            while y <= tam.height + 0.5 {
+                g.setStrokeColor(UIColor(white: 1, alpha: i % 4 == 0 ? 0.45 : 0.22).cgColor); g.setLineWidth(i % 4 == 0 ? 1.5 : 1)
+                g.move(to: CGPoint(x: 0, y: y)); g.addLine(to: CGPoint(x: tam.width, y: y)); g.strokePath()
+                y += paso; i += 1
+            }
+            g.restoreGState()
+            g.addPath(camino); g.setStrokeColor(UIColor(white: 1, alpha: 0.85).cgColor); g.setLineWidth(3); g.strokePath()
+        }
+    }
+    // Los huecos del techo que se está midiendo, en pedazos de 4 puntas (pies del plano): cada renglón de cuadritos del
+    // hueco es un pedazo (así un hueco en L sale en L, no como su caja).
+    private func tirasDelTecho(_ tt: TechoDelLab, _ r: ComparadorDeTecho.Resultado, ac: DemolicionEnPlano.Acomodo2D) -> [[SIMD2<Double>]] {
+        typealias T = ComparadorDeTecho
+        func plano(_ u: Float, _ v: Float) -> SIMD2<Double> { let w = tt.cara.alMundo(SIMD2(u, v)); return DemolicionEnPlano.alPlano(SIMD2(w.x, w.z), ac) }
+        func pedazo(_ u0: Float, _ u1: Float, _ v0: Float, _ v1: Float) -> [SIMD2<Double>] { [plano(u0, v0), plano(u1, v0), plano(u1, v1), plano(u0, v1)] }
+        var out: [[SIMD2<Double>]] = []
+        for h in r.huecos {
+            guard !h.celdas.isEmpty else { out.append(pedazo(h.u0, h.u1, h.v0, h.v1)); continue }
+            var filas: [Int: [Int]] = [:]
+            for k in h.celdas { filas[Int(k) / T.lado, default: []].append(Int(k) % T.lado) }
+            for (fila, cols) in filas {
+                let cs = cols.sorted()
+                var ini = cs[0], ant = cs[0]
+                for col in cs.dropFirst() + [Int.max] {
+                    if col == ant + 1 { ant = col; continue }
+                    out.append(pedazo(T.centro(ini) - T.celda / 2, T.centro(ant) + T.celda / 2, T.centro(fila) - T.celda / 2, T.centro(fila) + T.celda / 2))
+                    ini = col; ant = col
+                }
+            }
+        }
+        return out
     }
     // La misma pared vista desde dos cuartos es UNA malla: se busca una que ya esté a 0.5 ft o menos (en cualquier orden).
     private func claveDeMalla(_ a: SIMD2<Double>, _ b: SIMD2<Double>) -> String {
@@ -10824,6 +10962,7 @@ extension ARMeasureViewController {
         let L = lab
         for n in L.malla.values { n.removeFromParentNode() }
         L.malla.removeAll(); L.mallaFirma.removeAll()
+        L.mallaTecho?.removeFromParentNode(); L.mallaTecho = nil; L.mallaTechoFirma = ""
     }
     // Al salir del laboratorio: lo medido a la memoria; las esquinas tocadas y el zoom se quitan (son de esta sesión).
     private func cerrarMallaPorCuarto() {
@@ -10836,6 +10975,7 @@ extension ARMeasureViewController {
         L.cuartoMalla = nil; L.cuartoNuevo = nil; L.mallaAR.removeAll(); L.mallaClaves.removeAll(); L.acCuarto.removeAll()
         L.ajusteInfo = (0, 0, 0)
         L.mallaPastilla.isHidden = true
+        L.techoAhora = nil
     }
     // El dibujo de una pared: una malla clarita (líneas cada 6 in, más marcadas cada 2 ft; con zoom, cada 3 in y marcadas
     // cada pie), lo quitado en naranja del piso para arriba, y las alturas de corte de siempre (1 ft, 2 ft y 4 ft: lo que
@@ -11048,10 +11188,17 @@ extension ARMeasureViewController {
             L.memoria[k.key] = (cortes, vistos, fecha)
             L.cortesPorPared[k.key] = cortes
         }
+        for t in casa["techos"] as? [[String: Any]] ?? [] {
+            guard let cu = t["cuarto"] as? String, let ts = t["tiras"] as? [[Double]] else { continue }
+            let tiras = ts.filter { $0.count == 8 }.map { v in stride(from: 0, to: 8, by: 2).map { SIMD2(v[$0], v[$0 + 1]) } }
+            let fecha = (t["fecha"] as? String).flatMap { iso.date(from: $0) } ?? Date()
+            if !tiras.isEmpty { L.memoriaTecho[cu] = (tiras, fecha) }
+        }
     }
     // Lo de la pared que se está midiendo pasa a la memoria (y se guarda). `seguir`: se sigue midiendo la misma.
     private func anotarParedEnLaMemoria(seguir: Bool = false) {
         let L = lab
+        anotarTechoEnLaMemoria(seguir: seguir)
         guard let k = L.paredMidiendo else { return }
         if !seguir { L.paredMidiendo = nil }
         let vistos = L.vistosAhora[k] ?? []
@@ -11061,9 +11208,18 @@ extension ARMeasureViewController {
         if !seguir { L.vistosAhora[k] = nil }
         guardarMemoriaDeLaCasa()
     }
+    private func anotarTechoEnLaMemoria(seguir: Bool) {
+        let L = lab
+        guard let t = L.techoAhora else { return }
+        if !seguir { L.techoAhora = nil }
+        let nuevas = MallaDelCuarto.mezclarTecho(viejos: L.memoriaTecho[t.cuarto]?.tiras ?? [], nuevos: t.tiras, visto: t.visto)
+        L.memoriaTecho[t.cuarto] = (nuevas, Date())
+        if seguir { L.techoAhora = (t.cuarto, [], 0) }      // ya quedó en la memoria: lo que siga llegando se junta con ella
+        guardarMemoriaDeLaCasa()
+    }
     private func guardarMemoriaDeLaCasa() {
         let L = lab
-        guard maqueta == 0, let u = urlMemoria, !L.mallaParedes.isEmpty, !L.memoria.isEmpty else { return }
+        guard maqueta == 0, let u = urlMemoria, !L.mallaParedes.isEmpty, !L.memoria.isEmpty || !L.memoriaTecho.isEmpty else { return }
         var casas = ((try? Data(contentsOf: u)).flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [[String: Any]]) ?? []
         let id = L.memoriaId ?? UUID().uuidString
         L.memoriaId = id
@@ -11079,8 +11235,11 @@ extension ARMeasureViewController {
             }
             paredes.append(p)
         }
+        let techos: [[String: Any]] = L.memoriaTecho.map { k, v in
+            ["cuarto": k, "fecha": iso.string(from: v.fecha), "tiras": v.tiras.map { t in t.flatMap { [r2($0.x), r2($0.y)] } }]
+        }
         casas.removeAll { ($0["id"] as? String) == id }
-        casas.append(["id": id, "nivel": nivelActual, "fecha": iso.string(from: Date()), "paredes": paredes])
+        casas.append(["id": id, "nivel": nivelActual, "fecha": iso.string(from: Date()), "paredes": paredes, "techos": techos])
         if casas.count > 30 { casas = Array(casas.sorted { ($0["fecha"] as? String ?? "") < ($1["fecha"] as? String ?? "") }.suffix(30)) }
         if let d = try? JSONSerialization.data(withJSONObject: casas) { try? d.write(to: u, options: .atomic) }
     }
@@ -11298,6 +11457,9 @@ extension ARMeasureViewController {
                     L.procesando = false
                     guard L.activo, gen == L.generacion else { return }
                     L.resultadoTecho = rt; L.lejos = lejosT; L.pisoVisto = true
+                    if let tt = L.techo, let cu = tt.cuarto, let acT = self.acomodoParaLab() ?? tt.ac {
+                        L.techoAhora = (cu, self.tirasDelTecho(tt, rt, ac: acT), Double(rt.techoVisto ?? 0))
+                    }
                     if let i = imgT { self.ponerCapaTecho(i, cara: tt.cara) }
                     self.pintarLaboratorio()
                 }
@@ -11394,7 +11556,7 @@ extension ARMeasureViewController {
     fileprivate func maquetaLaboratorio(_ paso: Int) {
         entrarLaboratorio()
         if paso == 18 || paso == 19 || paso == 20 { nueva.minimapa.telefono = SIMD2(27, 6); nueva.minimapa.mirando = SIMD2(0, -1) }
-        if paso == 21 || paso == 22, let ac = acomodoParaLab() {
+        if paso == 21 || paso == 22 || paso == 23, let ac = acomodoParaLab() {
             // LA MALLA DE LA CASA en el simulador: sin ARKit no hay cámara de verdad; se pone una cámara de SceneKit parada en
             // la cocina mirando la pared del sur, con un corte de 2 ft (de 3 a 11 ft) ya encontrado en esa pared.
             let L = lab
@@ -11403,6 +11565,11 @@ extension ARMeasureViewController {
             // Solo el cuarto donde está (la cocina); 22 = con zoom (2.2x: la malla de cuadritos de 3 in).
             L.cuartoMalla = "Kitchen"; L.ajusteInfo = (0, 4, 0)
             if paso == 22 { L.zoom = 2.2; L.mallaFina = true }
+            if paso == 23 {
+                // El techo de la cocina con un hueco en L ya medido (de 5 a 11 ft x de 4 a 8 ft, más un pedazo hacia la ventana).
+                func q(_ x0: Double, _ x1: Double, _ y0: Double, _ y1: Double) -> [SIMD2<Double>] { [SIMD2(20 + x0, y0), SIMD2(20 + x1, y0), SIMD2(20 + x1, y1), SIMD2(20 + x0, y1)] }
+                L.memoriaTecho["Kitchen"] = ([q(5, 11, 4, 8), q(9, 11, 8, 10)], Date())
+            }
             pintarMalla(ac: ac, marco: 0, piso: 0, cuarto: "Kitchen")
             if let clave = L.mallaParedes.first(where: { abs($0.value.a.y) < 0.1 && abs($0.value.b.y) < 0.1 && min($0.value.a.x, $0.value.b.x) >= 19.9 })?.key,
                let w = L.mallaParedes[clave] {
@@ -11414,11 +11581,12 @@ extension ARMeasureViewController {
             camNodo.camera = cam
             camNodo.simdPosition = SIMD3(0.7, 1.35, 3.3)
             camNodo.eulerAngles = SCNVector3(-0.08, -0.95, 0)
+            if paso == 23 { camNodo.simdPosition = SIMD3(0.35, 1.15, 3.45); camNodo.eulerAngles = SCNVector3(0.5, -0.9, 0) }
             // En el simulador la vista de ARKit no dibuja ni guarda su escena: la malla (los MISMOS nodos) se pasa a una vista
             // de SceneKit normal, con la cámara parada en la cocina.
             let vista3D = SCNView(frame: view.bounds)
             let escena = SCNScene()
-            for n in L.malla.values { n.removeFromParentNode(); escena.rootNode.addChildNode(n) }
+            for n in Array(L.malla.values) + [L.mallaTecho].compactMap({ $0 }) { n.removeFromParentNode(); escena.rootNode.addChildNode(n) }
             escena.rootNode.addChildNode(camNodo)
             vista3D.scene = escena
             vista3D.pointOfView = camNodo
