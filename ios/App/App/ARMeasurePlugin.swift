@@ -149,6 +149,7 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
                 func num(_ x: Any?) -> Double? { (x as? Double) ?? (x as? NSNumber)?.doubleValue }
                 var mapa: [String: (paredes: [UbicadorEnPlano.ParedPlano], senas: [UbicadorEnPlano.SenaPlano])] = [:]
                 var marcos: [String: Int] = [:]
+                var pisos: [String: (area: Double, largo: Double, ancho: Double, aprox: Bool)] = [:]
                 for (cuarto, valor) in formas {
                     guard let f = valor as? [String: Any] else { continue }
                     if let m = num(f["marco"]) { marcos[cuarto] = Int(m) }
@@ -163,8 +164,13 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
                                                          abajo: x.count >= 5 ? (num(x[4]) ?? -1) : -1, alto: x.count >= 6 ? (num(x[5]) ?? 0) : 0)
                     }
                     if paredes.count >= 3 { mapa[cuarto] = (paredes, senas) }
+                    // El piso completo (16 oct): [área, largo, ancho, aproximado].
+                    if let pz = f["piso"] as? [Any], pz.count >= 3, let a = num(pz[0]), let l = num(pz[1]), let w = num(pz[2]), a > 1, l > 0, w > 0 {
+                        pisos[cuarto] = (a, l, w, pz.count >= 4 ? (num(pz[3]) ?? 0) > 0.5 : false)
+                    }
                 }
                 arVC.planoPorCuarto = mapa
+                arVC.pisoPorCuarto = pisos
                 arVC.marcoPorCuarto = marcos
             }
             if let areas = call.getObject("areasPorCuarto") {
@@ -256,7 +262,7 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
         arVC.maqueta = paso
         arVC.laboratorio = (11...13).contains(paso) || (18...23).contains(paso)
         // 24-37: medir primero, el material al final (16 oct).
-        arVC.porMovimiento = (24...42).contains(paso)
+        arVC.porMovimiento = (24...45).contains(paso)
         arVC.modo = "recorrido"
         arVC.alcance = "nivel"
         arVC.nivelActual = "2nd Floor"

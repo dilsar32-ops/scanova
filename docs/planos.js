@@ -2,8 +2,8 @@
 // (el mismo escáner de Field Reports, que ya viene dentro de la app: plugin RoomScan) y se dibuja con el
 // mismo código de Field Reports (plano.js, copiado por tools/extraer_plano.py). Un escaneo por piso;
 // un escaneo nuevo no borra el anterior (queda de historial), se ve el más reciente.
-import * as plano from './plano.js?v=2026-10-16-5';
-import { authFetch, esAparato } from './app.js?v=2026-10-16-5';
+import * as plano from './plano.js?v=2026-10-16-6';
+import { authFetch, esAparato } from './app.js?v=2026-10-16-6';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
@@ -96,6 +96,18 @@ export async function paredesParaCamara(trabajoId, nivelId){
       // 5o y 6o (15-oct): a qué altura del piso empieza (-1 = el escaneo es viejo y no lo guardó) y su alto, para que la
       // malla de la casa deje el hueco de la puerta o la ventana en su lugar.
       ['windows', 'doors'].forEach(k => (room[k] || []).forEach(x => { if(x && x.position && !x._removed){ const an = Number(x._widthOverrideFt || x.widthFt) || 0, al = Number(x._heightOverrideFt || x.heightFt) || 0, ab = x.bottomFt == null ? -1 : Number(x.bottomFt); forma.senas.push([Math.round(x.position.x * 100) / 100, Math.round(x.position.y * 100) / 100, k === 'windows' ? 1 : 0, Math.round(an * 100) / 100, Math.round(ab * 100) / 100, Math.round(al * 100) / 100]); } }));
+      // El piso (y el techo) completo del cuarto (16-oct, su pedido "todo el piso o corte parcial"): el área de verdad del
+      // contorno, y su largo × ancho (la caja; el plano ya está enderezado). Con el contorno roto no se manda: la cámara
+      // dice que lo mida. El 4o número = 1 si la app cerró sola un tramo del borde (el área es aproximada).
+      try{
+        const mm = plano.fpRoomMeasurements(room), poly = plano.fpOrderedRoomPolygon(room) || [];
+        if(mm && mm.outlineOk && mm.floorSqFt > 1 && poly.length >= 3){
+          const xs = poly.map(q => q.x), ys = poly.map(q => q.y);
+          const a = Math.max(...xs) - Math.min(...xs), b = Math.max(...ys) - Math.min(...ys);
+          const r2 = v => Math.round(v * 100) / 100;
+          forma.piso = [r2(mm.floorSqFt), r2(Math.max(a, b)), r2(Math.min(a, b)), (mm.guessedFt || 0) > 1 ? 1 : 0];
+        }
+      }catch(e){}
       if(forma.paredes.length >= 3) FORMAS[nombre] = forma;
     });
     return out;

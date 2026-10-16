@@ -59,6 +59,13 @@ ok("techo a +28° estando en pared: nada", voto(m(28, plana(y: 2.25), techoY: ni
 ok("techo a +28° ya en techo: techo", voto(m(28, plana(y: 2.25), techoY: nil), "ceiling") == .techo)
 ok("corona (a 0.1 m del techo): esquina", voto(m(30, pared(h: 2.34)), "wall") == .esquina)
 ok("sofito 0.5 m arriba a +40°: techo", voto(m(40, plana(y: 1.85), techoY: nil), "wall") == .techo)
+// Su prueba del 16 oct: desde lejos, a 22-31°, el teléfono ya decía "techo" (clase) y la parte seguía en pared 17 s.
+ok("el teléfono dice TECHO, 1 m arriba, a +24° estando en pared: techo", voto(m(24, plana(y: 2.44, d: 3.5, clase: "ceiling"), techoY: nil), "wall") == .techo)
+ok("y a +31°: techo", voto(m(31, plana(y: 2.44, d: 3, clase: "ceiling"), techoY: nil), "wall") == .techo)
+ok("sin la clase del teléfono, +28° desde pared sigue siendo nada", voto(m(28, plana(y: 2.25), techoY: nil), "wall") == .nada)
+ok("clase techo pero casi a la altura del teléfono (0.2 m): no por la clase sola", voto(m(20, plana(y: 1.55, clase: "ceiling"), techoY: nil), "wall") == .nada)
+ok("clase techo mirando casi derecho (+8°): nada", voto(m(8, plana(y: 2.44, d: 4.5, clase: "ceiling"), techoY: nil), "wall") == .nada)
+ok("clase techo pegado a la pared (corona): esquina", voto(m(30, plana(y: 2.44, clase: "ceiling", aPared: 0.1), techoY: nil), "wall") == .esquina)
 ok("cubierta a 0.9 m, -60°: nada", voto(m(-60, plana(y: 0.9), techoY: nil), "floor") == .nada)
 ok("frente de gabinete (sin clase, llega a 0.9 m): nada", voto(m(-10, pared(h: 0.5, clase: "", tope: 0.9)), "wall") == .nada)
 ok("una puerta (llega a 2 m): pared", voto(m(0, pared(h: 1.0, clase: "door", tope: 2.0)), "wall") == .pared)
@@ -181,7 +188,7 @@ ok("ARKit las avisa (al agregar y al cambiar) y se borran al quitarse",
 # ---- la ubicación firme ----
 ub = bloque(v, 'fileprivate func ubicarseEnElPlano')
 ok("firme al ubicarse en la fase (3 seguidas)", 'n.ubicadoDesde = Date(); n.firme = true; n.ultimaConfirmacion = Date()' in ub)
-ok("sin acomodo no hay firme", 'if n.acomodo == nil { n.firme = false }' in ub)
+ok("sin acomodo no hay firme (y la bitácora dice por qué)", 'if n.acomodo == nil { if n.firme { n.porqueFirme = "sin-acomodo" }; n.firme = false }' in ub)
 ok("fuera de la fase: 3 respuestas seguras seguidas en el mismo lugar; una dudosa la quita", 'n.confirmacionesFuera >= 3 { n.firme = true' in ub and 'n.firme = false; n.confirmacionesFuera = 0; n.candidatoFuera = nil' in ub)
 ok("ya ubicado, cada respuesta aceptada confirma", 'n.ultimaConfirmacion = Date()' in ub)
 ok("y lo que ya se probaba sigue igual", 'if ac.seguro || !(n.acomodo?.seguro ?? false)' in ub and 'n.coincidencias >= 3 && n.ubicadoDesde == nil' in ub)
