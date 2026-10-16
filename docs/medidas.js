@@ -11,7 +11,7 @@
 //    del trabajo por partida; las notas; y el PDF "Measurements & Demo" (lo arma Documents).
 // Lo que cambia contra Field Reports: aquí el trabajo ya es el proyecto (cliente, dirección y fecha ya están), y los
 // niveles y cuartos son los del proyecto (los mismos de Photos y Dry Logs).
-import { $, authFetch, esAparato, esManager, preguntar, PERFIL } from './app.js?v=2026-10-16-3';
+import { $, authFetch, esAparato, esManager, preguntar, PERFIL } from './app.js?v=2026-10-16-4';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -81,12 +81,14 @@ const r2 = (v) => Math.round(v * 100) / 100;
 const norm = (s) => String(s || '').trim().toLowerCase();
 const num = (v) => { const n = parseFloat(v); return isFinite(n) && n > 0 ? n : 0; };
 // Lo que vale un corte, según la UNIDAD de su material (15-oct-2026). faltaAlto: es de superficie y solo trae el largo.
-export function calcular(material, largo, ancho){
-  const a = num(largo), b = num(ancho), u = unidad(material);
+// `menos` (16-oct): los pies² que se le restan — las puertas y ventanas de una pared entera que la cámara sacó del plano.
+export function calcular(material, largo, ancho, menos){
+  const a = num(largo), b = num(ancho), u = unidad(material), m = num(menos);
+  const area = (x, y) => r2(Math.max(0, x * y - m));
   if(u === 'EA') return { sqft: 0, linear: 0, piezas: a ? Math.round(a) : 0, faltaAlto: false };
   if(u === 'LF') return { sqft: 0, linear: a ? r2(a) : 0, piezas: 0, faltaAlto: false };
-  if(u === 'SF') return { sqft: a && b ? r2(a * b) : 0, linear: 0, piezas: 0, faltaAlto: !!a && !b };
-  if(a && b) return { sqft: r2(a * b), linear: 0, piezas: 0, faltaAlto: false };
+  if(u === 'SF') return { sqft: a && b ? area(a, b) : 0, linear: 0, piezas: 0, faltaAlto: !!a && !b };
+  if(a && b) return { sqft: area(a, b), linear: 0, piezas: 0, faltaAlto: false };
   return { sqft: 0, linear: a ? r2(a) : 0, piezas: 0, faltaAlto: false };
 }
 // "120 sq ft + 40 linear ft": nunca sumados entre sí.
@@ -123,7 +125,9 @@ export function medidaTexto(f){
   if(u === 'EA') return Math.round(num(f.largo)) + ' each';
   const a = num(f.largo), b = num(f.ancho);
   if(u === 'LF') return r2(a) + ' ft';
-  return a && b ? r2(a) + ' × ' + r2(b) + ' ft' : r2(a) + ' ft' + (u === 'SF' ? ' · missing height' : '');
+  // La pared entera: lo que se le restó (sus puertas y ventanas), dicho junto a la medida.
+  const m = a && b ? num(f.menos) : 0, menos = m ? ' − ' + r2(m) + ' sq ft' + (f.menos_que ? ' (' + String(f.menos_que) + ')' : '') : '';
+  return a && b ? r2(a) + ' × ' + r2(b) + ' ft' + menos : r2(a) + ' ft' + (u === 'SF' ? ' · missing height' : '');
 }
 const RANGO_SECCION = { floor: 0, wall: 1, ceiling: 2, kitchen: 3, bathroom: 4, materiales: 5 };
 // Las medidas -> niveles -> cuartos -> materiales, ya sumadas. Los niveles en el orden del proyecto; los cuartos y los
@@ -146,7 +150,7 @@ export function agrupar(filas, niveles, cuartos){
     if(!C){ C = { clave: claveC, cuarto_id: cu ? f.cuarto_id : null, nivel_id: N.nivel_id, nivel: N.titulo, titulo: cuartoTit || 'Room not specified',
       nivel_nombre: nv ? '' : nivelTit, cuarto_nombre: cu ? '' : cuartoTit, orden: N.cuartos.size, materiales: new Map(), filas: [] }; N.cuartos.set(claveC, C); }
     C.filas.push(f);
-    const r = calcular(f.material, f.largo, f.ancho);
+    const r = calcular(f.material, f.largo, f.ancho, f.menos);
     const claveM = f.material + '|' + f.seccion;
     let M = C.materiales.get(claveM);
     if(!M){ M = { material: f.material, seccion: f.seccion, superficie: SUPERFICIE[f.seccion] || f.seccion, orden: C.materiales.size, sqft: 0, linear: 0, piezas: 0, faltaAlto: 0, filas: [] }; C.materiales.set(claveM, M); }
@@ -189,9 +193,16 @@ export function filasDeCamara(medidas, base){
     const cuarto = String(m.cuarto || (norm(nivel) === norm(base.nivel) ? base.cuarto : '') || '').trim().slice(0, 60);
     const fila = { nivel, cuarto, seccion, material,
       largo: pieza ? Math.max(1, Math.round(largo)) : r2(largo), ancho: ancho ? r2(ancho) : null, orden: base.orden + (k++) };
+    // La pared entera (16-oct): las puertas y ventanas que se le restan. Solo en lo de superficie con su alto.
+    const menos = num(m.menos);
+    if(menos && ancho && unidad(material) === 'SF'){ fila.menos = r2(menos); fila.menos_que = String(m.menosQue || '').trim().slice(0, 120) || null; }
     out.push(fila);
     const comp = String(m.companion || '').trim();
-    if(comp && !esPorPieza(comp)) out.push({ ...fila, material: comp, orden: base.orden + (k++) });
+    if(comp && !esPorPieza(comp)){
+      const c = { ...fila, material: comp, orden: base.orden + (k++) };
+      if(unidad(comp) !== 'SF'){ delete c.menos; delete c.menos_que; }
+      out.push(c);
+    }
   });
   return out;
 }
@@ -272,7 +283,7 @@ function pintarAqui(){
   const vacio = !g.total && !FALLO && !pend ? `<div class="vacio-tarj">${IC('regla')}<div><b>No measurements yet.</b> ${cam ? 'Measure with the camera, or add them by hand' : 'Add what was removed, room by room'}: floor, walls, ceiling, kitchen, bathroom and the plastic used.</div></div>` : '';
   const filaHtml = (f) => `<button type="button" class="med-fila" data-med-editar="${esc(f.id)}">
       <span class="med-fila-txt"><b>${esc(f.material)}</b><small>${esc(SUPERFICIE[f.seccion] || f.seccion)} · ${esc(medidaTexto(f))}${f.origen === 'camara' ? ' · camera' : ''}</small></span>
-      <span class="med-fila-res${calcular(f.material, f.largo, f.ancho).faltaAlto ? ' falta' : ''}">${esc(totalTexto(...Object.values(calcular(f.material, f.largo, f.ancho))) || (calcular(f.material, f.largo, f.ancho).faltaAlto ? 'missing height' : ''))}</span>${IC('chev-der', 'med-chev')}</button>`;
+      <span class="med-fila-res${calcular(f.material, f.largo, f.ancho, f.menos).faltaAlto ? ' falta' : ''}">${esc(totalTexto(...Object.values(calcular(f.material, f.largo, f.ancho, f.menos))) || (calcular(f.material, f.largo, f.ancho, f.menos).faltaAlto ? 'missing height' : ''))}</span>${IC('chev-der', 'med-chev')}</button>`;
   const cuartoHtml = (C) => {
     // Lo GUARDADO, no lo que se ve: "Level not specified" es un rótulo, nunca un nombre de nivel.
     const donde = { nivel_id: C.nivel_id, cuarto_id: C.cuarto_id, nivel: C.nivel_nombre || '', cuarto: C.cuarto_nombre || '' };
@@ -302,7 +313,7 @@ function pintarAqui(){
 // ---------- el editor (una hoja que sube) ----------
 const hoja = () => $('#hojaMedida');
 function abrirEditor(e){
-  ED = { id: null, nivel_id: null, cuarto_id: null, nivel: '', cuarto: '', seccion: 'floor', material: '', otro: '', largo: '', ancho: '', acomp: false, ...e };
+  ED = { id: null, nivel_id: null, cuarto_id: null, nivel: '', cuarto: '', seccion: 'floor', material: '', otro: '', largo: '', ancho: '', acomp: false, menos: 0, menos_que: '', restar: true, ...e };
   const h = hoja(); if(!h) return; pintarEditor(); h.hidden = false;
   setTimeout(() => { const i = h.querySelector(ED && ED.material ? '#medLargo' : '[data-med-mat]'); if(i && !('ontouchstart' in window)) i.focus(); }, 60);
 }
@@ -319,7 +330,7 @@ function pintarEditor(){
   if(esOtro && ED.material !== 'Other'){ ED.otro = ED.material; ED.material = 'Other'; }
   const mat = materialDe(ED), pieza = esPorPieza(mat), comp = !ED.id && ACOMPANANTE[mat];
   const nivel = nombreNivel(ED.nivel_id, ED.nivel), cuarto = nombreCuarto(ED.cuarto_id, ED.cuarto);
-  const r = calcular(mat, ED.largo, pieza ? '' : ED.ancho), res = totalTexto(r.sqft, r.linear, r.piezas) || (r.faltaAlto ? (ED.seccion === 'wall' ? 'missing height' : 'missing width') : '');
+  const r = calcular(mat, ED.largo, pieza ? '' : ED.ancho, restaDe(ED)), res = totalTexto(r.sqft, r.linear, r.piezas) || (r.faltaAlto ? (ED.seccion === 'wall' ? 'missing height' : 'missing width') : '');
   const etqAncho = ED.seccion === 'wall' ? 'Height (ft)' : 'Width (ft)', lineal = unidad(mat) === 'LF', sup = unidad(mat) === 'SF';
   // En la compu, 4 columnas solo si la última fila queda igual o más llena que con 3 (Wall: 9 = 3 × 3, sin huecos).
   const nMat = lista.length + 1, hueco = (c) => (c - nMat % c) % c, cuatro = hueco(4) <= hueco(3);
@@ -338,12 +349,15 @@ function pintarEditor(){
          ${ED.seccion === 'wall' && sup ? '<p class="med-nota-chica">Walls are always length × height, in square feet, however tall the cut is.</p>' : ''}`)
       + `<p class="med-res" id="medRes">${res ? '= ' + esc(res) : ''}</p>` : ''}
     ${comp ? `<label class="med-acomp"><input type="checkbox" id="medAcomp"${ED.acomp ? ' checked' : ''}><span>Also add <b>${esc(comp)}</b> with the same size</span></label>` : ''}
+    ${ED.id && num(ED.menos) && sup ? `<label class="med-acomp"><input type="checkbox" id="medMenos"${ED.restar ? ' checked' : ''}><span>Subtract <b>${esc(String(r2(num(ED.menos))))} sq ft</b>${ED.menos_que ? ': ' + esc(ED.menos_que) : ''} (the whole wall, from the floor plan)</span></label>` : ''}
     <p class="aviso" id="medEdAviso"></p>
     <div class="fila-botones">${ED.id ? '<button type="button" class="btn btn-outline btn-rojo" data-med-borrar>Delete</button>' : ''}<button type="button" class="btn btn-outline" data-med-cerrar>Cancel</button><button type="button" class="btn btn-accent" data-med-guardar>Save</button></div>
     ${ED.id ? '' : '<button type="button" class="btn btn-block med-otra" data-med-guardar="otra">Save and add another</button>'}`;
 }
+// Lo que se resta de la medida que se edita (la pared entera), si sigue marcada "Subtract".
+const restaDe = (e) => e && e.id && e.restar && unidad(materialDe(e)) === 'SF' ? num(e.menos) : 0;
 function pintarResultado(){
-  if(!ED) return; const mat = materialDe(ED), r = calcular(mat, ED.largo, esPorPieza(mat) ? '' : ED.ancho), t = totalTexto(r.sqft, r.linear, r.piezas);
+  if(!ED) return; const mat = materialDe(ED), r = calcular(mat, ED.largo, esPorPieza(mat) ? '' : ED.ancho, restaDe(ED)), t = totalTexto(r.sqft, r.linear, r.piezas);
   const el = $('#medRes'); if(el) el.textContent = t ? '= ' + t : '';
 }
 const botonesEditor = (off) => document.querySelectorAll('#hojaMedida [data-med-guardar], #hojaMedida [data-med-borrar]').forEach(b => { b.disabled = off; });
@@ -359,6 +373,8 @@ async function guardarEditor(otra){
   if(unidad(mat) === 'SF' && !ancho){ avisoEditor(ed, ed.seccion === 'wall' ? 'Write the height: walls are length × height.' : 'Write the width: this is length × width.'); return; }
   const fila = { nivel_id: ed.nivel_id || null, cuarto_id: ed.cuarto_id || null, nivel_nombre: nombreNivel(ed.nivel_id, ed.nivel) || null, cuarto_nombre: nombreCuarto(ed.cuarto_id, ed.cuarto) || null,
     seccion: ed.seccion, material: mat, largo: pieza ? Math.max(1, Math.round(largo)) : r2(largo), ancho: ancho ? r2(ancho) : null };
+  // La resta de la pared entera solo se toca si la quitó (o si ya no es de superficie con su alto).
+  if(ed.id && num(ed.menos) && (!ed.restar || unidad(mat) !== 'SF' || !ancho)){ fila.menos = null; fila.menos_que = null; }
   // Todo lo que hace falta DESPUÉS se toma ahora: si cierran el editor mientras guarda, ya no existe.
   const edId = ed.id, sig = otra ? { nivel_id: ed.nivel_id, cuarto_id: ed.cuarto_id, nivel: ed.nivel, cuarto: ed.cuarto, seccion: ed.seccion } : null;
   GUARDANDO = true; botonesEditor(true);
@@ -507,8 +523,11 @@ async function guardarDeCamara(tid, nuevas){
         cuarto = CUARTOS.find(c => c.nivel_id === nivel.id && norm(c.nombre) === norm(n.cuarto)) || null;
         if(!cuarto && AYUDA.asegurarCuarto){ cuarto = await AYUDA.asegurarCuarto(nivel.id, n.cuarto, tid); sigue(); if(cuarto && !CUARTOS.some(x => x.id === cuarto.id)) CUARTOS = CUARTOS.concat(cuarto); }
       }
-      filas.push({ id: n.id, trabajo_id: tid, nivel_id: nivel ? nivel.id : null, cuarto_id: cuarto ? cuarto.id : null, nivel_nombre: nivel ? nivel.nombre : (n.nivel || null), cuarto_nombre: cuarto ? cuarto.nombre : (n.cuarto || null),
-        seccion: n.seccion, material: n.material, largo: n.largo, ancho: n.ancho, origen: 'camara', orden: n.orden });
+      const fila = { id: n.id, trabajo_id: tid, nivel_id: nivel ? nivel.id : null, cuarto_id: cuarto ? cuarto.id : null, nivel_nombre: nivel ? nivel.nombre : (n.nivel || null), cuarto_nombre: cuarto ? cuarto.nombre : (n.cuarto || null),
+        seccion: n.seccion, material: n.material, largo: n.largo, ancho: n.ancho, origen: 'camara', orden: n.orden };
+      // Solo si trae resta: lo demás se manda igual que siempre.
+      if(num(n.menos)){ fila.menos = n.menos; fila.menos_que = n.menos_que || null; }
+      filas.push(fila);
     }
     const out = await insertar(filas);
     soltarPendientes(tid);
@@ -559,7 +578,8 @@ export function conectar(){
     if((el = q('[data-med-agregar]'))){ let d = {}; try{ d = JSON.parse(el.dataset.medAgregar); }catch{}
       abrirEditor({ nivel_id: d.nivel_id || null, cuarto_id: d.cuarto_id || null, nivel: d.nivel || '', cuarto: d.cuarto || '', seccion: d.seccion || 'floor' }); return; }
     if((el = q('[data-med-editar]'))){ const f = FILAS.find(x => x.id === el.dataset.medEditar); if(!f) return;
-      abrirEditor({ id: f.id, nivel_id: f.nivel_id, cuarto_id: f.cuarto_id, nivel: f.nivel_nombre || '', cuarto: f.cuarto_nombre || '', seccion: f.seccion, material: f.material, largo: String(f.largo), ancho: f.ancho == null ? '' : String(f.ancho) }); return; }
+      abrirEditor({ id: f.id, nivel_id: f.nivel_id, cuarto_id: f.cuarto_id, nivel: f.nivel_nombre || '', cuarto: f.cuarto_nombre || '', seccion: f.seccion, material: f.material, largo: String(f.largo), ancho: f.ancho == null ? '' : String(f.ancho),
+        menos: num(f.menos), menos_que: String(f.menos_que || ''), restar: true }); return; }
     if(q('[data-med-nota]')){ guardarNota(); return; }
     if((el = q('[data-med-pdf]'))){ hacerPdf(el); return; }
   });
@@ -574,7 +594,8 @@ export function conectar(){
       if(antes !== formaDe(ED)){ const pos = e.target.selectionStart; pintarEditor(); const i = $('#medOtro'); if(i){ i.focus(); try{ i.setSelectionRange(pos, pos); }catch{} } }
     }
     else if(e.target.id === 'medAcomp'){ ED.acomp = e.target.checked; }
+    else if(e.target.id === 'medMenos'){ ED.restar = e.target.checked; pintarResultado(); }
   });
-  document.addEventListener('change', (e) => { if(ED && e.target.id === 'medAcomp') ED.acomp = e.target.checked; });
+  document.addEventListener('change', (e) => { if(ED && e.target.id === 'medAcomp') ED.acomp = e.target.checked; if(ED && e.target.id === 'medMenos'){ ED.restar = e.target.checked; pintarResultado(); } });
   document.addEventListener('keydown', (e) => { if(e.key === 'Escape' && ED && hoja() && !hoja().hidden && !algoEncima()) cerrarEditor(); if(e.key === 'Enter' && ED && (e.target.id === 'medLargo' || e.target.id === 'medAncho')){ e.preventDefault(); guardarEditor(false); } });
 }

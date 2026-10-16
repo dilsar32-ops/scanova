@@ -211,6 +211,8 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
                                     "seccion": item.seccion]
             if let width = item.width { d["width"] = width }
             if let companion = item.companion { d["companion"] = companion }
+            // La pared entera (16 oct): lo que se resta de puertas y ventanas, y qué fue. Las páginas viejas no lo leen.
+            if item.menos > 0 { d["menos"] = item.menos; d["menosQue"] = item.menosQue }
             return d
         }
     }
@@ -254,7 +256,7 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
         arVC.maqueta = paso
         arVC.laboratorio = (11...13).contains(paso) || (18...23).contains(paso)
         // 24-37: medir primero, el material al final (16 oct).
-        arVC.porMovimiento = (24...38).contains(paso)
+        arVC.porMovimiento = (24...42).contains(paso)
         arVC.modo = "recorrido"
         arVC.alcance = "nivel"
         arVC.nivelActual = "2nd Floor"
