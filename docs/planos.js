@@ -2,8 +2,8 @@
 // (el mismo escáner de Field Reports, que ya viene dentro de la app: plugin RoomScan) y se dibuja con el
 // mismo código de Field Reports (plano.js, copiado por tools/extraer_plano.py). Un escaneo por piso;
 // un escaneo nuevo no borra el anterior (queda de historial), se ve el más reciente.
-import * as plano from './plano.js?v=2026-10-16-6';
-import { authFetch, esAparato } from './app.js?v=2026-10-16-6';
+import * as plano from './plano.js?v=2026-10-16-7';
+import { authFetch, esAparato } from './app.js?v=2026-10-16-7';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
@@ -11,6 +11,7 @@ const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href=
 const SIN_NIVEL = 'sin';
 const PLANTAS = ['Basement', '1st Floor', '2nd Floor', '3rd Floor', 'Attic'];
 
+let PL_CERRADO = false;   // teléfono: todos los niveles cerrados (se ven solo sus tarjetas)
 let T = null, NIVELES = [], PLANOS = [], NIV_SEL = null, VISTA = '2d', REJILLA = true, ZOOM = 1, CARGADO = '', AVISO = '', AVISO_OK = false, OCUPADO = false, AL_NIVEL = null, MENU = false;
 const PZ = { s: 1, x: 0, y: 0 }, PZ_GRANDE = { s: 1, x: 0, y: 0 };   // acercamiento con los dedos (teléfono)
 
@@ -240,7 +241,7 @@ function nivelElegido(){
 
 // ---------- dibujar ----------
 export function abrir(trabajo, niveles, alNivel){
-  if(!T || T.id !== trabajo.id){ PLANOS = []; NIV_SEL = null; ZOOM = 1; VISTA = '2d'; CARGADO = ''; AVISO = ''; }
+  if(!T || T.id !== trabajo.id){ PLANOS = []; NIV_SEL = null; PL_CERRADO = false; ZOOM = 1; VISTA = '2d'; CARGADO = ''; AVISO = ''; }
   T = trabajo; NIVELES = niveles || []; AL_NIVEL = alNivel || null;
   if(CARGADO !== T.id && CARGADO !== 'cargando') cargar(); else pintar();
 }
@@ -253,7 +254,13 @@ export function pintar(){
     return `<button type="button" class="pl-nivel${n.id === niv.id ? ' on' : ''}" data-pl-nivel="${esc(n.id)}"><b>${esc(n.nombre)}</b><small>${q ? fmtPies(q.data ? resumenPlano(q.data).area : (q.area_sqft || 0)) + ' sq ft' : 'No plan'}</small></button>`; }).join('');
   // Teléfono (su pedido, 13-oct): sin la tarjeta de resumen ni la fila de pisos debajo de los botones, para que el
   // plano tenga más espacio. El piso se escoge arriba (la lista); "Add Level" vive en el menú •••.
-  const opciones = lista.map(n => `<option value="${esc(n.id)}"${n.id === niv.id ? ' selected' : ''}>${esc(n.nombre)}</option>`).join('');
+  // Teléfono (16-oct, su pedido "como en Dry Logs: abrir y encoger, ir rápido a cierto nivel"): cada nivel es una tarjeta;
+  // la abierta enseña su plano (como siempre, quieto y lo más grande posible) y las demás quedan arriba y abajo. Tocar la
+  // abierta la cierra (se ven todos los niveles); tocar otra la abre.
+  const tarjetaNiv = (n) => { const q = planoDe(PLANOS, n.id), abierta = n.id === niv.id && !PL_CERRADO;
+    return `<button type="button" class="pl-tel-niv${abierta ? ' on' : ''}" data-pl-tel-niv="${esc(n.id)}" aria-expanded="${abierta ? 'true' : 'false'}"><span class="pl-tel-niv-t"><b>${esc(n.nombre)}</b><small>${q ? fmtPies(q.data ? resumenPlano(q.data).area : (q.area_sqft || 0)) + ' sq ft' : 'No plan'}</small></span>${IC('chev', 'pl-tel-niv-flecha')}</button>`; };
+  const iNiv = Math.max(0, lista.findIndex(n => n.id === niv.id));
+  const nivArriba = lista.slice(0, iNiv + 1).map(tarjetaNiv).join(''), nivAbajo = lista.slice(iNiv + 1).map(tarjetaNiv).join('');
   let vista;
   if(CARGADO === 'cargando' || CARGADO === '') vista = '<div class="pl-vacio"><p>Loading plans…</p></div>';
   else if(CARGADO === 'error') vista = '<div class="pl-vacio"><p>Could not load the plans. Check your connection.</p></div>';
@@ -266,6 +273,7 @@ export function pintar(){
     : '<p class="pl-nada">Scan this floor to see its area, rooms and walls.</p>';
   const herrVista = `<div class="pl-seg"><button type="button" class="${VISTA === '2d' ? 'on' : ''}" data-pl-vista="2d">2D</button><button type="button" class="${VISTA === '3d' ? 'on' : ''}" data-pl-vista="3d">3D</button></div>`;
   const zoom = `<div class="pl-zoomer"><button type="button" data-pl-zoom="-1" aria-label="Zoom out">${IC('menos')}</button><span>${Math.round(ZOOM * 100)}%</span><button type="button" data-pl-zoom="1" aria-label="Zoom in">${IC('mas')}</button></div>`;
+  caja.classList.toggle('pl-cerrado', PL_CERRADO);
   caja.innerHTML = `
   <div class="pl-cab">
     <div class="pl-cab-t"><h2 class="sec-t">Floor Plan</h2><p>View and manage plans by level</p></div>
@@ -277,11 +285,12 @@ export function pintar(){
   </div>
   ${AVISO ? `<p class="aviso${AVISO_OK ? ' ok' : ''}" id="plAviso">${esc(AVISO)}</p>` : ''}
   <div class="pl-tel-barra">
-    <label class="sel pl-sel"><select id="plNivelSel" aria-label="Level">${opciones}</select>${IC('chev')}</label>
+    <span class="pl-sel"></span>
     ${herrVista}
     <div class="pl-mas-wrap"><button type="button" class="pl-mas-btn" data-pl-menu aria-label="More options" aria-expanded="${MENU ? 'true' : 'false'}">•••</button>
       <div class="pl-menu"${MENU ? '' : ' hidden'}><button type="button" data-pl-mas-nivel>${IC('mas')}Add Level</button><button type="button" data-pl-rejilla>${IC('cuadros')}${REJILLA ? 'Hide grid' : 'Show grid'}</button><button type="button" data-pl-ajustes>${IC('engrane')}Plan Settings</button></div></div>
   </div>
+  <div class="pl-tel-niveles">${nivArriba}</div>
   <div class="pl-cuerpo">
     <aside class="pl-col pl-niveles"><h3>Levels</h3>${filasNiv}<button type="button" class="btn btn-outline btn-block pl-mas-nivel" data-pl-mas-nivel>${IC('mas')}Add Level</button></aside>
     <section class="pl-col pl-visor">
@@ -293,6 +302,7 @@ export function pintar(){
     </section>
     <aside class="pl-col pl-detalles"><h3>Plan Details</h3>${detalles}<button type="button" class="btn btn-outline btn-block" data-pl-ajustes>${IC('engrane')}Plan Settings</button></aside>
   </div>
+  ${nivAbajo ? `<div class="pl-tel-niveles">${nivAbajo}</div>` : ''}
   <div class="pl-tel-acc">
     <div class="pl-tel-editar"><button type="button" class="btn btn-accent" data-pl-editar${p ? '' : ' disabled'}>Edit Floor Plan</button><button type="button" class="btn btn-outline pl-tel-grande" data-pl-grande aria-label="Full screen">${IC('expandir')}</button></div>
     <div class="pl-tel-dos"><button type="button" class="btn btn-outline" data-pl-escanear>${IC('escanear')}Scan New Plan</button><button type="button" class="btn btn-outline" data-pl-exportar${p ? '' : ' disabled'}>${IC('compartir')}Export</button></div>
@@ -513,7 +523,12 @@ export function conectar(){
     if(!e.target.closest('#panel-plano')){ if(MENU){ MENU = false; pintar(); } return; }
     if(q('[data-pl-menu]')){ MENU = !MENU; pintar(); return; }
     if(MENU){ MENU = false; if(!q('.pl-menu')) pintar(); }   // tocar cualquier otra cosa cierra el menú
-    if((el = q('[data-pl-nivel]'))){ NIV_SEL = el.dataset.plNivel; ZOOM = 1; PZ.s = 1; PZ.x = 0; PZ.y = 0; AVISO = ''; pintar(); return; }
+    if((el = q('[data-pl-nivel]'))){ NIV_SEL = el.dataset.plNivel; PL_CERRADO = false; ZOOM = 1; PZ.s = 1; PZ.x = 0; PZ.y = 0; AVISO = ''; pintar(); return; }
+    if((el = q('[data-pl-tel-niv]'))){
+      const id = el.dataset.plTelNiv;
+      if(id === nivelElegido().id && !PL_CERRADO) PL_CERRADO = true;
+      else { NIV_SEL = id; PL_CERRADO = false; ZOOM = 1; PZ.s = 1; PZ.x = 0; PZ.y = 0; AVISO = ''; }
+      pintar(); if(!PL_CERRADO){ const m = $('#main'); if(m) m.scrollTop = 0; } return; }
     if((el = q('[data-pl-vista]'))){
       if(el.dataset.plVista === '3d'){
         const RS = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.RoomScan;

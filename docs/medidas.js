@@ -11,7 +11,7 @@
 //    del trabajo por partida; las notas; y el PDF "Measurements & Demo" (lo arma Documents).
 // Lo que cambia contra Field Reports: aquí el trabajo ya es el proyecto (cliente, dirección y fecha ya están), y los
 // niveles y cuartos son los del proyecto (los mismos de Photos y Dry Logs).
-import { $, authFetch, esAparato, esManager, preguntar, PERFIL } from './app.js?v=2026-10-16-6';
+import { $, authFetch, esAparato, esManager, preguntar, PERFIL } from './app.js?v=2026-10-16-7';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -207,6 +207,8 @@ export function filasDeCamara(medidas, base){
   return out;
 }
 // ---------- en la página ----------
+// Los niveles abiertos o cerrados (se recuerda mientras está abierta la página) y si se está borrando un nivel.
+const ABIERTO_NIV = new Map(); let BORRANDO = false;
 let T = null, NIVELES = [], CUARTOS = [], FILAS = [], NOTA = '', NOTA_ED = null, CARGADO = null, CARGANDO = false, FALTA_SQL = false, FALLO = '', AVISO = '', AVISO_OK = false;
 // Tres trabajos que pueden ir a la vez sin estorbarse: guardar del editor, guardar lo de la cámara y hacer el PDF.
 let ALCANCE = false, GUARDANDO = false, CAMARA = false, HACIENDO_PDF = false, ED = null, AYUDA = {}, ULTIMO = null;
@@ -266,6 +268,7 @@ function pintarAqui(){
   // No pisar las notas que se están escribiendo.
   const ta = c.querySelector('#medNotaTxt'), enNota = !!(ta && document.activeElement === ta); if(enNota) NOTA_ED = ta.value;
   const g = agrupar(FILAS, NIVELES, CUARTOS), cam = camaraLista(), pend = pendientes(T.id);
+  pintarConteo(FILAS.length);
   const botones = `${cam ? `<button type="button" class="btn btn-accent" data-med-camara${CAMARA ? ' disabled' : ''}>${IC('regla')}Measure with camera</button>` : ''}
       <button type="button" class="btn ${cam ? 'btn-outline' : 'btn-accent'}" data-med-nuevo>${IC('mas')}Add by hand</button>
       ${g.total ? `<button type="button" class="btn btn-outline" data-med-pdf>${IC('bajar')}PDF</button>` : ''}`;
@@ -294,7 +297,17 @@ function pintarAqui(){
       <div class="med-agregar"><span>Add to this room</span><div class="med-rejilla med-partes">${SECCIONES.map(([k, t]) => `<button type="button" class="chip" data-med-agregar='${esc(JSON.stringify({ ...donde, seccion: k }))}'>+ ${t}</button>`).join('')}</div></div>
     </section>`;
   };
-  const niveles = g.niveles.map(N => `<h3 class="med-nivel">${esc(N.titulo)}</h3>${N.cuartos.map(cuartoHtml).join('')}`).join('');
+  // Cada nivel se abre y se cierra, como los días del Dry Log (su pedido del 16-oct: "si es Third Floor se puede expandir
+  // y encoger, para ir rápido a cierto nivel"). Con un solo nivel sale abierto; con varios, cerrados. Se recuerda.
+  // Y el manager puede borrar TODAS las medidas de un nivel (las pruebas de la cámara).
+  const solo = g.niveles.length <= 1;
+  const niveles = g.niveles.map(N => {
+    const cuantas = N.cuartos.reduce((t, C) => t + C.filas.length, 0), abierto = ABIERTO_NIV.has(N.clave) ? ABIERTO_NIV.get(N.clave) : solo;
+    const borrar = esManager() && cuantas ? `<button type="button" class="btn btn-outline btn-rojo med-borrar-nivel" data-med-borrar-nivel="${esc(N.clave)}"${BORRANDO ? ' disabled' : ''}>${IC('basura')}Delete all ${cuantas} on ${esc(N.titulo)}</button>` : '';
+    return `<details class="med-niv" data-med-niv="${esc(N.clave)}"${abierto ? ' open' : ''}><summary><span class="med-niv-t"><h3 class="med-nivel">${esc(N.titulo)}</h3>
+      <small>${N.cuartos.length} ${N.cuartos.length === 1 ? 'room' : 'rooms'} · ${cuantas} ${cuantas === 1 ? 'measurement' : 'measurements'}</small></span>${IC('chev', 'med-niv-flecha')}</summary>
+      <div class="med-niv-in">${N.cuartos.map(cuartoHtml).join('')}${borrar}</div></details>`;
+  }).join('');
   const partidas = g.nCuartos > 1 && g.partidas.length ? `<section class="card med-partidas"><h3>Job totals by line item</h3>
       <div class="med-tabla-caja"><table class="med-tabla"><thead><tr><th>Material</th><th>Surface</th><th class="der">Qty</th><th>Unit</th><th class="der">Rooms</th></tr></thead><tbody>
       ${g.partidas.map(p => lineasUnidad(p).map(l => `<tr><td><b>${esc(p.material)}</b></td><td>${esc(p.superficie)}</td><td class="der"><b>${esc(l.qty)}</b></td><td>${esc(l.unidad)}</td><td class="der">${l.cuartos}</td></tr>`).join('')).join('')}
@@ -308,6 +321,48 @@ function pintarAqui(){
       <div class="med-acc">${botones}</div></div>
     ${alcance}${avisoHtml()}${pendHtml}${falloHtml}${vacio}${niveles}${partidas}${notas}</div>`;
   if(enNota){ const n = c.querySelector('#medNotaTxt'); if(n){ n.focus(); n.setSelectionRange(n.value.length, n.value.length); } }
+}
+
+// El número de la pestaña: cuántas medidas hay (su pedido del 16-oct, como Photos (54) y Floor Plan (3)).
+function pintarConteo(n){ const s = typeof document !== 'undefined' ? document.getElementById('medidasConteo') : null; if(s) s.textContent = n == null ? '' : '(' + n + ')'; }
+let CONTEO_PARA = null;
+export async function contar(trabajoId){
+  CONTEO_PARA = trabajoId;
+  if(CARGADO === trabajoId && T && T.id === trabajoId){ pintarConteo(FILAS.length); return; }
+  pintarConteo(null);
+  try{
+    const r = await authFetch('/rest/v1/fotos_medidas?trabajo_id=eq.' + encodeURIComponent(trabajoId) + '&select=id&limit=5000');
+    if(!r.ok) return; const filas = await r.json();
+    if(CONTEO_PARA === trabajoId && !(CARGADO === trabajoId && T && T.id === trabajoId)) pintarConteo(Array.isArray(filas) ? filas.length : null);
+  }catch(e){}
+}
+// BORRAR TODAS LAS MEDIDAS DE UN NIVEL (su pedido del 16-oct: "como estamos haciendo testeo, poder eliminar esos datos").
+// Solo el manager. Se pregunta antes, se borra en el servidor y se COMPRUEBA volviendo a leer (nunca se dice "borrado" a ciegas).
+async function borrarNivel(clave){
+  if(!T || BORRANDO || GUARDANDO || CAMARA) return; const tid = T.id;
+  const g = agrupar(FILAS, NIVELES, CUARTOS), N = g.niveles.find(x => x.clave === clave); if(!N) return;
+  const ids = N.cuartos.flatMap(C => C.filas.map(f => f.id)).filter(Boolean); if(!ids.length) return;
+  const ok = await preguntar({ titulo: 'Delete all measurements on ' + N.titulo + '?', texto: ids.length + (ids.length === 1 ? ' measurement' : ' measurements') + ' in ' + N.cuartos.length + (N.cuartos.length === 1 ? ' room' : ' rooms') + ' will be deleted. This cannot be undone.', si: 'Delete all', no: 'Keep them' });
+  if(!ok || !T || T.id !== tid) return;
+  BORRANDO = true; avisar('Deleting ' + ids.length + (ids.length === 1 ? ' measurement…' : ' measurements…'), true); pintarAqui();
+  let borradas = 0, fallo = '';
+  try{
+    for(let i = 0; i < ids.length; i += 80){
+      const lote = ids.slice(i, i + 80);
+      const r = await authFetch('/rest/v1/fotos_medidas?id=in.(' + lote.join(',') + ')', { method: 'DELETE', headers: { Prefer: 'return=representation' } });
+      if(!r.ok){ fallo = 'HTTP ' + r.status; break; }
+      const out = await r.json(); (Array.isArray(out) ? out : []).forEach(f => { borradas++; anotar({ quita: f.id }, tid); });
+    }
+  }catch(e){ fallo = msg(e); }
+  finally{ BORRANDO = false; }
+  if(!T || T.id !== tid) return;
+  // Lo que de verdad quedó en el servidor (se vuelve a leer; si ya estaba leyendo, se quita aquí lo que el servidor devolvió borrado).
+  const fuera = new Set(CAMBIOS.filter(c => c.quita && c.trabajo === tid).map(c => c.quita)); FILAS = FILAS.filter(f => !fuera.has(f.id));
+  CARGADO = null; await cargar();
+  const quedan = FILAS.filter(f => ids.includes(f.id)).length;
+  if(!quedan) avisar(borradas + (borradas === 1 ? ' measurement deleted from ' : ' measurements deleted from ') + N.titulo + '.', true);
+  else avisar(quedan + ' could not be deleted' + (fallo ? ' (' + fallo + ')' : '') + '. Only the manager or who measured them can delete them.');
+  pintarAqui();
 }
 
 // ---------- el editor (una hoja que sube) ----------
@@ -581,6 +636,7 @@ export function conectar(){
     if(q('[data-med-nuevo]')){ if(AYUDA.escogerCuarto) AYUDA.escogerCuarto('Measure which room?', ULTIMO, (d) => abrirEditor({ nivel_id: d.nivel_id || null, cuarto_id: d.cuarto_id || null })); return; }
     if((el = q('[data-med-agregar]'))){ let d = {}; try{ d = JSON.parse(el.dataset.medAgregar); }catch{}
       abrirEditor({ nivel_id: d.nivel_id || null, cuarto_id: d.cuarto_id || null, nivel: d.nivel || '', cuarto: d.cuarto || '', seccion: d.seccion || 'floor' }); return; }
+    if((el = q('[data-med-borrar-nivel]'))){ borrarNivel(el.dataset.medBorrarNivel); return; }
     if((el = q('[data-med-editar]'))){ const f = FILAS.find(x => x.id === el.dataset.medEditar); if(!f) return;
       abrirEditor({ id: f.id, nivel_id: f.nivel_id, cuarto_id: f.cuarto_id, nivel: f.nivel_nombre || '', cuarto: f.cuarto_nombre || '', seccion: f.seccion, material: f.material, largo: String(f.largo), ancho: f.ancho == null ? '' : String(f.ancho),
         menos: num(f.menos), menos_que: String(f.menos_que || ''), restar: true }); return; }
@@ -600,6 +656,8 @@ export function conectar(){
     else if(e.target.id === 'medAcomp'){ ED.acomp = e.target.checked; }
     else if(e.target.id === 'medMenos'){ ED.restar = e.target.checked; pintarResultado(); }
   });
+  // Abrir o cerrar un nivel se recuerda ('toggle' no sube: se escucha en la captura).
+  document.addEventListener('toggle', (e) => { const d = e.target; if(d && d.matches && d.matches('details.med-niv')) ABIERTO_NIV.set(d.dataset.medNiv, d.open); }, true);
   document.addEventListener('change', (e) => { if(ED && e.target.id === 'medAcomp') ED.acomp = e.target.checked; if(ED && e.target.id === 'medMenos'){ ED.restar = e.target.checked; pintarResultado(); } });
   document.addEventListener('keydown', (e) => { if(e.key === 'Escape' && ED && hoja() && !hoja().hidden && !algoEncima()) cerrarEditor(); if(e.key === 'Enter' && ED && (e.target.id === 'medLargo' || e.target.id === 'medAncho')){ e.preventDefault(); guardarEditor(false); } });
 }

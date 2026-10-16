@@ -6,12 +6,12 @@
 // TELÉFONO (su diseño del 14-oct): Dry Logs abre con la cámara prendida. Arriba "Dry Logs" y en qué cuarto va
 // (Room 1 of 4), luego Level y Room para escoger dónde, y la cámara llena lo que sobra. El botón azul de cámara de
 // abajo (el de siempre) toma la foto directo. Lo que sigue después de la foto espera su siguiente diseño.
-import { $, $$, authFetch, registrarAtras, preguntar, alMostrar } from './app.js?v=2026-10-16-6';
-import { RESTRICCIONES, errorCamara, puedeCamaraPropia } from './camara.js?v=2026-10-16-6';
-import * as fotos from './fotos.js?v=2026-10-16-6';
-import { leerPantalla } from './lector.js?v=2026-10-16-6';
-import * as R from './registro.js?v=2026-10-16-6';
-import { APP_BUILD } from './config.js?v=2026-10-16-6';
+import { $, $$, authFetch, registrarAtras, preguntar, alMostrar } from './app.js?v=2026-10-16-7';
+import { RESTRICCIONES, errorCamara, puedeCamaraPropia } from './camara.js?v=2026-10-16-7';
+import * as fotos from './fotos.js?v=2026-10-16-7';
+import { leerPantalla } from './lector.js?v=2026-10-16-7';
+import * as R from './registro.js?v=2026-10-16-7';
+import { APP_BUILD } from './config.js?v=2026-10-16-7';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -45,11 +45,24 @@ async function cargarRegistro(forzar){
   try{
     const q = (t) => authFetch('/rest/v1/' + t + '?trabajo_id=eq.' + encodeURIComponent(id) + '&order=dia.asc,created_at.asc&limit=5000').then(r => r.ok ? r.json() : []).catch(() => []);
     const [l, e] = await Promise.all([q('fotos_drylog_lecturas'), q('fotos_drylog_equipos')]);
-    if(T && T.id === id){ LECT = Array.isArray(l) ? l : []; EQUI = Array.isArray(e) ? e : []; REG_DE = id; }
+    if(T && T.id === id){ LECT = Array.isArray(l) ? l : []; EQUI = Array.isArray(e) ? e : []; REG_DE = id; if(CONTEO_PARA === id) pintarConteo(R.diasDelRegistro(LECT, EQUI).length); }
   }finally{ REG_CARGANDO = false; }
   // Si mientras cargaba se cambió de proyecto, ahora se carga el que está abierto (antes se quedaba sin cargar).
   if(T && T.id !== id){ cargarRegistro(); return; }
   if(T && T.id === id){ if(AUTO && PANTALLA === 'cam'){ CUARTO = null; } pintarAqui(); }
+}
+// El número de la pestaña Dry Logs (su pedido del 16-oct): cuántos días tienen algo anotado (las tarjetas de la lista).
+function pintarConteo(n){ const s = typeof document !== 'undefined' ? document.getElementById('secadoConteo') : null; if(s) s.textContent = n == null ? '' : '(' + n + ')'; }
+let CONTEO_PARA = null;
+export async function contarDias(trabajoId){
+  CONTEO_PARA = trabajoId;
+  if(REG_DE === trabajoId){ pintarConteo(R.diasDelRegistro(LECT, EQUI).length); return; }
+  pintarConteo(null);
+  try{
+    const q = (t) => authFetch('/rest/v1/' + t + '?trabajo_id=eq.' + encodeURIComponent(trabajoId) + '&select=dia&limit=5000').then(r => r.ok ? r.json() : []).catch(() => []);
+    const [l, e] = await Promise.all([q('fotos_drylog_lecturas'), q('fotos_drylog_equipos')]);
+    if(CONTEO_PARA === trabajoId && REG_DE !== trabajoId) pintarConteo(R.diasDelRegistro(Array.isArray(l) ? l : [], Array.isArray(e) ? e : []).length);
+  }catch(e){}
 }
 const HOY = () => hoyLocal();
 const recorrido = () => R.cuartosDelRecorrido(NIVELES, CUARTOS, LECT, EQUI, HOY());
