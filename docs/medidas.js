@@ -11,7 +11,7 @@
 //    del trabajo por partida; las notas; y el PDF "Measurements & Demo" (lo arma Documents).
 // Lo que cambia contra Field Reports: aquí el trabajo ya es el proyecto (cliente, dirección y fecha ya están), y los
 // niveles y cuartos son los del proyecto (los mismos de Photos y Dry Logs).
-import { $, authFetch, esAparato, esManager, preguntar, PERFIL } from './app.js?v=2026-10-16-10';
+import { $, authFetch, esAparato, esManager, preguntar, PERFIL } from './app.js?v=2026-10-16-11';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -472,7 +472,7 @@ async function borrarEditor(){
   try{
     const r = await authFetch('/rest/v1/fotos_medidas?id=eq.' + encodeURIComponent(id), { method: 'DELETE', headers: { Prefer: 'return=representation' } });
     if(!r.ok) throw new Error('HTTP ' + r.status); const out = await r.json();
-    if(!out.length) throw new Error('only the manager or who measured it can delete it');
+    if(!out.length) throw new Error('only the manager can delete it');
     anotar({ quita: id }, tid);
     if(T && T.id === tid) FILAS = FILAS.filter(x => x.id !== id);
     if(ED === ed) cerrarEditor(); pintarAqui();
