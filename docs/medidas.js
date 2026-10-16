@@ -11,7 +11,7 @@
 //    del trabajo por partida; las notas; y el PDF "Measurements & Demo" (lo arma Documents).
 // Lo que cambia contra Field Reports: aquí el trabajo ya es el proyecto (cliente, dirección y fecha ya están), y los
 // niveles y cuartos son los del proyecto (los mismos de Photos y Dry Logs).
-import { $, authFetch, esAparato, esManager, preguntar, PERFIL } from './app.js?v=2026-10-16-1';
+import { $, authFetch, esAparato, esManager, preguntar, PERFIL } from './app.js?v=2026-10-16-2';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -431,6 +431,21 @@ function catalogos(){
     return { value: v, label: ETIQUETA_CAMARA[v] || v, companion: a ? { value: a, labelEn: a, labelEs: ACOMPANANTE_ES[a] || a } : null, porPieza: esPorPieza(v), unidad: unidad(v) }; }); });
   return secciones;
 }
+// LA BITÁCORA DEL LABORATORIO (16 oct, su pedido: "que guarde información para que tú aprendas y veas los datos de lo
+// que voy haciendo"): mientras se prueba "Probar lo demolido", la cámara manda lotes (un resumen cada 2 s y cada evento)
+// y aquí se suben a fotos_lab_bitacora. Si la red falla, el lote espera al siguiente; si la tabla todavía no existe, se tira.
+let BITACORA_PENDIENTE = [];
+async function subirBitacora(tid, lote){
+  const filas = (lote && Array.isArray(lote.filas) ? lote.filas : []).map(f => ({ trabajo_id: tid, sesion: String((lote && lote.sesion) || 'sin-sesion').slice(0, 64),
+    t: Number(f && f.t) || 0, tipo: String((f && f.tipo) || 'evento').slice(0, 40), datos: (f && f.datos) || {} }));
+  const todas = BITACORA_PENDIENTE.concat(filas).slice(-3000);
+  BITACORA_PENDIENTE = [];
+  if(!todas.length) return;
+  try{
+    const r = await authFetch('/rest/v1/fotos_lab_bitacora', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(todas) });
+    if(!r.ok && r.status !== 400 && r.status !== 404) BITACORA_PENDIENTE = todas;
+  }catch(e){ BITACORA_PENDIENTE = todas; }
+}
 async function lanzarCamara(alcance, d){
   const ARMeasure = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.ARMeasure;
   if(!camaraLista() || !ARMeasure){ avisar('Measuring with the camera works in the Scanova app on the iPhone.'); return; }
@@ -451,12 +466,15 @@ async function lanzarCamara(alcance, d){
   // Y la forma de cada cuarto, para que la cámara se ubique dentro del plano con el LiDAR (15-oct).
   let planoPorCuarto = {};
   try{ if(AYUDA.formas) planoPorCuarto = AYUDA.formas() || {}; }catch(e){ planoPorCuarto = {}; }
+  let oyente = null;
+  try{ if(esManager() && ARMeasure.addListener) oyente = await ARMeasure.addListener('bitacora', l => { subirBitacora(tid, l); }); }catch(e){ oyente = null; }
   try{
     res = await ARMeasure.measure({ modo: 'recorrido', alcance, nivel: nivel ? nivel.nombre : '', section: 'floor', materials: secciones.floor, secciones, cuartos, niveles,
       areasPorCuarto: {}, cuartosPorPlanta, areasPorPlanta: {}, crewName: String((PERFIL && PERFIL.full_name) || '').split(' ')[0], roomName: cuarto ? cuarto.nombre : '', roomAreaSqFt: 0, tema: TEMA_CAMARA, experiencia: EXPERIENCIA_CAMARA, paredesPorCuarto, planoPorCuarto,
       // "Probar lo demolido" (laboratorio): solo el manager ve el botón dentro de la cámara. Un aparato viejo lo ignora.
       laboratorio: esManager() });
   }catch(e){ avisar('Could not open the measuring camera. ' + msg(e)); return; }
+  finally{ try{ if(oyente && oyente.remove) await oyente.remove(); }catch(e){} if(BITACORA_PENDIENTE.length) subirBitacora(tid, null); }
   if(!res || res.cancelled){ if(res && res.error) avisar(res.error); return; }
   const nuevas = filasDeCamara(res.measurements, { nivel: nivel ? nivel.nombre : '', cuarto: cuarto ? cuarto.nombre : '', orden: Date.now() }).map(f => ({ ...f, id: nuevoId() }));
   if(!nuevas.length) return;

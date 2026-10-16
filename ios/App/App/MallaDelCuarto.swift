@@ -23,7 +23,11 @@ enum MallaDelCuarto {
     struct Pin { var plano: SIMD2<Double>; var ar: SIMD2<Double> }
     // Una pared ya acomodada, en metros del piso del AR. `vista`: pegada a lo que ve el láser. `finaA/B`: esa esquina salió
     // del cruce de dos paredes vistas (es de verdad, no de la ubicación).
-    struct ParedAR { var a: SIMD2<Double>; var b: SIMD2<Double>; var vista = false; var finaA = false; var finaB = false }
+    struct ParedAR {
+        var a: SIMD2<Double>; var b: SIMD2<Double>; var vista = false; var finaA = false; var finaB = false
+        var cual: Int? = nil        // qué plano del láser la pegó (índice en `vistas`)
+        var fija = false            // ya se quedó amarrada a su plano (la cámara la marca; aquí no se mueve)
+    }
     struct Ajuste {
         var ac: Ac
         var paredes: [ParedAR]          // en el mismo orden que las paredes del plano
@@ -244,7 +248,8 @@ enum MallaDelCuarto {
         // Solo los planos cerca del cuarto (lo del resto de la casa no cuenta).
         let xs = inicio.flatMap { [$0.a.x, $0.b.x] }, ys = inicio.flatMap { [$0.a.y, $0.b.y] }
         let caja = (x: (xs.min()! - 1.8)...(xs.max()! + 1.8), y: (ys.min()! - 1.8)...(ys.max()! + 1.8))
-        let cerca = vistas.filter { v in [v.a, v.b, (v.a + v.b) / 2].contains { caja.x.contains($0.x) && caja.y.contains($0.y) } }
+        let cercaIdx = vistas.indices.filter { i in let v = vistas[i]; return [v.a, v.b, (v.a + v.b) / 2].contains { caja.x.contains($0.x) && caja.y.contains($0.y) } }
+        let cerca = cercaIdx.map { vistas[$0] }
         var acF = ac
         if let th = giroPorDirecciones(enAR(acF), cerca) { acF = componer(acF, th: th, t: .zero, c: c0) }
         do {
@@ -286,8 +291,16 @@ enum MallaDelCuarto {
             let u = simd_normalize(pa[p.pared].b - pa[p.pared].a)
             let d = [p.t0, p.t1].map { simd_dot(pa[p.pared].a + u * $0 - v.a, nP) }.reduce(0, +) / 2
             salida[p.pared].a = pa[p.pared].a - nP * d; salida[p.pared].b = pa[p.pared].b - nP * d; salida[p.pared].vista = true
+            salida[p.pared].cual = cercaIdx[p.vista]
         }
-        // Las esquinas: donde se cruzan dos paredes que se tocan en el plano (a 1 ft o menos) y hacen 30° o más.
+        salida = esquinar(paredes, salida)
+        return Ajuste(ac: acF, paredes: salida, vistas: finales.count, pines: pines.count, giro: dg, mov: movCentro)
+    }
+
+    // Las esquinas: donde se cruzan dos paredes que se tocan en el plano (a 1 ft o menos) y hacen 30° o más. `fina`:
+    // las dos están pegadas a lo que ve el láser (es de verdad, no de la ubicación).
+    static func esquinar(_ paredes: [DemolicionEnPlano.Pared], _ entrada: [ParedAR]) -> [ParedAR] {
+        var salida = entrada
         let lineas = salida
         for i in 0..<paredes.count {
             for j in (i + 1)..<max(i + 1, paredes.count) where j < paredes.count {
@@ -305,14 +318,14 @@ enum MallaDelCuarto {
                         let X = lineas[i].a + ui * s
                         let actualI = ei == 0 ? salida[i].a : salida[i].b, actualJ = ej == 0 ? salida[j].a : salida[j].b
                         guard simd_distance(X, actualI) <= 0.6, simd_distance(X, actualJ) <= 0.6 else { continue }
-                        let fina = lineas[i].vista && lineas[j].vista
+                        let fina = (lineas[i].vista || lineas[i].fija) && (lineas[j].vista || lineas[j].fija)
                         if ei == 0 { salida[i].a = X; salida[i].finaA = fina } else { salida[i].b = X; salida[i].finaB = fina }
                         if ej == 0 { salida[j].a = X; salida[j].finaA = fina } else { salida[j].b = X; salida[j].finaB = fina }
                     }
                 }
             }
         }
-        return Ajuste(ac: acF, paredes: salida, vistas: finales.count, pines: pines.count, giro: dg, mov: movCentro)
+        return salida
     }
 
     // ---------------- LAS ESQUINAS TOCADAS ----------------
@@ -340,6 +353,75 @@ enum MallaDelCuarto {
             if d <= 0.75, mejor == nil || d < mejor!.2 { mejor = (q, p, d) }
         }
         return mejor.map { ($0.0, $0.1) }
+    }
+
+    // ---------------- LO QUE SE VE A TRAVÉS DE LA PARED (16 oct, su foto: "había una puerta a la cocina que el mapa no
+    // había leído, y la malla se puso sobre ella... que la malla también escanee") ----------------
+    // Un rayo del láser que CRUZA la línea de una pared y pega 30 cm o más detrás de ella pasó por un hueco: por ahí no
+    // hay pared (una puerta, un paso, una ventana). Un punto a 8 cm o menos de la línea es la pared misma. Se cuenta por
+    // cuadritos de 4 x 6 in, en metros desde la punta `a` de la pared y del piso para arriba.
+    struct Traspaso {
+        static let col = 0.1016, fila = 0.1524
+        let a: SIMD2<Double>, b: SIMD2<Double>, alto: Double
+        let cols: Int, filas: Int
+        var cruza: [UInt16], pega: [UInt16]
+        init(a: SIMD2<Double>, b: SIMD2<Double>, alto: Double) {
+            self.a = a; self.b = b; self.alto = alto
+            cols = max(1, Int((simd_distance(a, b) / Self.col).rounded(.up)))
+            filas = max(1, Int((alto / Self.fila).rounded(.up)))
+            cruza = Array(repeating: 0, count: cols * filas); pega = cruza
+        }
+        // ¿Sigue siendo la misma pared? (si la malla se movió más de 30 cm, se empieza de nuevo)
+        func misma(_ a2: SIMD2<Double>, _ b2: SIMD2<Double>) -> Bool { simd_distance(a, a2) < 0.3 && simd_distance(b, b2) < 0.3 }
+        mutating func votar(camara C: SIMD3<Float>, punto P: SIMD3<Float>, piso: Float) {
+            let d = b - a, L = simd_length(d)
+            guard L > 0.2 else { return }
+            let u = d / L, n = SIMD2(-u.y, u.x)
+            let c2 = SIMD2(Double(C.x), Double(C.z)), p2 = SIMD2(Double(P.x), Double(P.z))
+            let sc = simd_dot(c2 - a, n), sp = simd_dot(p2 - a, n)
+            func celda(_ q: SIMD2<Double>, _ y: Double) -> Int? {
+                let uu = simd_dot(q - a, u), vv = y - Double(piso)
+                guard uu >= 0, uu < L, vv >= 0, vv < alto else { return nil }
+                return min(filas - 1, Int(vv / Self.fila)) * cols + min(cols - 1, Int(uu / Self.col))
+            }
+            if abs(sp) < 0.08, let k = celda(p2, Double(P.y)) { if pega[k] < 60000 { pega[k] += 1 }; return }
+            guard (sc > 0) != (sp > 0), abs(sp) > 0.3, abs(sc) > 0.15 else { return }
+            let t = sc / (sc - sp)
+            let x = c2 + (p2 - c2) * t, y = Double(C.y) + Double(P.y - C.y) * t
+            if let k = celda(x, y), cruza[k] < 60000 { cruza[k] += 1 }
+        }
+        // Los huecos que se ven: PUERTA (desde el piso hasta 5'-3" o más, 16 in de ancho o más) o VENTANA (empieza a 18 in
+        // o más del piso, 18 in de alto o más, 12 in de ancho o más). En metros desde `a`.
+        func aberturas() -> [(t0: Double, t1: Double, abajo: Double, arriba: Double, puerta: Bool)] {
+            func abierta(_ c: Int, _ r: Int) -> Bool { let k = r * cols + c; return cruza[k] >= 3 && Int(cruza[k]) >= 2 * Int(pega[k]) }
+            var tipo = [Int](repeating: 0, count: cols)        // 0 nada, 1 puerta, 2 ventana
+            var bajo = [Int](repeating: 0, count: cols), alto_ = [Int](repeating: 0, count: cols)
+            for c in 0..<cols {
+                guard let r0 = (0..<filas).first(where: { abierta(c, $0) }) else { continue }
+                var r1 = r0, hueco = 0
+                for r in (r0 + 1)..<max(r0 + 1, filas) { if abierta(c, r) { r1 = r; hueco = 0 } else { hueco += 1; if hueco > 1 { break } } }
+                let abajoM = Double(r0) * Self.fila, arribaM = Double(r1 + 1) * Self.fila
+                if r0 <= 1 && arribaM >= 1.6 { tipo[c] = 1 } else if abajoM >= 0.45 && arribaM - abajoM >= 0.45 { tipo[c] = 2 }
+                bajo[c] = r0; alto_[c] = r1
+            }
+            var out: [(t0: Double, t1: Double, abajo: Double, arriba: Double, puerta: Bool)] = []
+            var c = 0
+            while c < cols {
+                let k = tipo[c]
+                guard k != 0 else { c += 1; continue }
+                var fin = c, hueco = 0, j = c + 1
+                while j < cols { if tipo[j] == k { fin = j; hueco = 0 } else { hueco += 1; if hueco > 1 { break } }; j += 1 }
+                let n = fin - c + 1
+                if n >= (k == 1 ? 4 : 3) {
+                    let rs = (c...fin).filter { tipo[$0] == k }
+                    let abajos = rs.map { bajo[$0] }.sorted(), arribas = rs.map { alto_[$0] }.sorted()
+                    out.append((Double(c) * Self.col, Double(fin + 1) * Self.col,
+                                k == 1 ? 0 : Double(abajos[abajos.count / 2]) * Self.fila, Double(arribas[arribas.count / 2] + 1) * Self.fila, k == 1))
+                }
+                c = fin + 1
+            }
+            return out
+        }
     }
 
     // ---------------- EL TECHO (16 oct: "hace falta la malla para el techo") ----------------

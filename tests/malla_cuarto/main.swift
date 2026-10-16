@@ -182,6 +182,47 @@ do {
     let ok5 = poco.count == 2 && mucho.count == 1
     print("\(ok5 ? "OK  " : "FALLA") techo · memoria: viendo poco se junta con lo de antes (\(poco.count) pedazos), viendo casi todo manda lo de ahora (\(mucho.count))"); if !ok5 { fallas += 1 }
 }
+// LO QUE SE VE A TRAVÉS: una pared de 14 ft (4.27 m) con una puerta de 3 ft (de 6 a 9 ft, hasta 6'-8") que el plano no
+// tenía, y una ventana de 3 ft (de 10 a 13 ft, de 3 a 7 ft de alto). El teléfono camina frente a ella; los puntos que caen en
+// la pared pegan en ella y los de los huecos pegan 2 m detrás. Debe salir 1 puerta y 1 ventana, en su lugar.
+do {
+    let pie = 0.3048
+    let a = SIMD2<Double>(0, 0), b = SIMD2<Double>(14 * pie, 0)
+    var tr = MallaDelCuarto.Traspaso(a: a, b: b, alto: 8 * pie)
+    semilla = 11
+    func hueco(_ x: Double, _ y: Double) -> Bool { (x >= 6 * pie && x <= 9 * pie && y <= 6.67 * pie) || (x >= 10 * pie && x <= 13 * pie && y >= 3 * pie && y <= 7 * pie) }
+    for paso in 0..<40 {
+        let C = SIMD3<Float>(Float(1 + Double(paso) * 0.06), 1.2, 1.5)      // el teléfono a 1.5 m de la pared (z = 0), caminando
+        for _ in 0..<400 {
+            let x = rnd() * 14 * pie, y = rnd() * 8 * pie
+            if hueco(x, y) {
+                // pasa por el hueco y pega en algo 2 m detrás (z = -2)
+                let dir = SIMD3<Float>(Float(x), Float(y), 0) - C
+                let P = C + dir * Float((1.5 + 2) / 1.5)
+                tr.votar(camara: C, punto: P + SIMD3<Float>(Float(gauss(0.01)), Float(gauss(0.01)), Float(gauss(0.01))), piso: 0)
+            } else {
+                tr.votar(camara: C, punto: SIMD3<Float>(Float(x), Float(y), Float(gauss(0.01))), piso: 0)
+            }
+        }
+    }
+    let ab = tr.aberturas()
+    let puertas = ab.filter { $0.puerta }, ventanas = ab.filter { !$0.puerta }
+    let okP = puertas.count == 1 && abs(puertas[0].t0 / pie - 6) < 0.5 && abs(puertas[0].t1 / pie - 9) < 0.5 && abs(puertas[0].arriba / pie - 6.67) < 0.6
+    let okV = ventanas.count == 1 && abs(ventanas[0].t0 / pie - 10) < 0.5 && abs(ventanas[0].t1 / pie - 13) < 0.5 && abs(ventanas[0].abajo / pie - 3) < 0.6
+    print(String(format: "%@ a través · puerta que el plano no tenía: %@ · ventana: %@", okP && okV ? "OK  " : "FALLA",
+                 puertas.map { String(format: "%.1f-%.1f ft hasta %.1f", $0.t0 / pie, $0.t1 / pie, $0.arriba / pie) }.joined(), ventanas.map { String(format: "%.1f-%.1f ft de %.1f a %.1f", $0.t0 / pie, $0.t1 / pie, $0.abajo / pie, $0.arriba / pie) }.joined()))
+    if !(okP && okV) { fallas += 1 }
+    // Una pared entera (sin huecos): nada.
+    var entera = MallaDelCuarto.Traspaso(a: a, b: b, alto: 8 * pie)
+    for paso in 0..<40 { let C = SIMD3<Float>(Float(1 + Double(paso) * 0.06), 1.2, 1.5); for _ in 0..<400 { entera.votar(camara: C, punto: SIMD3<Float>(Float(rnd() * 14 * pie), Float(rnd() * 8 * pie), Float(gauss(0.015))), piso: 0) } }
+    let ok2 = entera.aberturas().isEmpty
+    print("\(ok2 ? "OK  " : "FALLA") a través · pared entera: ninguna abertura"); if !ok2 { fallas += 1 }
+    // La malla corrida 20 cm de la pared de verdad (todavía sin pegar): no inventa huecos.
+    var corrida = MallaDelCuarto.Traspaso(a: a + SIMD2(0, 0.2), b: b + SIMD2(0, 0.2), alto: 8 * pie)
+    for paso in 0..<40 { let C = SIMD3<Float>(Float(1 + Double(paso) * 0.06), 1.2, 1.5); for _ in 0..<400 { corrida.votar(camara: C, punto: SIMD3<Float>(Float(rnd() * 14 * pie), Float(rnd() * 8 * pie), Float(gauss(0.015))), piso: 0) } }
+    let ok3 = corrida.aberturas().isEmpty
+    print("\(ok3 ? "OK  " : "FALLA") a través · malla corrida 20 cm: no inventa huecos"); if !ok3 { fallas += 1 }
+}
 extension SystemRandomNumberGenerator { static var shared = SystemRandomNumberGenerator() }
 print(fallas == 0 ? "TODO BIEN" : "FALLAS: \(fallas)")
 exit(fallas == 0 ? 0 : 1)

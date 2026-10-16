@@ -230,6 +230,8 @@ final class OrbitaVoz: UIView {
 class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerViewDataSource, UIPickerViewDelegate, AVSpeechSynthesizerDelegate {
 
     var onFinish: ((ARMeasureOutcome) -> Void)?
+    // La bitácora del laboratorio (16 oct): el plugin la pasa a la página, que la sube a fotos_lab_bitacora.
+    var onBitacora: (([String: Any]) -> Void)?
     // Set by the plugin before presenting, from the section the crew tapped
     // the camera button from - each option already carries its own
     // companion info (or none), so the "does this include X too?" question
@@ -10027,7 +10029,30 @@ fileprivate final class LabDemolicion {
     var mallaTechoFirma = ""
     var memoriaTecho: [String: (tiras: [[SIMD2<Double>]], fecha: Date)] = [:]   // por cuarto, pies del plano
     var techoAhora: (cuarto: String, tiras: [[SIMD2<Double>]], visto: Double)?
+    // CADA PARED SE QUEDA (16 oct, su prueba: "se mueve todo como si fuese una sola pieza... la malla tiene que unirse a
+    // la pared, saber dónde está y quedarse ahí"): una pared que el láser pega al MISMO plano 3 veces seguidas (1.5 s)
+    // se amarra a ese plano de ARKit y ya no la mueve el ajuste del cuarto; solo se suelta si el plano desaparece (ARKit lo
+    // juntó con otro) o si el láser la ve en otro lado 4 s seguidos.
+    var fijas: [String: ParedFija] = [:]                       // "cuarto|clave"
+    var candidatas: [String: (ancla: UUID, veces: Int)] = [:]
+    // LA MALLA TAMBIÉN ESCANEA (16 oct, su foto de la puerta a la cocina): lo que se ve a través de cada pared.
+    var traspasos: [String: MallaDelCuarto.Traspaso] = [:]     // "cuarto|clave", en el orden de la clave
+    var aberturasVistas: [String: [(t0: Double, t1: Double, abajo: Double, arriba: Double, puerta: Bool)]] = [:]   // pies desde `a`
+    var ultimoTraspaso: CFTimeInterval = 0
+    var ultimasAberturas: CFTimeInterval = 0
+    // LA BITÁCORA (16 oct: "que guarde información para que tú aprendas"): resumen cada 2 s y cada evento, al servidor
+    // (fotos_lab_bitacora) por la página y a Documents/bitacora/ en el teléfono.
+    var bitacora: [[String: Any]] = []
+    var bitacoraSesion = ""
+    var bitacoraInicio = Date()
+    var ultimoResumen: CFTimeInterval = 0
+    var ultimoEnvio: CFTimeInterval = 0
+    var ultimosPlanosBit: CFTimeInterval = 0
 }
+
+// Una pared de la malla amarrada a un plano de ARKit: sus dos puntas en las coordenadas de ese plano (así sigue al plano si
+// ARKit lo corrige) y cuántas veces seguidas el láser la ha visto en otro lado.
+fileprivate struct ParedFija { var ancla: UUID; var aLocal: SIMD4<Float>; var bLocal: SIMD4<Float>; var malas = 0 }
 
 // Los toques del laboratorio (pellizco = zoom, un toque = marcar una esquina, dos toques = sin zoom): solo los que caen en
 // la cámara, nunca en la tarjeta, la pastilla o el mapita.
@@ -10116,7 +10141,18 @@ extension ARMeasureViewController {
         L.resultado = ComparadorDeDemolicion.Resultado()
         ponerGestosLab()
         pintarPastillaMalla()
+        L.bitacoraSesion = ""; L.bitacora.removeAll()
+        anotarBitacora("entrar", ["nivel": nivelActual, "cuarto_escogido": roomName, "plano": planoParaBitacora(), "aparato": Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? ""])
         pintarLaboratorio()
+    }
+    // El plano del nivel, para la bitácora (las paredes en pies; los cuartos por su nombre del plano).
+    private func planoParaBitacora() -> [[String: Any]] {
+        guard let m = nueva.acomodoMarco ?? marcoDe(roomName) ?? marcoPorCuarto.values.min() else { return [] }
+        func r(_ x: Double) -> Double { (x * 100).rounded() / 100 }
+        return cuartosDelMarco(m).map { c in
+            ["cuarto": c.nombre, "paredes": c.paredes.map { [r($0.seg.a.x), r($0.seg.a.y), r($0.seg.b.x), r($0.seg.b.y), r($0.alto), $0.exterior ? 1 : 0] },
+             "senas": c.senas.map { [r($0.p.x), r($0.p.y), $0.esVentana ? 1 : 0, r($0.ancho), r($0.abajo), r($0.alto)] }]
+        }
     }
 
     private func salirLaboratorio() {
@@ -10146,6 +10182,8 @@ extension ARMeasureViewController {
         L.cola.async { L.comparador.reiniciar() }
         L.capa?.removeFromParentNode(); L.capa = nil
         L.vistaMaqueta?.removeFromSuperview(); L.vistaMaqueta = nil
+        anotarBitacora("salir", ["fijas": L.fijas.count, "aberturas": L.aberturasVistas.values.reduce(0) { $0 + $1.count }])
+        enviarBitacora()
         cerrarMallaPorCuarto()
         quitarMallaDeLaCasa()
         L.pastilla.isHidden = true; L.tarjeta.isHidden = true
@@ -10501,6 +10539,7 @@ extension ARMeasureViewController {
         ponerCara(cara, ancla: ancla, t: frame.timestamp)
         L.enPlano = ParedDelLab(cuarto: w.cuarto, pared: w.pared, ac: ac, aberturas: w.aberturas)
         actualizarEsquinas(frame, forzar: true)
+        anotarBitacora("fijar-pared", ["cuarto": w.cuarto, "a": [w.pared.a.x, w.pared.a.y], "b": [w.pared.b.x, w.pared.b.y], "exterior": w.pared.exterior])
         if let g = L.grabadora {
             // Para la Mac: qué pared del plano es, en pies del plano y con el acomodo (así se repite igual allá).
             let e: [String: Any] = ["evento": "pared-plano", "cuarto": w.cuarto, "exterior": w.pared.exterior,
@@ -10539,6 +10578,7 @@ extension ARMeasureViewController {
         let lim = DemolicionEnPlano.limitesDelTecho(cara, paredes: paredes, acomodo: ac, planos: planos)
         lab.apuntada = nil; lab.apuntadaTexto = nil
         ponerTecho(TechoDelLab(cuarto: cuarto, cara: cara, limites: lim, ac: ac), t: frame.timestamp)
+        anotarBitacora("fijar-techo", ["cuarto": cuarto, "alto_m": (Double(techoY - pisoParaLab(frame)) * 100).rounded() / 100])
         pintarLaboratorio()
     }
     private func ponerTecho(_ t0: TechoDelLab, t: TimeInterval) {
@@ -10595,9 +10635,154 @@ extension ARMeasureViewController {
         guard ahora - L.ultimaMalla >= 0.5 else { return }
         L.ultimaMalla = ahora
         let piso = pisoParaLab(frame)
+        let antes = L.cuartoMalla
         seguirElCuarto(m, base: base, frame: frame)
+        if L.cuartoMalla != antes, let c = L.cuartoMalla { anotarBitacora("cuarto", ["cuarto": c, "antes": antes ?? ""]) }
         if let cuarto = L.cuartoMalla { afinarMalla(cuarto: cuarto, marco: m, base: base, piso: piso) }
         pintarMalla(ac: acomodoParaLab() ?? base, marco: m, piso: piso)
+        resumenBitacora(frame, piso: piso)
+    }
+    // ---------------- LA MALLA TAMBIÉN ESCANEA ----------------
+    // Su foto del 16 oct: una puerta hacia la cocina que el plano no tenía, y la malla encima. Tres veces por segundo se
+    // toman ~2,500 puntos del láser y se ve qué rayos CRUZAN cada pared del cuarto (MallaDelCuarto.Traspaso): por donde el
+    // láser pasa al otro lado no hay pared. Cada segundo salen las aberturas (puerta o ventana) y la malla deja ese hueco.
+    fileprivate func vigilarAberturas(_ frame: ARFrame) {
+        let L = lab
+        let ahora = CACurrentMediaTime()
+        guard L.activo, maqueta == 0, ahora - L.ultimoTraspaso >= 0.33, ProcessInfo.processInfo.thermalState != .critical,
+              let cuarto = L.cuartoMalla, let claves = L.mallaClaves[cuarto], let enAR = L.mallaAR[cuarto], enAR.count == claves.count,
+              let prof = frame.smoothedSceneDepth ?? frame.sceneDepth else { return }
+        L.ultimoTraspaso = ahora
+        let piso = pisoParaLab(frame)
+        // Las paredes del cuarto, en el orden de su clave (`a` de la malla primero).
+        var paredes: [(k: String, clave: String, a: SIMD2<Double>, b: SIMD2<Double>, alto: Double)] = []
+        for clave in claves {
+            guard let mw = L.mallaParedes[clave] else { continue }
+            guard let e = extremosEnAR(clave: clave, ac: acomodoParaLab() ?? DemolicionEnPlano.Acomodo2D(giro: 0, mov: .zero)) else { continue }
+            paredes.append((cuarto + "|" + clave, clave, e.a, e.b, mw.alto * 0.3048))
+        }
+        for p in paredes where !(L.traspasos[p.k]?.misma(p.a, p.b) ?? false) {
+            L.traspasos[p.k] = MallaDelCuarto.Traspaso(a: p.a, b: p.b, alto: p.alto)
+        }
+        let pb = prof.depthMap
+        guard CVPixelBufferGetPixelFormatType(pb) == kCVPixelFormatType_DepthFloat32 else { return }
+        CVPixelBufferLockBaseAddress(pb, .readOnly)
+        let w = CVPixelBufferGetWidth(pb), h = CVPixelBufferGetHeight(pb), bpr = CVPixelBufferGetBytesPerRow(pb)
+        var conf: [UInt8]? = nil
+        if let cm = prof.confidenceMap { conf = Self.copiarConfianza(cm) }
+        if let base = CVPixelBufferGetBaseAddress(pb) {
+            let K = frame.camera.intrinsics, res = frame.camera.imageResolution
+            let esc = Float(w) / Float(res.width)
+            let fx = K[0][0] * esc, fy = K[1][1] * esc, cx = K[2][0] * esc, cy = K[2][1] * esc
+            let T = frame.camera.transform
+            let C = SIMD3<Float>(T.columns.3.x, T.columns.3.y, T.columns.3.z)
+            var y = 2
+            while y < h {
+                let fila = (base + y * bpr).assumingMemoryBound(to: Float32.self)
+                var x = 2
+                while x < w {
+                    let d = fila[x]
+                    if d > 0.2, d < 6, (conf.map { $0[y * w + x] >= 1 } ?? true) {
+                        let local = SIMD4<Float>((Float(x) - cx) / fx * d, -(Float(y) - cy) / fy * d, -d, 1)
+                        let m = T * local
+                        let P = SIMD3<Float>(m.x, m.y, m.z)
+                        for p in paredes { L.traspasos[p.k]?.votar(camara: C, punto: P, piso: piso) }
+                    }
+                    x += 5
+                }
+                y += 4
+            }
+        }
+        CVPixelBufferUnlockBaseAddress(pb, .readOnly)
+        // Cada segundo: las aberturas (en pies desde `a`). Una "abertura" de más del 60% de la pared no es abertura: es la
+        // malla corrida (el láser pega en la pared de verdad detrás de ella).
+        guard ahora - L.ultimasAberturas >= 1 else { return }
+        L.ultimasAberturas = ahora
+        for p in paredes {
+            guard let tr = L.traspasos[p.k] else { continue }
+            let largo = simd_distance(p.a, p.b)
+            let nuevas = tr.aberturas().filter { $0.t1 - $0.t0 <= 0.6 * largo }.map {
+                (t0: $0.t0 * MallaDelCuarto.k, t1: $0.t1 * MallaDelCuarto.k, abajo: $0.abajo * MallaDelCuarto.k, arriba: $0.arriba * MallaDelCuarto.k, puerta: $0.puerta)
+            }
+            let viejas = L.aberturasVistas[p.k] ?? []
+            for n in nuevas where !viejas.contains(where: { abs($0.t0 - n.t0) < 0.7 && abs($0.t1 - n.t1) < 0.7 }) {
+                // ¿Estaba en el plano? (una puerta o ventana del escaneo de antes a 1 ft o menos)
+                let delPlano = (L.mallaAberturas[p.clave] ?? []).contains { min($0.t1, n.t1) - max($0.t0, n.t0) > 0.5 * (n.t1 - n.t0) }
+                anotarBitacora("abertura", ["cuarto": cuarto, "clave": p.clave, "tipo": n.puerta ? "puerta" : "ventana", "en_el_plano": delPlano,
+                                            "de_ft": (n.t0 * 10).rounded() / 10, "a_ft": (n.t1 * 10).rounded() / 10,
+                                            "abajo_ft": (n.abajo * 10).rounded() / 10, "arriba_ft": (n.arriba * 10).rounded() / 10])
+            }
+            L.aberturasVistas[p.k] = nuevas
+        }
+    }
+
+    // ---------------- LA BITÁCORA ----------------
+    // Cada evento y un resumen cada 2 s: al servidor (la página lo sube a fotos_lab_bitacora cada 8 s) y a
+    // Documents/bitacora/<sesión>.jsonl en el teléfono. Sin nombres de clientes: cuartos y números.
+    fileprivate func anotarBitacora(_ tipo: String, _ datos: [String: Any]) {
+        let L = lab
+        guard L.activo || tipo == "salir" else { return }
+        if L.bitacoraSesion.isEmpty { L.bitacoraSesion = UUID().uuidString; L.bitacoraInicio = Date() }
+        let fila: [String: Any] = ["t": (Date().timeIntervalSince(L.bitacoraInicio) * 10).rounded() / 10, "tipo": tipo, "datos": datos]
+        L.bitacora.append(fila)
+        if let d = try? JSONSerialization.data(withJSONObject: fila), let doc = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            let dir = doc.appendingPathComponent("bitacora", isDirectory: true)
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let url = dir.appendingPathComponent(L.bitacoraSesion + ".jsonl")
+            var linea = d; linea.append(0x0A)
+            if let h = try? FileHandle(forWritingTo: url) { h.seekToEndOfFile(); h.write(linea); try? h.close() } else { try? linea.write(to: url) }
+        }
+        if L.bitacora.count >= 40 { enviarBitacora() }
+    }
+    fileprivate func enviarBitacora() {
+        let L = lab
+        guard !L.bitacora.isEmpty, let mandar = onBitacora else { L.bitacora.removeAll(); return }
+        let lote: [String: Any] = ["sesion": L.bitacoraSesion, "filas": L.bitacora]
+        L.bitacora.removeAll()
+        L.ultimoEnvio = CACurrentMediaTime()
+        mandar(lote)
+    }
+    private func resumenBitacora(_ frame: ARFrame, piso: Float) {
+        let L = lab
+        let ahora = CACurrentMediaTime()
+        if ahora - L.ultimoEnvio >= 8 { enviarBitacora() }
+        guard ahora - L.ultimoResumen >= 2 else { return }
+        L.ultimoResumen = ahora
+        func r(_ x: Double, _ n: Double = 100) -> Double { (x * n).rounded() / n }
+        let T = frame.camera.transform
+        let adelante = -SIMD3<Float>(T.columns.2.x, T.columns.2.y, T.columns.2.z)
+        var d: [String: Any] = ["tel": [r(Double(T.columns.3.x)), r(Double(T.columns.3.y)), r(Double(T.columns.3.z))],
+                                "mira": [r(Double(adelante.x)), r(Double(adelante.y)), r(Double(adelante.z))],
+                                "piso": r(Double(piso)), "termico": ProcessInfo.processInfo.thermalState.rawValue, "zoom": r(Double(L.zoom), 10)]
+        if let ac = nueva.acomodo { d["ubicacion"] = ["giro": r(ac.giro, 10000), "mov": [r(ac.mov.x), r(ac.mov.y)], "seguro": ac.seguro] }
+        if let c = L.cuartoMalla {
+            d["cuarto"] = c
+            if let ac = L.acCuarto[c] { d["afinado"] = ["giro": r(ac.giro, 10000), "mov": [r(ac.mov.x), r(ac.mov.y)]] }
+            if let claves = L.mallaClaves[c], let enAR = L.mallaAR[c], enAR.count == claves.count {
+                d["paredes"] = zip(claves, enAR).map { k, w -> [String: Any] in
+                    ["clave": k, "a": [r(w.a.x), r(w.a.y)], "b": [r(w.b.x), r(w.b.y)], "estado": w.fija ? "fija" : (w.vista ? "laser" : "ubicacion"),
+                     "aberturas": (L.aberturasVistas[c + "|" + k] ?? []).map { [r($0.t0, 10), r($0.t1, 10), r($0.abajo, 10), r($0.arriba, 10)] }]
+                }
+            }
+            d["pines"] = (L.pines[c] ?? []).count
+        }
+        if let ctx = L.enPlano {
+            d["midiendo"] = ["cuarto": ctx.cuarto, "a": [r(ctx.pared.a.x), r(ctx.pared.a.y)], "b": [r(ctx.pared.b.x), r(ctx.pared.b.y)],
+                             "sf": r(Double((L.reporte?.area ?? L.resultado.area) / (0.3048 * 0.3048)), 10),
+                             "tramos": (L.reporte?.tramos ?? []).map { [r(Double($0.desde), 100), r(Double($0.hasta), 100), r(Double($0.alto), 100)] },
+                             "visto": r(Double(L.resultado.vistoPct)), "lejos": r(Double(L.lejos)), "mensaje": mensajeLaboratorio() ?? ""]
+        } else if let tt = L.techo {
+            d["midiendo"] = ["techo": tt.cuarto ?? "", "sf": r(Double(L.resultadoTecho.area / (0.3048 * 0.3048)), 10), "huecos": L.resultadoTecho.huecos.count,
+                             "visto": r(Double(L.resultadoTecho.techoVisto ?? 0))]
+        }
+        anotarBitacora("resumen", d)
+        // Cada 10 s, los planos de ARKit que ve (para revisar en la computadora qué se pegó con qué).
+        if ahora - L.ultimosPlanosBit >= 10 {
+            L.ultimosPlanosBit = ahora
+            let vs = vistasParaMalla(piso: piso)
+            anotarBitacora("planos", ["verticales": vs.map { ["id": String($0.id.uuidString.prefix(8)), "a": [r($0.vista.a.x), r($0.vista.a.y)], "b": [r($0.vista.b.x), r($0.vista.b.y)],
+                                                              "arriba": r(Double($0.arriba - piso))] }])
+        }
     }
     // Las paredes de un cuarto que llevan malla (1 ft o más), con su clave (la misma pared vista desde dos cuartos es una).
     private func paredesDeMalla(_ c: (nombre: String, paredes: [UbicadorEnPlano.ParedPlano], senas: [UbicadorEnPlano.SenaPlano])) -> [(clave: String, pared: DemolicionEnPlano.Pared)] {
@@ -10630,10 +10815,10 @@ extension ARMeasureViewController {
             if !L.fijada { pintarLaboratorio() }
         } else { L.cuartoNuevo = (aqui, Date()) }
     }
-    // Lo que ve el láser, para la malla: las paredes de ARKit en el piso (metros), con su lado. Lo que no pasa de 1.2 m del
-    // piso es un mueble (un sillón, un gabinete bajo): no cuenta.
-    private func vistasParaMalla(piso: Float) -> [MallaDelCuarto.Vista] {
-        nueva.planosVistos.values.compactMap { p -> MallaDelCuarto.Vista? in
+    // Lo que ve el láser, para la malla: las paredes de ARKit en el piso (metros), con su lado y hasta dónde llegan para
+    // arriba. Lo que no pasa de 1.2 m del piso es un mueble (un sillón, un gabinete bajo): no cuenta.
+    private func vistasParaMalla(piso: Float) -> [(id: UUID, vista: MallaDelCuarto.Vista, arriba: Float)] {
+        nueva.planosVistos.values.compactMap { p -> (id: UUID, vista: MallaDelCuarto.Vista, arriba: Float)? in
             let t = p.transform
             var n = SIMD2<Double>(Double(t.columns.1.x), Double(t.columns.1.z))
             guard simd_length(n) > 0.7 else { return nil }
@@ -10648,36 +10833,78 @@ extension ARMeasureViewController {
             }
             guard cuenta > 2, hi - lo >= 0.3, arriba >= piso + 1.2 else { return nil }
             off /= cuenta
-            return MallaDelCuarto.Vista(a: dir * lo + n * off, b: dir * hi + n * off, n: nueva.ladoPlano[p.identifier])
+            return (p.identifier, MallaDelCuarto.Vista(a: dir * lo + n * off, b: dir * hi + n * off, n: nueva.ladoPlano[p.identifier]), arriba)
         }
     }
-    // La ubicación del cuarto, afinada con lo que ve el láser y las esquinas tocadas; suavizada para que la malla no brinque
-    // (un brinco de más de 50 cm = la ubicación cambió de verdad: se toma de una vez).
+    // La ubicación del cuarto, afinada con lo que ve el láser y las esquinas tocadas. Cada pared que el láser confirma se
+    // AMARRA a su plano y se queda ahí (ya no se mueve con el ajuste del cuarto); las demás se suavizan para que no
+    // brinquen (un brinco de más de 50 cm = la ubicación cambió de verdad: se toma de una vez).
     private func afinarMalla(cuarto: String, marco m: Int, base: DemolicionEnPlano.Acomodo2D, piso: Float) {
         let L = lab
         guard let c = cuartosDelMarco(m).first(where: { $0.nombre == cuarto }) else { return }
         let lista = paredesDeMalla(c)
         guard !lista.isEmpty else { return }
-        let aj = MallaDelCuarto.ajustar(paredes: lista.map { $0.pared }, ac: base, vistas: vistasParaMalla(piso: piso), pines: L.pines[cuarto] ?? [])
-        let antes = L.ajusteInfo
-        L.ajusteInfo = (aj.vistas, lista.count, aj.pines)
-        if antes != L.ajusteInfo { pintarPastillaMalla() }
+        let vs = vistasParaMalla(piso: piso)
+        let aj = MallaDelCuarto.ajustar(paredes: lista.map { $0.pared }, ac: base, vistas: vs.map { $0.vista }, pines: L.pines[cuarto] ?? [])
         L.mallaClaves[cuarto] = lista.map { $0.clave }
-        // Sin nada con qué afinar ahora (un momento sin ver paredes): se queda lo que ya se había afinado.
-        if !aj.afinado, L.acCuarto[cuarto] != nil, L.mallaAR[cuarto]?.count == lista.count { return }
-        var nuevas = aj.paredes, ac = aj.ac
-        if let prev = L.mallaAR[cuarto], prev.count == nuevas.count, let acP = L.acCuarto[cuarto] {
-            let salto = zip(prev, nuevas).map { max(simd_distance($0.a, $1.a), simd_distance($0.b, $1.b)) }.max() ?? 0
-            if salto < 0.5 {
-                let f = 0.35
-                nuevas = zip(prev, nuevas).map { p, n in var x = n; x.a = p.a + (n.a - p.a) * f; x.b = p.b + (n.b - p.b) * f; return x }
-                var dg = (ac.giro - acP.giro).truncatingRemainder(dividingBy: 2 * .pi)
-                if dg > .pi { dg -= 2 * .pi } else if dg < -.pi { dg += 2 * .pi }
-                ac = DemolicionEnPlano.Acomodo2D(giro: acP.giro + dg * f, mov: acP.mov + (ac.mov - acP.mov) * f)
+        var lineas = aj.paredes
+        for (i, item) in lista.enumerated() {
+            let k = cuarto + "|" + item.clave
+            let visto: (id: UUID, j: Int)? = aj.paredes[i].vista ? aj.paredes[i].cual.map { (vs[$0].id, $0) } : nil
+            // Ya amarrada: va donde dice su plano.
+            if var f = L.fijas[k] {
+                if let ancla = nueva.planosVistos[f.ancla] {
+                    let a4 = ancla.transform * f.aLocal, b4 = ancla.transform * f.bLocal
+                    var linea = MallaDelCuarto.ParedAR(a: SIMD2(Double(a4.x), Double(a4.z)), b: SIMD2(Double(b4.x), Double(b4.z)))
+                    linea.vista = true; linea.fija = true
+                    // ¿El láser la ve en otro plano, a más de 15 cm? Varias veces seguidas = se amarró mal: se suelta.
+                    if let v = visto, v.id != f.ancla {
+                        let nl = simd_normalize(linea.b - linea.a)
+                        let dist = abs(simd_dot((aj.paredes[i].a + aj.paredes[i].b) / 2 - linea.a, MallaDelCuarto.perp(nl)))
+                        f.malas = dist > 0.15 ? f.malas + 1 : 0
+                    } else { f.malas = 0 }
+                    if f.malas >= 8 {
+                        L.fijas[k] = nil
+                        anotarBitacora("pared-suelta", ["cuarto": cuarto, "clave": item.clave, "porque": "el láser la ve en otro lado"])
+                    } else { L.fijas[k] = f; lineas[i] = linea; continue }
+                } else {
+                    L.fijas[k] = nil
+                    anotarBitacora("pared-suelta", ["cuarto": cuarto, "clave": item.clave, "porque": "ARKit juntó su plano con otro"])
+                }
+            }
+            // Sin amarrar: si el láser la pega al MISMO plano 3 veces seguidas, con un plano que sube 1.5 m o más y que
+            // cubre 60 cm (o 40% de la pared), se amarra.
+            guard let v = visto else { L.candidatas[k] = nil; continue }
+            let veces = (L.candidatas[k]?.ancla == v.id) ? (L.candidatas[k]!.veces + 1) : 1
+            L.candidatas[k] = (v.id, veces)
+            let w = lineas[i], largo = simd_distance(w.a, w.b)
+            guard veces >= 3, largo > 0.2, vs[v.j].arriba >= piso + 1.5, let ancla = nueva.planosVistos[v.id] else { continue }
+            let u = (w.b - w.a) / largo
+            let s0 = simd_dot(vs[v.j].vista.a - w.a, u), s1 = simd_dot(vs[v.j].vista.b - w.a, u)
+            let encima = min(largo, max(s0, s1)) - max(0, min(s0, s1))
+            guard encima >= min(0.6, 0.4 * largo) else { continue }
+            let inv = ancla.transform.inverse
+            L.fijas[k] = ParedFija(ancla: v.id, aLocal: inv * SIMD4<Float>(Float(w.a.x), piso, Float(w.a.y), 1),
+                                   bLocal: inv * SIMD4<Float>(Float(w.b.x), piso, Float(w.b.y), 1))
+            lineas[i].fija = true
+            anotarBitacora("pared-fija", ["cuarto": cuarto, "clave": item.clave, "largo_m": (largo * 100).rounded() / 100,
+                                          "visto_m": (encima * 100).rounded() / 100])
+        }
+        lineas = MallaDelCuarto.esquinar(lista.map { $0.pared }, lineas)
+        // Las que no están amarradas se suavizan (las amarradas van donde dice su plano, sin más).
+        if let prev = L.mallaAR[cuarto], prev.count == lineas.count {
+            for i in lineas.indices where !lineas[i].fija {
+                let salto = max(simd_distance(prev[i].a, lineas[i].a), simd_distance(prev[i].b, lineas[i].b))
+                guard salto < 0.5 else { continue }
+                lineas[i].a = prev[i].a + (lineas[i].a - prev[i].a) * 0.35
+                lineas[i].b = prev[i].b + (lineas[i].b - prev[i].b) * 0.35
             }
         }
-        L.mallaAR[cuarto] = nuevas
-        L.acCuarto[cuarto] = aj.afinado ? ac : nil
+        L.mallaAR[cuarto] = lineas
+        if aj.afinado { L.acCuarto[cuarto] = aj.ac }
+        let antes = L.ajusteInfo
+        L.ajusteInfo = (lineas.filter { $0.vista || $0.fija }.count, lista.count, aj.pines)
+        if antes != L.ajusteInfo { pintarPastillaMalla() }
     }
     // Las dos puntas de una pared de la malla en el AR (metros), en el orden de su clave (`a` de la malla primero): las del
     // cuarto donde está, ya afinadas; si es de otro cuarto, con la ubicación.
@@ -10802,13 +11029,19 @@ extension ARMeasureViewController {
             // Su dibujo, solo si cambió lo cortado (o el zoom, o el lado).
             let cortes = L.cortesPorPared[clave] ?? []
             let aberturas = L.mallaAberturas[clave] ?? []
+            // Las que vio el láser y el plano no tenía (las del plano ya van en `aberturas`).
+            let vistas = (L.aberturasVistas[cuarto + "|" + clave] ?? []).filter { n in
+                !aberturas.contains { min($0.t1, n.t1) - max($0.t0, n.t0) > 0.5 * (n.t1 - n.t0) } }.map { ($0.t0, $0.t1, $0.abajo, $0.arriba) }
+            let fija = enAR[j].fija
             let largoPies = Double(largoM) * MallaDelCuarto.k
             let firma = cortes.map { String(format: "%.2f-%.2f-%.2f", $0.t0, $0.t1, $0.alto) }.joined(separator: "|")
-                + String(format: "|%.2f|%.1f|%d|%@|%@", mw.alto, largoPies, aberturas.count, L.mallaFina ? "f" : "g", espejo ? "e" : "d")
+                + String(format: "|%.2f|%.1f|%d|%@|%@|%@|", mw.alto, largoPies, aberturas.count, L.mallaFina ? "f" : "g", espejo ? "e" : "d", fija ? "F" : "s")
+                + vistas.map { String(format: "%.1f-%.1f-%.1f-%.1f", $0.0, $0.1, $0.2, $0.3) }.joined(separator: ",")
             if L.mallaFirma[clave] != firma {
                 L.mallaFirma[clave] = firma
                 nodo.geometry?.firstMaterial?.diffuse.contents = Self.texturaDeMalla(largoPies: largoPies, altoPies: mw.alto, cortes: cortes,
-                                                                                    aberturas: aberturas, fina: L.mallaFina, espejo: espejo)
+                                                                                    aberturas: aberturas, fina: L.mallaFina, espejo: espejo,
+                                                                                    vistas: vistas, fija: fija)
             }
             let x = simd_normalize(b3 - a3), y = SIMD3<Float>(0, 1, 0), z = simd_cross(x, y)
             var mt = matrix_identity_float4x4
@@ -10976,6 +11209,7 @@ extension ARMeasureViewController {
         L.ajusteInfo = (0, 0, 0)
         L.mallaPastilla.isHidden = true
         L.techoAhora = nil
+        L.fijas.removeAll(); L.candidatas.removeAll(); L.traspasos.removeAll(); L.aberturasVistas.removeAll()
     }
     // El dibujo de una pared: una malla clarita (líneas cada 6 in, más marcadas cada 2 ft; con zoom, cada 3 in y marcadas
     // cada pie), lo quitado en naranja del piso para arriba, y las alturas de corte de siempre (1 ft, 2 ft y 4 ft: lo que
@@ -10983,7 +11217,8 @@ extension ARMeasureViewController {
     // `espejo` se voltea (la cara de enfrente mira para adentro del cuarto y los números se leen derechos).
     static func texturaDeMalla(largoPies: Double, altoPies: Double, cortes: [(t0: Double, t1: Double, alto: Double)],
                                aberturas: [(t0: Double, t1: Double, abajo: Double, arriba: Double, estimada: Bool)] = [],
-                               fina: Bool = false, espejo: Bool = false) -> UIImage {
+                               fina: Bool = false, espejo: Bool = false,
+                               vistas: [(Double, Double, Double, Double)] = [], fija: Bool = false) -> UIImage {
         let px = mallaPxPorPie * (fina ? 2 : 1)
         let tam = CGSize(width: max(8, CGFloat(largoPies) * px), height: max(8, CGFloat(altoPies) * px))
         func x(_ t: Double) -> CGFloat { CGFloat(espejo ? largoPies - t : t) * px }
@@ -11025,8 +11260,19 @@ extension ARMeasureViewController {
                 texto.draw(at: CGPoint(x: 6, y: y - t.height - 2), withAttributes: letra)
                 if tam.width > 6 * px { texto.draw(at: CGPoint(x: tam.width - t.width - 6, y: y - t.height - 2), withAttributes: letra) }
             }
-            g.setStrokeColor(UIColor(white: 1, alpha: 0.85).cgColor); g.setLineWidth(2)
-            g.stroke(CGRect(origin: .zero, size: tam).insetBy(dx: 1, dy: 1))
+            // La orilla: azul gruesa si la pared ya quedó amarrada a lo que ve el láser; blanca si no.
+            g.setStrokeColor(fija ? UIColor(red: 0.15, green: 0.39, blue: 0.92, alpha: 0.95).cgColor : UIColor(white: 1, alpha: 0.85).cgColor)
+            g.setLineWidth(fija ? 5 : 2)
+            g.stroke(CGRect(origin: .zero, size: tam).insetBy(dx: fija ? 2.5 : 1, dy: fija ? 2.5 : 1))
+            // Lo que el láser vio a través y el plano no tenía: hueco limpio con orilla azul punteada.
+            for v in vistas {
+                let xa = x(max(0, v.0)), xb = x(min(largoPies, v.1))
+                let y0 = tam.height - CGFloat(min(altoPies, v.3)) * px, y1 = tam.height - CGFloat(max(0, v.2)) * px
+                let r = CGRect(x: min(xa, xb), y: y0, width: abs(xb - xa), height: max(0, y1 - y0))
+                g.clear(r)
+                g.setStrokeColor(UIColor(red: 0.38, green: 0.62, blue: 1, alpha: 0.95).cgColor); g.setLineWidth(3)
+                g.setLineDash(phase: 0, lengths: [10, 6]); g.stroke(r.insetBy(dx: 1.5, dy: 1.5)); g.setLineDash(phase: 0, lengths: [])
+            }
             // Las puertas y ventanas: hueco limpio (la malla no las tapa) con su orilla; una ventana cuyo antepecho no se
             // guardó (escaneo viejo) va con la orilla punteada.
             for ab in aberturas {
@@ -11109,6 +11355,7 @@ extension ARMeasureViewController {
         if ps.count > 4 { ps.removeFirst(ps.count - 4) }
         L.pines[cuarto] = ps
         marcarEsquina(w, piso: pisoParaLab(frame))
+        anotarBitacora("esquina", ["cuarto": cuarto, "plano": [e.plano.x, e.plano.y], "pulgadas": (simd_distance(e.ar, enPiso) / 0.0254 * 10).rounded() / 10])
         L.ultimaMalla = 0
         let pulgadas = simd_distance(e.ar, enPiso) / 0.0254
         avisoLaboratorio(pulgadas < 1.5 ? "Esquina marcada: la malla ya estaba ahí." : String(format: "Esquina marcada: la malla se mueve %.0f in para pegarse ahí.", pulgadas))
@@ -11139,7 +11386,8 @@ extension ARMeasureViewController {
         if let c = L.cuartoMalla {
             partes.append("Malla · \(c)")
             let i = L.ajusteInfo
-            if i.total > 0 { partes.append(i.vistas == 0 ? "con la ubicación" : "\(i.vistas) de \(i.total) paredes con el láser") }
+            let fijasAqui = (L.mallaAR[c] ?? []).filter { $0.fija }.count
+            if i.total > 0 { partes.append(i.vistas == 0 ? "con la ubicación" : "\(i.vistas) de \(i.total) paredes con el láser" + (fijasAqui > 0 ? (fijasAqui == 1 ? " (1 fija)" : " (\(fijasAqui) fijas)") : "")) }
             if i.pines > 0 { partes.append(i.pines == 1 ? "1 esquina" : "\(i.pines) esquinas") }
         }
         if L.zoom > 1.01 { partes.append(String(format: "%.1f×", L.zoom)) }
@@ -11262,6 +11510,7 @@ extension ARMeasureViewController {
 
     private func otraPared() {
         let L = lab
+        anotarBitacora("otra-pared", ["sf": ((L.reporte?.area ?? L.resultado.area) / (0.3048 * 0.3048) * 10).rounded() / 10])
         anotarParedEnLaMemoria()
         cerrarGrabacion()
         L.generacion += 1
@@ -11290,6 +11539,7 @@ extension ARMeasureViewController {
         L.generacion += 1
         L.cola.async { L.comparador.reiniciar() }
         if let g = L.grabadora { let t = sceneView.session.currentFrame?.timestamp ?? 0; L.cola.async { g.evento(t: t, ["evento": "reiniciar", "porque": porque]) } }
+        anotarBitacora("reiniciar", ["porque": porque])
         L.ultimoOrigen = cara.origen
         L.resultado = ComparadorDeDemolicion.Resultado()
         avisoLaboratorio(porque)
@@ -11372,6 +11622,7 @@ extension ARMeasureViewController {
         // La ubicación sigue afinándose mientras se prueba (con plano), y el mapita enseña la pared que se mide.
         if !planoPorCuarto.isEmpty { ubicarseEnElPlano(); pintarMinimapa() }
         pintarMallaDeLaCasa(frame)
+        vigilarAberturas(frame)
         let ac = acomodoParaLab()
         if (ac != nil) != L.modoPlano { L.modoPlano = ac != nil; pintarLaboratorio() }
         if !L.fijada, let ac = ac { apuntarParedDelPlano(frame, ac: ac) }
@@ -11565,6 +11816,20 @@ extension ARMeasureViewController {
             // Solo el cuarto donde está (la cocina); 22 = con zoom (2.2x: la malla de cuadritos de 3 in).
             L.cuartoMalla = "Kitchen"; L.ajusteInfo = (0, 4, 0)
             if paso == 22 { L.zoom = 2.2; L.mallaFina = true }
+            if paso == 21, let co = cuartosDelMarco(0).first(where: { $0.nombre == "Kitchen" }) {
+                // La pared del sur ya quedó amarrada al láser (orilla azul) y el láser vio una puerta en la del este que el
+                // plano no tenía (de 8'-6" a 11'-6").
+                let lista = paredesDeMalla(co)
+                L.mallaAR["Kitchen"] = lista.enumerated().map { i, it in
+                    var w = MallaDelCuarto.ParedAR(a: MallaDelCuarto.ar(it.pared.a, ac), b: MallaDelCuarto.ar(it.pared.b, ac))
+                    w.vista = i == 0; w.fija = i == 0; return w
+                }
+                L.mallaClaves["Kitchen"] = lista.map { $0.clave }
+                if let este = lista.first(where: { abs($0.pared.a.x - 34) < 0.1 && abs($0.pared.b.x - 34) < 0.1 }) {
+                    L.aberturasVistas["Kitchen|" + este.clave] = [(0.8, 3.6, 0, 6.7, true)]
+                }
+                L.ajusteInfo = (1, 4, 0)
+            }
             if paso == 23 {
                 // El techo de la cocina con un hueco en L ya medido (de 5 a 11 ft x de 4 a 8 ft, más un pedazo hacia la ventana).
                 func q(_ x0: Double, _ x1: Double, _ y0: Double, _ y1: Double) -> [SIMD2<Double>] { [SIMD2(20 + x0, y0), SIMD2(20 + x1, y0), SIMD2(20 + x1, y1), SIMD2(20 + x0, y1)] }

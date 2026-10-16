@@ -175,6 +175,8 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
             // tapping (cancel, length-only, or both measurements) - the
             // dismiss happens here, not inside the view controller, so
             // there is only ever one dismissal path to reason about.
+            // La bitácora del laboratorio (16 oct): cada lote va a la página como evento "bitacora" (ella lo sube).
+            arVC.onBitacora = { [weak self] lote in self?.notifyListeners("bitacora", data: lote) }
             arVC.onFinish = { [weak arVC] outcome in
                 guard let arVC = arVC else { return }
                 arVC.dismiss(animated: true) {
