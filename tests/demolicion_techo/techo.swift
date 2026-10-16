@@ -7,6 +7,22 @@ import Foundation
 import simd
 
 struct Hueco { var x0: Float; var x1: Float; var z0: Float; var z1: Float }
+// Un tubo (agua, desagüe, cable, ducto redondo) dentro del techo: un cilindro a lo largo de x o de z.
+// `pos` = dónde está en el otro eje (m); `alto` = su centro arriba de la cara del techo (m); `radio` (m).
+struct Tubo { var aLoLargoDeX: Bool; var pos: Float; var alto: Float; var radio: Float }
+// Choque de un rayo con un cilindro horizontal; el t más chico > 0.
+func cruzaTubo(_ o: SIMD3<Float>, _ d: SIMD3<Float>, _ tb: Tubo, H: Float) -> Float? {
+    let yc = H + tb.alto
+    let oa = tb.aLoLargoDeX ? SIMD2(o.y - yc, o.z - tb.pos) : SIMD2(o.y - yc, o.x - tb.pos)
+    let da = tb.aLoLargoDeX ? SIMD2(d.y, d.z) : SIMD2(d.y, d.x)
+    let a = simd_dot(da, da), b = 2 * simd_dot(oa, da), c = simd_dot(oa, oa) - tb.radio * tb.radio
+    let disc = b * b - 4 * a * c
+    guard a > 1e-9, disc >= 0 else { return nil }
+    let r = sqrt(disc)
+    let t1 = (-b - r) / (2 * a), t2 = (-b + r) / (2 * a)
+    if t1 > 1e-5 { return t1 }
+    return t2 > 1e-5 ? t2 : nil
+}
 
 struct CuartoTecho {
     var L: Float = 14 * pie, D: Float = 12 * pie, H: Float = 8 * pie
@@ -20,6 +36,8 @@ struct CuartoTecho {
     var rejillas: [Hueco] = []                    // rejilla del aire: un hueco chico de 4 in de hondo
     var cajas: [Caja] = []                        // un abanico, una lámpara colgada (delante del techo)
     var mancha: SIMD2<Float>? = nil               // la mancha del agua (anillo de 3 ft): el relleno de Apple ve 0.6 in
+    var tubos: [Tubo] = []                        // tubos y ductos redondos encima del techo
+    var ductos: [Caja] = []                       // ductos rectangulares encima del techo
 
     func enHueco(_ x: Float, _ z: Float) -> Bool { huecos.contains { x >= $0.x0 && x <= $0.x1 && z >= $0.z0 && z <= $0.z1 } }
     // Las vigas (o cuerdas) como cajas, la placa de arriba de cada pared y el subpiso.
@@ -69,6 +87,8 @@ struct CuartoTecho {
         }
         var t = mejor
         for c in cajasArriba() { if let tc = cruzaCaja(o, d, c) { t = min(t, tc) } }
+        for c in ductos { if let tc = cruzaCaja(o, d, c) { t = min(t, tc) } }
+        for tb in tubos { if let tc = cruzaTubo(o, d, tb, H: H) { t = min(t, tc) } }
         let arriba: Float = atico ? H + 1.6 : H + drywall + viga
         t = min(t, (arriba - o.y) / d.y)
         return t

@@ -2,8 +2,8 @@
 // (el mismo escáner de Field Reports, que ya viene dentro de la app: plugin RoomScan) y se dibuja con el
 // mismo código de Field Reports (plano.js, copiado por tools/extraer_plano.py). Un escaneo por piso;
 // un escaneo nuevo no borra el anterior (queda de historial), se ve el más reciente.
-import * as plano from './plano.js?v=2026-10-15-16';
-import { authFetch, esAparato } from './app.js?v=2026-10-15-16';
+import * as plano from './plano.js?v=2026-10-15-17';
+import { authFetch, esAparato } from './app.js?v=2026-10-15-17';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
@@ -88,7 +88,8 @@ export async function paredesParaCamara(trabajoId, nivelId){
         if(!w || !w.start || !w.end || w._ajena) return;
         if(Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y) < 1) return;
         const r2 = v => Math.round(v * 100) / 100;
-        forma.paredes.push([r2(w.start.x), r2(w.start.y), r2(w.end.x), r2(w.end.y), plano.floorplanIsExteriorWall(w, room, d.merged === false ? null : rooms) ? 1 : 0]);
+        // El 6o número es el alto de la pared (pies, 15-oct): con él la cámara pone la malla de la casa del piso al techo.
+        forma.paredes.push([r2(w.start.x), r2(w.start.y), r2(w.end.x), r2(w.end.y), plano.floorplanIsExteriorWall(w, room, d.merged === false ? null : rooms) ? 1 : 0, r2(Number(w.heightFt) || 0)]);
       });
       // El 4o número es el ancho (pies, 16-oct): con él la cámara sabe dónde no hay drywall (puerta) y hasta dónde
       // medir bajo una ventana. Los aparatos viejos leen solo los 3 primeros.

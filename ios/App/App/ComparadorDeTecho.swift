@@ -39,7 +39,9 @@ struct ComparadorDeTecho {
         func alMundo(_ q: SIMD2<Float>) -> SIMD3<Float> { origen + u * q.x + v * q.y }
     }
 
-    enum Estado: UInt8 { case noVisto = 0, sigue, ambiguo, cavidad, hondo, tapado }
+    // `encima`: algo ARRIBA de donde estaba el drywall (1.2 in o más), pero no el subpiso parejo: un tubo, un ducto,
+    // cables (su pregunta del 15 oct: "hay tubos que pasan ahí"). El drywall ya no está; cuenta dentro de un hueco.
+    enum Estado: UInt8 { case noVisto = 0, sigue, ambiguo, cavidad, hondo, tapado, encima }
 
     static let pulgada: Float = 0.0254
     static let sigueHasta: Float = 0.3
@@ -183,9 +185,9 @@ struct ComparadorDeTecho {
         if q75 > Self.hondoDesde && q60 > Self.hondoDesde * 0.5 { return .hondo }
         // Fondo parejo: lo más hondo que se ve (del 70 al 90 %) cabe en 1 in. Junto a una viga honda la mayoría de los
         // votos pega en su costado; solo los que miran derecho llegan al subpiso, y esos sí son parejos.
-        if Self.cavidad.contains(q75) {
-            return q90 - q70 <= Self.fondoPlanoMax ? .cavidad : .ambiguo
-        }
+        if Self.cavidad.contains(q75), q90 - q70 <= Self.fondoPlanoMax { return .cavidad }
+        // Más arriba de la cara del drywall de forma pareja (la mediana a 1.2 in o más): ahí ya no hay drywall.
+        if m > 1.2 && q75 > 1.5 { return .encima }
         return .ambiguo
     }
 
@@ -247,7 +249,7 @@ struct ComparadorDeTecho {
             guard cuenta[k] > 0 else { continue }
             let e = estado(k)
             est[k] = e
-            if e != .noVisto { visto += 1; if e == .sigue || e == .cavidad || e == .hondo { decidido += 1 } }
+            if e != .noVisto { visto += 1; if e == .sigue || e == .cavidad || e == .hondo || e == .encima { decidido += 1 } }
             if e == .tapado { tapados += 1 }
             if e == .ambiguo { ambiguos += 1 }
         } }
@@ -278,31 +280,48 @@ struct ComparadorDeTecho {
         // Las tiras de viga (o de cuerda) en medio de lo quitado: hasta 3 cuadritos (6 in) que no son drywall entero ni
         // algo delante, con lo quitado a los dos lados, en cualquiera de las dos direcciones.
         var viga = [Bool](repeating: false, count: n * n)
+        var ancho = [Bool](repeating: false, count: n * n)     // puenteado por tubo/ducto (más de 3 cuadritos)
         func tiras(_ porFila: Bool) {
             func k(_ x: Int, _ a: Int) -> Int { porFila ? Self.indice(x, a) : Self.indice(a, x) }
             for a in 0..<n {
                 var b = 1
                 while b < n {
                     guard !quitado[k(b, a)], quitado[k(b - 1, a)] else { b += 1; continue }
-                    var e = b, sirve = true
+                    // Hasta 3 cuadritos (una viga), o hasta 8 (16 in) si es "algo arriba" (un tubo, un ducto: su pregunta del
+                    // 15 oct). Siempre con hueco de verdad a los dos lados: así la orilla del corte nunca crece.
+                    var e = b, sirve = true, arriba = 0
                     while e < n, !quitado[k(e, a)] {
-                        if est[k(e, a)] == .sigue || est[k(e, a)] == .tapado { sirve = false }
+                        let es = est[k(e, a)]
+                        if es == .sigue || es == .tapado { sirve = false }
+                        if es == .encima { arriba += 1 }
                         e += 1
-                        if e - b > 3 { sirve = false; break }
+                        if e - b > 8 || (e - b > 3 && arriba * 2 < e - b) { sirve = false; break }
                     }
-                    if sirve, e < n, quitado[k(e, a)] { for x in b..<e { viga[k(x, a)] = true } }
+                    if sirve, e < n, quitado[k(e, a)] { for x in b..<e { viga[k(x, a)] = true; if e - b > 3 { ancho[k(x, a)] = true } } }
                     b = max(e, b + 1)
                 }
             }
         }
         tiras(true); tiras(false)
+        // Lo puenteado por un tubo o ducto (más de 3 cuadritos) nunca es la orilla del corte: si tiene drywall entero a 2
+        // cuadritos o menos, no se puentea (si no, la fila de la orilla se rellenaba a lo largo y el hueco crecía).
+        for k in 0..<(n * n) where viga[k] && ancho[k] {
+            let c = k % n, r = k / n
+            let cerca = [(1, 0), (-1, 0), (0, 1), (0, -1)].contains { (dc, dr) in
+                (1...2).contains { p in
+                    let cc = c + dc * p, rr = r + dr * p
+                    return cc >= 0 && cc < n && rr >= 0 && rr < n && est[Self.indice(cc, rr)] == .sigue
+                }
+            }
+            if cerca { viga[k] = false }
+        }
         for k in 0..<(n * n) where quitado[k] && caraDeViga(k) { viga[k] = true }
         var en = [Bool](repeating: false, count: n * n)
         for k in 0..<(n * n) { en[k] = quitado[k] || viga[k] }
         // Los huecos: grupos conectados (4 vecinos).
         var marca = [Int32](repeating: -1, count: n * n)
         var grupo: Int32 = 0
-        var sinOrilla = 0, sinVigas = 0
+        var sinOrilla = 0, sinVigas = 0, soloEncima = 0
         for k0 in 0..<(n * n) where en[k0] && marca[k0] < 0 {
             var pila = [k0]; marca[k0] = grupo
             var celdas: [Int] = []
@@ -317,6 +336,10 @@ struct ComparadorDeTecho {
                 }
             }
             grupo += 1
+            // Un hueco de verdad deja ver el subpiso o el ático en buena parte (30 % o más). Puro "algo arriba" (insulación
+            // colgando, un plafón más alto) no se cobra solo: se pregunta.
+            let abiertos = celdas.filter { est[$0] == .cavidad || est[$0] == .hondo }.count
+            if abiertos * 10 < celdas.count * 3 { if celdas.count >= 20 { soloEncima += 1 }; continue }
             // La orilla: los vecinos de fuera del hueco (para ver si tuvo drywall alrededor).
             var orilla = 0, buena = 0
             var cMin = n, cMax = -1, rMin = n, rMax = -1
@@ -454,7 +477,7 @@ struct ComparadorDeTecho {
         if sinOrilla > 0 { res.alarmas.append(.sinOrilla(sinOrilla)) }
         if sinVigas > 0 { res.alarmas.append(.sinVigas(sinVigas)) }
         if tapados >= 12 { res.alarmas.append(.tapado) }
-        if ambiguos >= 60 && res.huecos.isEmpty { res.alarmas.append(.ambiguo) }
+        if (ambiguos >= 60 && res.huecos.isEmpty) || soloEncima > 0 { res.alarmas.append(.ambiguo) }
         return res
     }
 

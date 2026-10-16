@@ -150,7 +150,8 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
                     if let m = num(f["marco"]) { marcos[cuarto] = Int(m) }
                     let paredes: [UbicadorEnPlano.ParedPlano] = ((f["paredes"] as? [[Any]]) ?? []).compactMap { w in
                         guard w.count >= 5, let x1 = num(w[0]), let y1 = num(w[1]), let x2 = num(w[2]), let y2 = num(w[3]) else { return nil }
-                        return UbicadorEnPlano.ParedPlano(seg: UbicadorEnPlano.Segmento(a: SIMD2(x1, y1), b: SIMD2(x2, y2)), exterior: (num(w[4]) ?? 0) > 0.5)
+                        return UbicadorEnPlano.ParedPlano(seg: UbicadorEnPlano.Segmento(a: SIMD2(x1, y1), b: SIMD2(x2, y2)), exterior: (num(w[4]) ?? 0) > 0.5,
+                                                          alto: w.count >= 6 ? (num(w[5]) ?? 0) : 0)
                     }
                     let senas: [UbicadorEnPlano.SenaPlano] = ((f["senas"] as? [[Any]]) ?? []).compactMap { x in
                         guard x.count >= 3, let px = num(x[0]), let py = num(x[1]) else { return nil }
@@ -244,7 +245,7 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
         arVC.modalPresentationStyle = .fullScreen
         arVC.experiencia = "nueva"
         arVC.maqueta = paso
-        arVC.laboratorio = (11...13).contains(paso) || (18...20).contains(paso)
+        arVC.laboratorio = (11...13).contains(paso) || (18...21).contains(paso)
         arVC.modo = "recorrido"
         arVC.alcance = "nivel"
         arVC.nivelActual = "2nd Floor"
