@@ -472,7 +472,9 @@ async function lanzarCamara(alcance, d){
     res = await ARMeasure.measure({ modo: 'recorrido', alcance, nivel: nivel ? nivel.nombre : '', section: 'floor', materials: secciones.floor, secciones, cuartos, niveles,
       areasPorCuarto: {}, cuartosPorPlanta, areasPorPlanta: {}, crewName: String((PERFIL && PERFIL.full_name) || '').split(' ')[0], roomName: cuarto ? cuarto.nombre : '', roomAreaSqFt: 0, tema: TEMA_CAMARA, experiencia: EXPERIENCIA_CAMARA, paredesPorCuarto, planoPorCuarto,
       // "Probar lo demolido" (laboratorio): solo el manager ve el botón dentro de la cámara. Un aparato viejo lo ignora.
-      laboratorio: esManager() });
+      // porMovimiento (16-oct): la parte sale de hacia dónde apunta el teléfono + la insulación por pared. Primero solo el
+      // manager; después de su prueba con cinta se cambia a true. Un aparato viejo lo ignora.
+      laboratorio: esManager(), porMovimiento: esManager() });
   }catch(e){ avisar('Could not open the measuring camera. ' + msg(e)); return; }
   finally{ try{ if(oyente && oyente.remove) await oyente.remove(); }catch(e){} if(BITACORA_PENDIENTE.length) subirBitacora(tid, null); }
   if(!res || res.cancelled){ if(res && res.error) avisar(res.error); return; }

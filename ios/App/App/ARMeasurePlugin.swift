@@ -78,6 +78,8 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
             arVC.experiencia = call.getString("experiencia") ?? "hoy"
             // "Probar lo demolido" (laboratorio): solo si la página lo manda (solo para el manager). Sin ella no existe.
             arVC.laboratorio = call.getBool("laboratorio") ?? false
+            // La parte sale del movimiento del teléfono + qué pared es según el plano (16 oct): solo si la página lo manda.
+            arVC.porMovimiento = call.getBool("porMovimiento") ?? false
             // EL NIVEL YA VIENE RESUELTO DESDE LA PANTALLA. Se escoge con el
             // dedo en Medidas, una sola vez, antes de abrir la camara: adentro
             // ya no se pregunta y se estampa en cada medida del recorrido.
