@@ -75,6 +75,24 @@ let c1 = R.alfombra(largo: 12, ancho: 10, pad: true)
 ok("carpet con pad: Carpet 120 SF + Carpet Pad 120 SF", c1.material == "Carpet" && c1.companero == "Carpet Pad" && c1.unidadCompanero == "SF" && igual(c1.cantidadCompanero, 120))
 ok("carpet sin pad: solo Carpet", R.alfombra(largo: 12, ancho: 10, pad: false).companero == nil)
 ok("tackless strip (piso, solo el largo): LF", R.lineal("Tackless Strip", largo: 40).unidad == "LF")
+// ---- "underlayment o padding" (16 oct, su prueba): UNA pregunta del nivel para el pad del carpet y el underlayment ----
+ok("debajo del carpet va Carpet Pad; del laminate, hardwood y vinyl, Underlayment; tile y lo escrito a mano, nada",
+   R.debajoDelPiso("Carpet") == "Carpet Pad" && R.debajoDelPiso("Laminate") == "Underlayment" && R.debajoDelPiso("Hardwood") == "Underlayment"
+   && R.debajoDelPiso("Vinyl (LVP)") == "Underlayment" && R.debajoDelPiso("Tile") == nil && R.debajoDelPiso("Cork") == nil)
+let c2 = R.piso("Carpet", largo: 12, ancho: 10, underlayment: true)
+ok("piso 'sí' + carpet: Carpet 120 SF + Carpet Pad 120 SF (sin preguntar el pad)", c2.material == "Carpet" && c2.unidad == "SF" && igual(c2.cantidad, 120)
+   && c2.companero == "Carpet Pad" && c2.unidadCompanero == "SF" && igual(c2.cantidadCompanero, 120))
+ok("piso 'no' + carpet: solo Carpet", R.piso("Carpet", largo: 12, ancho: 10, underlayment: false).companero == nil)
+ok("alfombra(pad:) da lo mismo que piso(\"Carpet\")", R.alfombra(largo: 12, ancho: 10, pad: true) == c2 && R.alfombra(largo: 12, ancho: 10, pad: false) == R.piso("Carpet", largo: 12, ancho: 10, underlayment: false))
+ok("la respuesta del nivel decide el pad: 'si' sí, 'no' no, 'mixto' se pregunta en el cuarto",
+   R.underlayment("si", material: "Carpet", respuesta: nil) == true && R.underlayment("no", material: "Carpet", respuesta: nil) == false
+   && R.underlayment("mixto", material: "Carpet", respuesta: nil) == nil && R.underlayment("mixto", material: "Carpet", respuesta: false) == false)
+ok("tile no lleva ni con 'si' (y nunca se pregunta)", R.underlayment("si", material: "Tile", respuesta: nil) == false && R.piso("Tile", largo: 1, ancho: 1, underlayment: true).companero == nil)
+ok("mixto contestado en el cuarto: carpet con Carpet Pad, laminate con Underlayment",
+   R.conUnderlayment(R.piso("Carpet", largo: 12, ancho: 10, underlayment: false), true).companero == "Carpet Pad"
+   && R.conUnderlayment(R.piso("Carpet", largo: 12, ancho: 10, underlayment: true), false).companero == nil
+   && R.conUnderlayment(R.piso("Carpet", largo: 12, ancho: 10, underlayment: false), true).unidadCompanero == "SF")
+ok("aviso del carpet con pad que salió solo", R.aviso(c2, parte: "floor") == "✓ Carpet + pad · 120 pies²")
 // ---- el techo ----
 ok("techo de drywall con insulación: 120 SF + Insulation 120 SF", R.techo("Drywall", largo: 12, ancho: 10, insulacion: true).companero == "Insulation"
    && igual(R.techo("Drywall", largo: 12, ancho: 10, insulacion: true).cantidadCompanero, 120))
@@ -148,10 +166,37 @@ ok("Deshacer en el alto/ancho quita un punto a la vez (undoTapped de siempre)", 
 mm = bloque(v, 'fileprivate func pintarMuelleMedir')
 ok("con el largo cerrado el botón dice 'Alto' (pared) o 'Ancho' (piso, techo), como antes", 'titulo = segundaPalabra.capitalized' in mm and 'self?.empezarAncho()' in mm)
 ok("el + se queda vivo en el alto/ancho ya medido (un ancho que dobla se sigue)", 'let masVivo = !roomName.isEmpty && stage != .lengthDone' in mm)
+# Su prueba del 16 oct (8:00): no le salió la página del nivel, la pared se quería guardar como techo y salía el "Ojo" viejo.
+ok("la página de las 3 preguntas sale SIEMPRE al abrir, con lo contestado ya marcado", 'abrirAjuste(volver: false)\n    }' in bloque(v, 'fileprivate func prepararMedirPrimero') and 'entrarAMedir()' not in bloque(v, 'fileprivate func prepararMedirPrimero'))
+ok("el aviso viejo 'Ojo: veo la pared, pero esta medida es de techo' no corre en medir primero", 'guard !(medirPrimero && nueva.medirActivo) else { return }' in bloque(v, 'private func updateSurfaceAssistant'))
+ok("la mira no se pone 'equivocada' en medir primero", '!(medirPrimero && n.medirActivo), let s = currentSurface()' in v)
+lm = bloque(v, 'fileprivate func listoMedir')
+ok("Listo revisa la parte por los puntos de la medida (si no la escogió a mano)", 'parteDeEstaMedida()' in lm and 'ponerParteDeLaMedida(z)' in lm and '!n.parteAMano' in lm)
+ok("cambiar la parte de la medida no borra sus esquinas ni usa cambiarSeccion", 'cambiarSeccion(' not in bloque(v, 'private func ponerParteDeLaMedida') and 'pathPoints' not in bloque(v, 'private func ponerParteDeLaMedida'))
+ok("la primera esquina toma la parte a la que apunta claro", 'n.clasificador.ahoraMismo(ahora: CACurrentMediaTime())' in bloque(v, 'fileprivate func gatilloMedir'))
+ok("en medir primero el seguro de la parte es solo una medida a medias o algo abierto", 'if medirPrimero && n.medirActivo {\n            return medidaEnCurso' in bloque(v, 'fileprivate func bloqueoDeParte'))
+ok("pared y techo en 1 s; el piso pide 2 s (leer la pantalla no es el piso)", 'estable(por: 1.0, ahora: ahora)' in v and 'estable(por: 2.0, ahora: ahora) != "floor"' in v)
+ok("la maqueta 38 recorre su prueba por las funciones de verdad (+, Listo el largo, Alto, Listo)", 'case 38:' in v and 'nueva.puntosDeMaqueta' in bloque(v, '@objc private func addTapped') and v.count('gatilloNuevoTocado(); gatilloNuevoTocado(); terminarElLargo()') == 2)
 ok("Terminar y mandar sigue por el camino de siempre", 'self.nueva.terminarDeVerdad = true\n            self.terminarNuevoTocado()' in v)
 ok("el corte de 1 pie va en pie lineal también en la cámara", 'if m.contains("1 ft cut") { return .lineal }' in v)
+# "underlayment o padding" (16 oct): UNA pregunta del nivel; ya no hay "¿Lleva pad?" aparte.
+aj = bloque(v, 'private func pintarAjuste')
+ok("la página del nivel: 'Piso · ¿Tiene underlayment o padding?' con Sí / No / Mixto",
+   '("piso", "Piso", "¿Tiene underlayment o padding?", [("si", "Sí", "todo el nivel"), ("no", "No", "ningún cuarto"), ("mixto", "Mixto", "en cada cuarto")])' in aj
+   and 'el underlayment y el padding salen solos' in aj)
+pm = bloque(v, 'fileprivate func armarPanelMedir')
+ok("ya no hay pregunta aparte del pad", 'case .pad' not in v and '.pad)' not in v and '¿Lleva pad?' not in v
+   and 'fileprivate enum PreguntaMedir: Equatable { case que, otroLineal, shoe, matPared, insulPared, piso, underCuarto, techo, techoCuarto, lineal1, cierre, cuarto, segunda }' in v)
+ok("el carpet va por resolverPiso como los demás pisos", 'listaDeMateriales(ReglasDeMedir.materialesPiso, sugerido: nil, sub: "\\(pies(A)) pies²") { s, m in s.resolverPiso(m) }' in pm)
+ok("mixto: '¿<cuarto> tiene underlayment o padding?' una vez por cuarto (padding si es carpet)",
+   '"¿\\(roomName) tiene underlayment o padding?"' in pm and 'ReglasDeMedir.debajoDelPiso(m) == "Carpet Pad" ? "padding" : "underlayment"' in pm
+   and 'case .underCuarto: n.underDeCuarto[n.clavePendiente] = si; guardarMedir(ReglasDeMedir.conUnderlayment(g, si))' in bloque(v, 'private func contestarPendiente'))
+tu = bloque(v, 'private func textoUnder')
+ok("la ayuda del panel del piso habla de underlayment o padding", 'debajo del carpet, laminate, hardwood o vinyl' in tu and 'Sin underlayment ni padding' in tu and 'tiene underlayment o padding' in tu)
+ok("lo contestado con la pregunta vieja no cuenta: la llave del nivel es v2", 'private static let llaveAjuste = "scanova.medirPrimero.ajuste.v2"' in v)
+ok("la maqueta 37 guarda el carpet por las reglas de verdad (resolverPiso)", 'resolverPiso("Carpet")' in bloque(v, 'private func maquetaMedirPrimeroPaso') and 'ReglasDeMedir.alfombra(' not in v[:v.index('struct ReglasDeMedir {')])
 ok("lo contestado del nivel se guarda por trabajo y nivel", 'Self.llaveAjuste + "|" + trabajoId + "|" + nivelActual' in v and 'arVC.trabajoId = call.getString("trabajo")' in plg)
-ok("las maquetas 24-37 no se enciman con las del laboratorio (18-23)", 'arVC.porMovimiento = (24...37).contains(paso)' in plg and '(18...23).contains(paso)' in plg)
+ok("las maquetas 24-37 no se enciman con las del laboratorio (18-23)", 'arVC.porMovimiento = (24...38).contains(paso)' in plg and '(18...23).contains(paso)' in plg)
 try:
     web = rd(fr + '/www/index.html')
     ok("Field Reports no manda la bandera", 'porMovimiento' not in web)
@@ -188,6 +233,10 @@ ok('baseboard y shoe molding: 14 LF cada uno', linea('Baseboard', 'wall')[0].lin
 ok('carpet y pad: 120 SF cada uno', linea('Carpet', 'floor')[0].sqft === 120 && linea('Carpet Pad', 'floor')[0].sqft === 120);
 ok('hardwood y underlayment: 120 SF cada uno', linea('Hardwood', 'floor')[0].sqft === 120 && linea('Underlayment', 'floor')[0].sqft === 120);
 ok('la insulación del techo va en el techo: 120 SF', linea('Insulation', 'ceiling')[0].sqft === 120);
+ok("los nombres que manda la cámara son los de la página: Carpet -> 'Carpet Pad', Laminate/Vinyl -> 'Underlayment', ambos SF en el piso",
+   M.ACOMPANANTE['Carpet'] === 'Carpet Pad' && M.ACOMPANANTE['Laminate'] === 'Underlayment' && M.ACOMPANANTE['Vinyl (LVP)'] === 'Underlayment'
+   && M.MATERIALES.floor.includes('Carpet Pad') && M.MATERIALES.floor.includes('Underlayment') && M.unidad('Carpet Pad') === 'SF' && M.unidad('Underlayment') === 'SF'
+   && !M.ACOMPANANTE['Tile']);
 ok("'Drywall (1 ft cut)' no sale en las listas para escoger (solo llega de la cámara)", !Object.values(M.MATERIALES).some(l => l.includes('Drywall (1 ft cut)')));
 const src = (await import('node:fs')).readFileSync(process.argv[2], 'utf8');
 ok("la página manda la bandera solo al manager, y de qué trabajo es", src.includes('porMovimiento: esManager(), trabajo: tid'));

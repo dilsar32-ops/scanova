@@ -64,7 +64,8 @@ ok("frente de gabinete (sin clase, llega a 0.9 m): nada", voto(m(-10, pared(h: 0
 ok("una puerta (llega a 2 m): pared", voto(m(0, pared(h: 1.0, clase: "door", tope: 2.0)), "wall") == .pared)
 ok("mesa: nada", voto(m(-60, plana(y: 0.75, clase: "table")), "floor") == .nada)
 ok("sillón o cama: nada", voto(m(-20, pared(h: 0.4, clase: "seat")), "wall") == .nada)
-ok("ya ubicado y el golpe a 0.6 m de toda pared del plano (un mueble): nada", voto(m(0, pared(h: 1.2, plano: 0.6)), "wall") == .nada)
+ok("ya ubicado y el golpe a 0.6 m de toda pared del plano (un mueble sin clase): nada", voto(m(0, pared(h: 1.2, clase: "", plano: 0.6)), "wall") == .nada)
+ok("ARKit dice que ES pared aunque la ubicación esté corrida 0.6 m: pared (su prueba del 16 oct)", voto(m(0, pared(h: 1.2, plano: 0.6)), "wall") == .pared)
 ok("ya ubicado y el golpe sobre la pared del plano: pared", voto(m(0, pared(h: 1.2, plano: 0.1)), "wall") == .pared)
 ok("volteando a 80°/s: moviendo", voto(m(-60, plana(y: 0.02), giro: 80), "floor") == .moviendo)
 ok("rastreo malo a -80°: nada (nada por pura inclinación)", voto(m(-80, plana(y: 0.02), rastreo: false), "floor") == .nada)
@@ -99,6 +100,37 @@ var g2 = C(); g2.anotar(.pared, t: 0, grados: 0); g2.anotar(.nada, t: 2, grados:
 ok("de 0° a -20°: no es giro", !g2.huboGiro(ahora: 2))
 var g3 = C(); g3.anotar(.pared, t: 0, grados: 0); g3.anotar(.piso, t: 0.5, grados: -30); for i in 1...10 { g3.anotar(.piso, t: 0.5 + Double(i) * 0.5, grados: -30) }
 ok("un giro de hace 5 s ya no cuenta", !g3.huboGiro(ahora: 5.5))
+// ---- LA PARTE DE LA MEDIDA POR SUS PUNTOS (su prueba del 16 oct: el techo, luego la pared se guardaba como techo) ----
+func P(_ x: Double, _ y: Double, _ z: Double) -> SIMD3<Double> { SIMD3(x, y, z) }
+let cam = 1.40
+ok("la base de la pared en el piso y el alto que SUBE 4 ft: pared (aunque iba en techo)",
+   C.parteDeLaMedida(largo: [P(0, 0.02, 0), P(4.27, 0.02, 0)], segunda: [P(4.27, 0.02, 0), P(4.27, 1.24, 0)], camY: cam, pisoY: 0, actual: "ceiling", zona: nil) == "wall")
+ok("el techo: el ancho corre plano arriba del teléfono: techo",
+   C.parteDeLaMedida(largo: [P(0, 2.44, 0), P(3.66, 2.44, 0)], segunda: [P(3.66, 2.44, 0), P(3.66, 2.44, 3.05)], camY: cam, pisoY: 0, actual: "wall", zona: nil) == "ceiling")
+ok("el piso: el ancho corre plano pegado al piso: piso",
+   C.parteDeLaMedida(largo: [P(0, 0.01, 0), P(3.66, 0.01, 0)], segunda: [P(3.66, 0.01, 0), P(3.66, 0.01, 3.05)], camY: cam, pisoY: 0, actual: "ceiling", zona: nil) == "floor")
+ok("un ancho plano a media altura (una cubierta): no se sabe, se queda la de antes",
+   C.parteDeLaMedida(largo: [P(0, 0.9, 0), P(2, 0.9, 0)], segunda: [P(2, 0.9, 0), P(2, 0.9, 0.6)], camY: cam, pisoY: 0, actual: "wall", zona: nil) == nil)
+ok("solo el largo a media pared (la línea del corte a 2 ft): pared",
+   C.parteDeLaMedida(largo: [P(0, 0.61, 0), P(4, 0.61, 0)], segunda: [], camY: cam, pisoY: 0, actual: "ceiling", zona: nil) == "wall")
+ok("solo el largo pegado al piso con la parte en techo: pared (baseboard), nunca techo",
+   C.parteDeLaMedida(largo: [P(0, 0.03, 0), P(4, 0.03, 0)], segunda: [], camY: cam, pisoY: 0, actual: "ceiling", zona: nil) == "wall")
+ok("solo el largo pegado al piso, en techo, y el teléfono ya ve el piso: piso (tackless)",
+   C.parteDeLaMedida(largo: [P(0, 0.03, 0), P(4, 0.03, 0)], segunda: [], camY: cam, pisoY: 0, actual: "ceiling", zona: "floor") == "floor")
+ok("solo el largo pegado al piso con la parte en pared: se queda pared (baseboard)",
+   C.parteDeLaMedida(largo: [P(0, 0.03, 0), P(4, 0.03, 0)], segunda: [], camY: cam, pisoY: 0, actual: "wall", zona: nil) == nil)
+ok("solo el largo allá arriba (crown, la orilla del techo): techo",
+   C.parteDeLaMedida(largo: [P(0, 2.4, 0), P(4, 2.4, 0)], segunda: [], camY: cam, pisoY: 0, actual: "wall", zona: nil) == "ceiling")
+ok("sin piso conocido se supone 1.35 m abajo del teléfono",
+   C.parteDeLaMedida(largo: [P(0, 0.07, 0), P(4, 0.07, 0)], segunda: [P(4, 0.07, 0), P(4, 1.3, 0)], camY: cam, pisoY: nil, actual: "floor", zona: nil) == "wall")
+ok("una sola esquina no decide nada", C.parteDeLaMedida(largo: [P(0, 0.03, 0)], segunda: [], camY: cam, pisoY: 0, actual: "ceiling", zona: nil) == nil)
+// ---- AHORA MISMO (la primera esquina): los últimos 3 votos de medio segundo para acá ----
+var cA = C(); cA.anotar(.techo, t: 0.0, grados: 40); cA.anotar(.pared, t: 0.8, grados: 2); cA.anotar(.pared, t: 0.9, grados: 1); cA.anotar(.pared, t: 1.0, grados: 0)
+ok("acaba de bajar a la pared (3 votos de pared): pared", cA.ahoraMismo(ahora: 1.05) == "wall")
+var cB = C(); cB.anotar(.pared, t: 0.8, grados: 0); cB.anotar(.esquina, t: 0.9, grados: -40); cB.anotar(.esquina, t: 1.0, grados: -42)
+ok("apuntando al pie de la pared (esquina): no se sabe", cB.ahoraMismo(ahora: 1.05) == nil)
+var cD = C(); cD.anotar(.pared, t: 0.1, grados: 0); cD.anotar(.pared, t: 0.2, grados: 0); cD.anotar(.pared, t: 0.3, grados: 0)
+ok("votos viejos (de hace más de medio segundo) no cuentan", cD.ahoraMismo(ahora: 1.5) == nil)
 print("\n  \(pasan) pasan, \(fallan) fallan")
 exit(fallan == 0 ? 0 : 1)
 '''

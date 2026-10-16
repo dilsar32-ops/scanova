@@ -7004,6 +7004,9 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
     // barrido de la camara por el cuarto soltaria "pared, piso, pared,
     // techo" en dos segundos y nadie volveria a hacerle caso.
     private func updateSurfaceAssistant() {
+        // Medir primero: la parte la pone el teléfono y la corrige Listo; este aviso viejo ("Ojo: veo la pared, pero esta
+        // medida es de techo") llegaba antes que el cambio y lo confundía (su prueba del 16 oct).
+        guard !(medirPrimero && nueva.medirActivo) else { return }
         guard stage == .measuringLength || stage == .measuringWidth else { return }
         guard let s = currentSurface(), s != .other else { return }
         if s != pendingSurface {
@@ -7248,7 +7251,9 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
     @objc private func addTapped() {
         aprendiDelDedo("marcar")
         cancelarResumen()
-        guard let hit = currentRaycastHit() else {
+        // En la maqueta 38 (simulador, sin ARKit) cada + marca el siguiente punto de la lista: el recorrido de verdad.
+        let deMaqueta: simd_float3? = maqueta > 0 && !nueva.puntosDeMaqueta.isEmpty ? nueva.puntosDeMaqueta.removeFirst() : nil
+        guard let hit = deMaqueta ?? currentRaycastHit() else {
             flashNoSurfaceWarning()
             return
         }
@@ -7766,7 +7771,7 @@ fileprivate enum Claro {
 
 fileprivate enum PanelCamara: Equatable { case nivel, cuarto, parte, material, voz, sigue, medir }
 // MEDIR PRIMERO (16 oct): lo que se le pregunta al tocar Listo, "¿Ya terminó con esta pared?" y la hoja del cuarto.
-fileprivate enum PreguntaMedir: Equatable { case que, otroLineal, shoe, matPared, insulPared, piso, pad, underCuarto, techo, techoCuarto, lineal1, cierre, cuarto, segunda }
+fileprivate enum PreguntaMedir: Equatable { case que, otroLineal, shoe, matPared, insulPared, piso, underCuarto, techo, techoCuarto, lineal1, cierre, cuarto, segunda }
 // A dónde se va al cambiar (lo que pide el teléfono o el mapa, entre una medida y otra).
 fileprivate enum CambioDeLugar: Equatable { case parte(String), pared(Int), cuarto(String) }
 
@@ -8067,16 +8072,18 @@ fileprivate final class CamaraNueva {
     var medirActivo = false                       // ya contestó lo del nivel: se mide
     var ajusteAbierto = false
     var ajusteVolver = false                      // la abrió otra vez desde la hoja del cuarto: la salida regresa
+    var ajusteYaEstaba = false                    // ya estaba contestada (la página sale igual, con lo de antes marcado)
+    var puntosDeMaqueta: [SIMD3<Float>] = []      // maqueta 38: dónde marca cada + (en el simulador no hay ARKit)
     var ajuste = ReglasDeMedir.Ajuste()
     var ajusteBorrador = ReglasDeMedir.Ajuste()   // lo que va tocando en la página (cuenta al tocar "Empezar a medir")
     let ajusteVista = UIView()
     let ajustePila = UIStackView()
     var preguntaMedir: PreguntaMedir?
-    var porGuardar: ReglasDeMedir.Guardado?       // espera su respuesta (insulación de la pared, underlayment, techo)
+    var porGuardar: ReglasDeMedir.Guardado?       // espera su respuesta (insulación de la pared, underlayment o padding, techo)
     var clavePendiente = ""                       // de qué pared o cuarto es esa respuesta
     var cambioPendiente: CambioDeLugar?           // "¿Ya terminó?": a dónde se iba
     var insulDePared: [String: Bool] = [:]        // nivel|cuarto|pared -> lo que contestó (mixto, o pared sin saber)
-    var underDeCuarto: [String: Bool] = [:]       // nivel|cuarto -> underlayment (mixto)
+    var underDeCuarto: [String: Bool] = [:]       // nivel|cuarto -> underlayment o padding (mixto; una respuesta vale para los dos)
     var techoDeCuarto: [String: Bool] = [:]       // nivel|cuarto -> insulación del techo (mixto)
     var paredActual: Int?                         // la pared del plano donde está midiendo (índice en su cuarto)
     var paredVista: Int?
@@ -9134,7 +9141,7 @@ extension ARMeasureViewController {
                     let p = cam.transform.columns.3
                     let d = simd_distance(simd_float3(p.x, p.y, p.z), hit)
                     if d > 4.5 { estado = .lejos }
-                    else if let s = currentSurface(), s != .other, let e = expectedSurface(), e != s { estado = .equivocada }
+                    else if !(medirPrimero && n.medirActivo), let s = currentSurface(), s != .other, let e = expectedSurface(), e != s { estado = .equivocada }
                     if let start = (stage == .measuringWidth ? widthPoints.last : pendingStart) ?? pendingStart {
                         n.vivo = Double(simd_distance(start, hit)) * 3.28084
                     }
@@ -9844,7 +9851,10 @@ extension ARMeasureViewController {
         if medidaEnCurso && !m.rastreoNormal { n.rastreoMaloEnMedida = true }
         let voto = ClasificadorDeParte.votar(m, actual: section)
         n.clasificador.anotar(voto, t: ahora, grados: m.grados)
-        let est = n.clasificador.estable(por: 1.5, ahora: ahora)
+        // 1 s para pared y techo (su prueba: tardaba y él ya estaba midiendo); el piso pide 2 s, porque leer la pantalla
+        // con el teléfono acostado apunta al piso.
+        var est = n.clasificador.estable(por: 1.0, ahora: ahora)
+        if est == "floor", n.clasificador.estable(por: 2.0, ahora: ahora) != "floor" { est = nil }
         if est != n.zonaVista { n.zonaVista = est; n.zonaVistaDesde = ahora }
         // La pared del plano a la que apunta (ya ubicado), 1.5 s en la misma: para "¿Ya terminó con esta pared?".
         var indice: Int? = nil
@@ -9868,6 +9878,11 @@ extension ARMeasureViewController {
     // ni mientras habla, ni con el dedo arrastrando un panel.
     fileprivate func bloqueoDeParte() -> Bool {
         let n = nueva
+        // Medir primero: solo frena una medida a medias o algo abierto (aquí no hay material escogido antes ni voz).
+        if medirPrimero && n.medirActivo {
+            return medidaEnCurso || n.preguntaMedir != nil || n.ajusteAbierto || n.panelForzado != nil || cancelarPendiente || resumenPendiente
+                || enPausa || presentedViewController != nil || n.panelScroll.isTracking || n.panelScroll.isDecelerating || roomName.isEmpty
+        }
         if medidaEnCurso || selectedMaterial != nil || !(stage == .pickingMaterial || stage == .measuringLength) { return true }
         if n.tarjetaVisible || n.panelForzado != nil || n.preguntaMedir != nil || n.ajusteAbierto { return true }
         if cancelarPendiente || resumenPendiente || enPausa { return true }
@@ -9910,7 +9925,10 @@ extension ARMeasureViewController {
         let centro = CGPoint(x: sceneView.bounds.midX, y: sceneView.bounds.midY)
         var r: ARRaycastResult? = nil
         if let q = sceneView.raycastQuery(from: centro, allowing: .existingPlaneGeometry, alignment: .any) { r = sceneView.session.raycast(q).first }
-        if r == nil, ahora - n.ultimoEstimado >= 0.2 {
+        if r == nil {
+            // Sin plano todavía y sin tocar el estimado (va cada 0.2 s): no hay muestra. Antes contaba como "nada" y en una
+            // pared que ARKit aún no hacía plano, la pared nunca ganaba.
+            guard ahora - n.ultimoEstimado >= 0.2 else { return nil }
             n.ultimoEstimado = ahora
             if let q = sceneView.raycastQuery(from: centro, allowing: .estimatedPlane, alignment: .any) { r = sceneView.session.raycast(q).first }
         }
@@ -10072,8 +10090,9 @@ struct ClasificadorDeParte {
         if g.vertical || g.clase == "wall" || g.clase == "door" || g.clase == "window" {
             // Gabinete, tina, media pared: lo vertical que no llega ni a 1.1 m no es pared.
             if g.clase != "wall", let tope = g.tope, tope - m.pisoY <= 1.1 { return .nada }
-            // Ya ubicado y el golpe no cae en ninguna pared del plano: un mueble.
-            if let ap = g.aParedPlano, ap > 0.30 { return .nada }
+            // Ya ubicado y el golpe no cae en ninguna pared del plano: un mueble. Si el plano dice que ES pared (su clase), se le cree
+            // (su prueba del 16 oct: con la ubicación un poco corrida, la pared nunca contaba como pared).
+            if g.clase != "wall", let ap = g.aParedPlano, ap > 0.30 { return .nada }
             // El pie de la pared (zoclo) o la corona: esquina, no gana nadie.
             if g.y - m.pisoY < mPiso { return .esquina }
             if let techo = m.techoY, techo - g.y < mTecho { return .esquina }
@@ -10109,6 +10128,41 @@ struct ClasificadorDeParte {
         }
         return nil
     }
+    /// Lo que se ve AHORA MISMO: los últimos 3 votos (de medio segundo para acá) dicen la misma parte. Para la primera
+    /// esquina: si apunta claro a otra parte, la parte cambia antes de marcar.
+    func ahoraMismo(ahora: Double) -> String? {
+        let ult = votos.filter { $0.t >= ahora - 0.5 }.suffix(3)
+        guard ult.count == 3, let v = ult.first?.v, ult.allSatisfy({ $0.v == v }) else { return nil }
+        switch v { case .piso: return "floor"; case .pared: return "wall"; case .techo: return "ceiling"; default: return nil }
+    }
+    /// LA PARTE DE UNA MEDIDA, POR DÓNDE QUEDARON SUS PUNTOS (su prueba del 16 oct: midió el techo, bajó el teléfono a la
+    /// pared y la medida de la pared se quería guardar como techo). Al tocar Listo se revisa: si el alto subió por la pared
+    /// es pared; si el ancho corre plano arriba del teléfono es techo, y pegado al piso es piso. Solo el largo: arriba del
+    /// teléfono, techo; a media pared, pared; pegado al piso puede ser pared (baseboard, corte) o piso (tackless): se queda
+    /// lo que ya era, pero nunca techo. Alturas en metros del mundo de la cámara. nil = no se sabe (se queda la de antes).
+    static func parteDeLaMedida(largo: [SIMD3<Double>], segunda: [SIMD3<Double>], camY: Double, pisoY: Double?, actual: String, zona: String?) -> String? {
+        guard largo.count >= 2 else { return nil }
+        let todos = largo + segunda
+        let yProm = todos.map { $0.y }.reduce(0, +) / Double(todos.count)
+        let piso = pisoY ?? (camY - 1.35)
+        if segunda.count >= 2 {
+            var sube = 0.0, corre = 0.0
+            for i in 1..<segunda.count {
+                let d = segunda[i] - segunda[i - 1]
+                sube += abs(d.y); corre += (d.x * d.x + d.z * d.z).squareRoot()
+            }
+            if sube >= 0.25 && sube > 1.5 * corre { return "wall" }          // el alto subió por la pared
+            if corre >= 0.25 && corre > 1.5 * sube {                         // el ancho corre plano
+                if yProm > camY + 0.2 { return "ceiling" }
+                if yProm < piso + 0.35 { return "floor" }
+            }
+            return nil
+        }
+        if yProm > camY + 0.3 { return "ceiling" }
+        if yProm > piso + 0.35 { return "wall" }                             // una línea a media pared
+        if actual == "ceiling" { return zona == "floor" ? "floor" : "wall" }   // pegado al piso: nunca es techo
+        return nil
+    }
     /// ¿Volteó el teléfono de verdad? (25° o más en los últimos 3 s). Leer la pantalla no es apuntar al piso.
     func huboGiro(ahora: Double) -> Bool {
         let g = votos.filter { $0.t >= ahora - 3 }.map { $0.grados }
@@ -10121,7 +10175,7 @@ struct ClasificadorDeParte {
 //
 // Su diseño (aprobado con la maqueta de la página "Medir primero"): al abrir Measurements ya escogió el nivel; el mapa
 // dice en qué cuarto está y el teléfono qué parte mide (abajo piso, derecho pared, arriba techo). Al empezar se contestan
-// en UNA página 3 preguntas del nivel (insulación de paredes y techo, underlayment del piso). Después solo mide: + marca
+// en UNA página 3 preguntas del nivel (insulación de paredes y techo, underlayment o padding del piso). Después solo mide: + marca
 // el largo, + otra vez el alto (pared) o el ancho (piso, techo), y al tocar Listo se escoge qué material fue. La
 // insulación, el underlayment y lo demás salen de lo que contestó al empezar; con "mixto" se pregunta una vez (en cada
 // pared o en cada cuarto).
@@ -10167,7 +10221,7 @@ extension ARMeasureViewController {
         ])
         v.isHidden = true
     }
-    private static let llaveAjuste = "scanova.medirPrimero.ajuste.v1"
+    private static let llaveAjuste = "scanova.medirPrimero.ajuste.v2"   // v2 (16 oct): el piso pregunta "underlayment o padding"
     private func llaveDelAjuste() -> String { Self.llaveAjuste + "|" + trabajoId + "|" + nivelActual }
     fileprivate func cargarAjuste() -> ReglasDeMedir.Ajuste? {
         guard maqueta == 0, let d = UserDefaults.standard.dictionary(forKey: llaveDelAjuste()) as? [String: String] else { return nil }
@@ -10204,7 +10258,9 @@ extension ARMeasureViewController {
             let l = UILabel(); l.text = t; l.font = .systemFont(ofSize: tam, weight: peso); l.textColor = color; l.numberOfLines = lineas; return l
         }
         // Arriba: de dónde viene y el nivel (ya escogido en Measurements).
-        let cab = UIStackView(arrangedSubviews: [etiqueta("Measurements", 15, .semibold, Claro.azul), UIView(), etiqueta(nivelActual, 13, .regular, Claro.gris)])
+        // A la derecha, la versión del aparato: así se sabe qué cámara tiene el teléfono cuando algo sale distinto en una prueba.
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
+        let cab = UIStackView(arrangedSubviews: [etiqueta("Measurements", 15, .semibold, Claro.azul), UIView(), etiqueta("Medir primero · " + version, 13, .regular, Claro.gris)])
         cab.axis = .horizontal; cab.alignment = .firstBaseline
         pila.addArrangedSubview(cab); pila.setCustomSpacing(8, after: cab)
         let tarjeta = UIView(); tarjeta.backgroundColor = Claro.loseta
@@ -10224,13 +10280,15 @@ extension ARMeasureViewController {
         let titulo = etiqueta("Antes de medir, \(nivel)", 21, .bold, Claro.tinta, lineas: 2)
         titulo.adjustsFontSizeToFitWidth = true; titulo.minimumScaleFactor = 0.8
         pila.addArrangedSubview(titulo); pila.setCustomSpacing(4, after: titulo)
-        let texto = etiqueta("Se contesta una vez para todo el nivel. Al medir, la insulación y el underlayment salen solos.", 14, .regular, Claro.gris, lineas: 3)
+        let yaEstaba = n.ajusteYaEstaba && !n.ajusteVolver && b.completo
+        let texto = etiqueta(yaEstaba ? "Así lo contestó la vez pasada. Revíselo y toque Empezar a medir." :
+                             "Se contesta una vez para todo el nivel. Al medir, la insulación, el underlayment y el padding salen solos.", 14, .regular, Claro.gris, lineas: 3)
         pila.addArrangedSubview(texto); pila.setCustomSpacing(14, after: texto)
         // Las 3 preguntas: cada una con sus 3 respuestas en UNA fila. Nada viene escogido la primera vez.
         let grupos: [(clave: String, titulo: String, pregunta: String, opciones: [(String, String, String)])] = [
             ("paredes", "Paredes", "¿Llevan insulación?", [("afuera", "Solo las de afuera", "adentro no"), ("todas", "Todas", "afuera y adentro"), ("mixto", "Mixto", "en cada pared")]),
             ("techo", "Techo", "¿Tiene insulación?", [("si", "Sí", "con insulación"), ("no", "No", "sin insulación"), ("mixto", "Mixto", "en cada cuarto")]),
-            ("piso", "Piso", "¿Tiene underlayment?", [("si", "Sí", "todo el nivel"), ("no", "No", "ningún cuarto"), ("mixto", "Mixto", "en cada cuarto")])
+            ("piso", "Piso", "¿Tiene underlayment o padding?", [("si", "Sí", "todo el nivel"), ("no", "No", "ningún cuarto"), ("mixto", "Mixto", "en cada cuarto")])
         ]
         for g in grupos {
             let t = NSMutableAttributedString(string: g.titulo, attributes: [.font: UIFont.systemFont(ofSize: 16, weight: .bold), .foregroundColor: Claro.tinta])
@@ -10302,7 +10360,10 @@ extension ARMeasureViewController {
     // ---------------- EMPEZAR ----------------
     fileprivate func prepararMedirPrimero() {
         ponerBarraSinVoz()
-        if let a = cargarAjuste() { nueva.ajuste = a; entrarAMedir() } else { abrirAjuste(volver: false) }
+        // Su prueba del 16 oct: si ya estaba contestada para este trabajo y nivel, se saltaba sin avisar y él no la vio.
+        // Ahora sale SIEMPRE al abrir la cámara, con lo que contestó ya marcado: un toque en "Empezar a medir".
+        if let a = cargarAjuste() { nueva.ajuste = a; nueva.ajusteYaEstaba = true }
+        abrirAjuste(volver: false)
     }
     // Sin asistente de voz por ahora: la bolita no se ve y la Luz se recorre a su lugar.
     fileprivate func ponerBarraSinVoz() {
@@ -10469,6 +10530,11 @@ extension ARMeasureViewController {
     fileprivate func gatilloMedir() {
         let n = nueva
         guard n.medirActivo, n.preguntaMedir == nil, !n.ajusteAbierto, !roomName.isEmpty else { return }
+        // La primera esquina: si el teléfono apunta CLARO a otra parte (pared, techo o piso), la parte cambia antes de marcar.
+        if stage == .pickingMaterial || stage == .measuringLength, pathPoints.isEmpty, !n.parteAMano,
+           let z = n.clasificador.ahoraMismo(ahora: CACurrentMediaTime()), z != section, seccionesDisponibles[z] != nil {
+            aplicarCambio(.parte(z))
+        }
         switch stage {
         case .pickingMaterial:
             stage = .measuringLength
@@ -10512,6 +10578,13 @@ extension ARMeasureViewController {
         if stage == .measuringLength, pathPoints.count >= 2 { finishPathTapped() }
         if stage == .measuringWidth { quitarSegunda() }      // un solo punto del alto: vale el largo solo
         guard stage == .lengthDone || stage == .widthDone, hasLengthMeasurement else { return }
+        // Su prueba del 16 oct: midió el techo, bajó a la pared y la medida de la pared se quería guardar como techo. La
+        // parte se revisa con los PUNTOS de la medida (si él no la escogió a mano).
+        if !n.parteAMano, ["floor", "wall", "ceiling"].contains(section), let z = parteDeEstaMedida(), z != section,
+           seccionesDisponibles[z] != nil {
+            ponerParteDeLaMedida(z)
+            mostrarAvisoNuevo("Esta medida es de \(Self.sectionSpokenName(z)): va en \(Self.sectionSpokenName(z).capitalized)", segundos: 3)
+        }
         let conSegunda = stage == .widthDone && (currentWidthFeet ?? 0) > 0
         switch section {
         case "wall": abrirPregunta(conSegunda ? .matPared : .que)
@@ -10521,6 +10594,34 @@ extension ARMeasureViewController {
             // Cocina, baño o materiales (escogidas a mano): su lista de siempre y se guarda como siempre.
             if selectedMaterial == nil { abrirPanelNuevo(.material) } else { saveContinueTapped() }
         }
+    }
+    // Los puntos de la medida (metros del mundo) y la altura del teléfono y del piso, para ClasificadorDeParte.parteDeLaMedida.
+    private func parteDeEstaMedida() -> String? {
+        func d3(_ p: SIMD3<Float>) -> SIMD3<Double> { SIMD3(Double(p.x), Double(p.y), Double(p.z)) }
+        let largo = pathPoints.map(d3), segunda = stage == .widthDone ? widthPoints.map(d3) : []
+        var camY = 1.4, pisoY: Double? = 0
+        if maqueta == 0 {
+            guard let f = sceneView.session.currentFrame else { return nil }
+            camY = Double(f.camera.transform.columns.3.y)
+            let hs = nueva.horizontales.values
+            if let p = hs.filter({ $0.clase == "floor" }).max(by: { $0.area < $1.area }) { pisoY = Double(p.y) }
+            else if let p = hs.filter({ camY - Double($0.y) >= 0.6 }).min(by: { $0.y < $1.y }) { pisoY = Double(p.y) }
+            else { pisoY = nil }
+        }
+        return ClasificadorDeParte.parteDeLaMedida(largo: largo, segunda: segunda, camY: camY, pisoY: pisoY, actual: section, zona: nueva.zonaVista)
+    }
+    // La parte de la medida que ya se tomó se cambia SIN tocar sus esquinas (cambiarSeccion no deja con una medida a medias).
+    private func ponerParteDeLaMedida(_ z: String) {
+        let n = nueva
+        guard seccionesDisponibles[z] != nil, z != section else { return }
+        n.cambiandoSolo = true
+        section = z
+        materials = listaDeMateriales(z)
+        materialPickerView.reloadAllComponents()
+        n.seccionVista = section
+        n.cambiandoSolo = false
+        empezarPared()
+        n.firmaPanel = ""
     }
     private func abrirPregunta(_ p: PreguntaMedir) {
         nueva.preguntaMedir = p
@@ -10550,11 +10651,11 @@ extension ARMeasureViewController {
            !n.cuartosTerminados.contains(Self.clave(aqui)),
            !(n.cuartoAMano.map { Self.clave($0.mapa ?? "") == Self.clave(aqui) } ?? false) {
             if let c = n.cuartoCandidato, c.nombre == aqui {
-                if ahora - c.desde >= 1.5 { n.cuartoCandidato = nil; pedirCambio(.cuarto(aqui)) }
+                if ahora - c.desde >= 1.5 { n.cuartoCandidato = nil; pedirCambio(.cuarto(aqui)); return }
             } else { n.cuartoCandidato = (aqui, ahora) }
-            return
-        }
-        n.cuartoCandidato = nil
+            // Mientras el mapa decide el cuarto, la parte se sigue revisando (con "Continuar" el cuarto no se cambia, y antes
+            // eso dejaba la parte sin revisar hasta la siguiente medida).
+        } else { n.cuartoCandidato = nil }
         // 2. LA PARTE, por el teléfono (si no la escogió él).
         if !n.parteAMano, let z = n.zonaVista, z != section, seccionesDisponibles[z] != nil { pedirCambio(.parte(z)); return }
         // 3. OTRA PARED del mismo cuarto (ya ubicado).
@@ -10581,6 +10682,14 @@ extension ARMeasureViewController {
         case .cuarto(let c): cambiarCuarto(c); n.cuartoAMano = nil
         case .parte(let z): elegirParteNueva(z)
         case .pared: break
+        }
+        // Que se vea que cambió solo (antes no decía nada); sin tapar el aviso de lo recién guardado.
+        if Date() > n.avisoHasta {
+            switch d {
+            case .parte(let z): mostrarAvisoNuevo("Ahora: \(Self.sectionSpokenName(z).capitalized) · por el teléfono", segundos: 2.5)
+            case .cuarto(let c): mostrarAvisoNuevo("Ahora: \(c) · por el mapa", segundos: 2.5)
+            case .pared: break
+            }
         }
         n.cambiandoSolo = false
         empezarPared()
@@ -10781,21 +10890,16 @@ extension ARMeasureViewController {
             poner(corregir)
         case .piso:
             cabeza(dondeMedir(conMedida: true), numero([("\(pies(L)) × \(pies(S)) = ", false), (pies(A), true), (" pies²", false)]), "¿Qué piso es?", textoUnder())
-            listaDeMateriales(ReglasDeMedir.materialesPiso, sugerido: nil, sub: "\(pies(A)) pies²") { s, m in
-                if m == "Carpet" { s.abrirPregunta(.pad) } else { s.resolverPiso(m) }
-            }
+            listaDeMateriales(ReglasDeMedir.materialesPiso, sugerido: nil, sub: "\(pies(A)) pies²") { s, m in s.resolverPiso(m) }
             poner(corregir)
-        case .pad:
-            cabeza(dondeMedir(conMedida: true), numero([("Carpet · ", false), (pies(A), true), (" pies²", false)]), "¿Lleva pad?", "El colchón de abajo de la alfombra.")
-            poner(rejilla([loseta("Sí · con pad", "\(pies(A)) pies²") { s in s.guardarMedir(ReglasDeMedir.alfombra(largo: L, ancho: S, pad: true)) },
-                           loseta("No · sin pad", nil) { s in s.guardarMedir(ReglasDeMedir.alfombra(largo: L, ancho: S, pad: false)) }], columnas: 2), 4)
-            poner(salida("‹ Regresar") { s in s.abrirPregunta(.piso) })
         case .underCuarto:
+            // Una sola pregunta por cuarto para los dos: el carpet lleva pad y el laminate, hardwood o vinyl underlayment.
             let m = n.porGuardar?.material ?? ""
-            cabeza(dondeMedir(conMedida: true), numero([("\(m) · ", false), (pies(A), true), (" pies²", false)]), "¿\(roomName) tiene underlayment?",
+            let cosa = ReglasDeMedir.debajoDelPiso(m) == "Carpet Pad" ? "padding" : "underlayment"
+            cabeza(dondeMedir(conMedida: true), numero([("\(m) · ", false), (pies(A), true), (" pies²", false)]), "¿\(roomName) tiene underlayment o padding?",
                    "Usted contestó \"mixto\" para el piso: se pregunta una vez en cada cuarto.")
-            poner(rejilla([loseta("Sí · con underlayment", "\(pies(A)) pies²") { s in s.contestarPendiente(true) },
-                           loseta("No · sin underlayment", nil) { s in s.contestarPendiente(false) }], columnas: 2), 4)
+            poner(rejilla([loseta("Sí · con \(cosa)", "\(pies(A)) pies²") { s in s.contestarPendiente(true) },
+                           loseta("No · sin \(cosa)", nil) { s in s.contestarPendiente(false) }], columnas: 2), 4)
             poner(salida("‹ Regresar") { s in s.nueva.porGuardar = nil; s.abrirPregunta(.piso) })
         case .techo:
             cabeza(dondeMedir(conMedida: true), numero([("\(pies(L)) × \(pies(S)) = ", false), (pies(A), true), (" pies²", false)]), "¿Qué techo es?", textoTecho())
@@ -10871,9 +10975,9 @@ extension ARMeasureViewController {
     }
     private func textoUnder() -> String {
         switch nueva.ajuste.piso {
-        case "si": return "Underlayment en todo el nivel: sale solo debajo del laminate, hardwood o vinyl."
-        case "no": return "Sin underlayment en este nivel."
-        default: return "Mixto: le pregunto una vez si este cuarto tiene underlayment."
+        case "si": return "Underlayment o padding en todo el nivel: sale solo debajo del carpet, laminate, hardwood o vinyl."
+        case "no": return "Sin underlayment ni padding en este nivel."
+        default: return "Mixto: le pregunto una vez si este cuarto tiene underlayment o padding."
         }
     }
     private func textoTecho() -> String {
@@ -10988,10 +11092,10 @@ extension ARMeasureViewController {
 
     // ---------------- LAS MAQUETAS 24-37 (solo simulador) ----------------
     // 24 la página del nivel sin contestar; 25 contestada; 26 midiendo la pared (el largo listo); 27 "¿Qué midió?"; 28 shoe
-    // molding; 29 el material de la pared; 30 insulación "mixto"; 31 el piso; 32 el pad; 33 underlayment "mixto"; 34 el
+    // molding; 29 el material de la pared; 30 insulación "mixto"; 31 el piso; 32 el carpet "mixto" (padding); 33 underlayment "mixto"; 34 el
     // techo; 35 el techo "mixto"; 36 "¿Ya terminó con esta pared?"; 37 la hoja del cuarto (con medidas guardadas de verdad).
     fileprivate func maquetaMedirPrimero() {
-        guard (24...37).contains(maqueta), medirPrimero else { return }
+        guard (24...38).contains(maqueta), medirPrimero else { return }
         let n = nueva
         func w(_ a: Double, _ b: Double, _ c: Double, _ d: Double, _ e: Bool) -> UbicadorEnPlano.ParedPlano {
             UbicadorEnPlano.ParedPlano(seg: UbicadorEnPlano.Segmento(a: SIMD2(a, b), b: SIMD2(c, d)), exterior: e) }
@@ -11020,11 +11124,15 @@ extension ARMeasureViewController {
         let m = Float(1 / 3.28084)
         func medida(_ parte: String, _ largo: Double, _ segunda: Double?) {
             if section != parte { n.cambiandoSolo = true; elegirParteNueva(parte); n.cambiandoSolo = false; n.seccionVista = section; empezarPared() }
-            pathPoints = [SIMD3<Float>(0, 0, 0), SIMD3<Float>(Float(largo) * m, 0, 0)]
+            // Los puntos donde de verdad quedan (Listo revisa la parte por ellos): la pared con su base en el piso y el alto que
+            // sube; el piso pegado al piso y el techo arriba, con el ancho plano.
+            let y: Float = parte == "ceiling" ? 2.44 : (parte == "floor" ? 0.01 : 0.02)
+            pathPoints = [SIMD3<Float>(0, y, 0), SIMD3<Float>(Float(largo) * m, y, 0)]
             pathTotalFeet = largo; pendingStart = nil; widthPoints = []; currentWidthFeet = nil
             stage = .lengthDone
             if let s = segunda {
-                widthPoints = [pathPoints[1], SIMD3<Float>(Float(largo) * m, Float(s) * m, 0)]
+                let fin = parte == "wall" ? SIMD3<Float>(Float(largo) * m, y + Float(s) * m, 0) : SIMD3<Float>(Float(largo) * m, y, Float(s) * m)
+                widthPoints = [pathPoints[1], fin]
                 currentWidthFeet = s
                 stage = .widthDone
             }
@@ -11034,7 +11142,7 @@ extension ARMeasureViewController {
         case 25: n.ajuste = ReglasDeMedir.Ajuste(paredes: "afuera", techo: "mixto", piso: "mixto"); abrirAjuste(volver: false)
         default:
             if paso == 30 { n.ajuste.paredes = "mixto" }
-            if paso == 33 { n.ajuste.piso = "mixto" }
+            if paso == 32 || paso == 33 { n.ajuste.piso = "mixto" }
             if paso == 35 { n.ajuste.techo = "mixto" }
             entrarAMedir()
             switch paso {
@@ -11044,10 +11152,27 @@ extension ARMeasureViewController {
             case 29: medida("wall", 14, 4); listoMedir()
             case 30: medida("wall", 14, 4); listoMedir(); resolverPared("Drywall")
             case 31: medida("floor", 12, 10); listoMedir()
-            case 32: medida("floor", 12, 10); listoMedir(); abrirPregunta(.pad)
+            case 32: medida("floor", 12, 10); listoMedir(); resolverPiso("Carpet")
             case 33: medida("floor", 12, 10); listoMedir(); resolverPiso("Laminate")
             case 34: medida("ceiling", 12, 10); listoMedir()
             case 35: medida("ceiling", 12, 10); listoMedir(); resolverTecho("Drywall")
+            case 38:
+                // SU PRUEBA DEL 16 OCT, por las MISMAS funciones del teléfono (+, Listo, Alto, el material): el techo se mide y
+                // se guarda; luego, con la parte TODAVÍA en techo (como si el teléfono no hubiera alcanzado a cambiar), se mide
+                // la pared: la base pegada al piso y el alto que sube 4 ft. Al tocar Listo tiene que irse a PARED.
+                let pie = Float(1 / 3.28084)
+                if section != "ceiling" { n.cambiandoSolo = true; elegirParteNueva("ceiling"); n.cambiandoSolo = false; n.seccionVista = section }
+                n.puntosDeMaqueta = [SIMD3(0, 2.44, -1), SIMD3(12 * pie, 2.44, -1),           // el largo del techo (12 ft, arriba)
+                                     SIMD3(12 * pie, 2.44, -1), SIMD3(12 * pie, 2.44, -1 + 10 * pie)]   // su ancho (10 ft, plano)
+                gatilloNuevoTocado(); gatilloNuevoTocado(); terminarElLargo()      // + + Listo · el largo
+                empezarAncho(); gatilloNuevoTocado(); gatilloNuevoTocado()         // Ancho: + +
+                listoMedir()                                                         // Listo -> ¿Qué techo es?
+                resolverTecho("Drywall")                                             // guardado como techo
+                n.puntosDeMaqueta = [SIMD3(-2, 0.02, -2), SIMD3(-2 + 14 * pie, 0.02, -2),    // la base de la pared (14 ft, en el piso)
+                                     SIMD3(-2 + 14 * pie, 0.02, -2), SIMD3(-2 + 14 * pie, 0.02 + 4 * pie, -2)]   // el alto (4 ft, sube)
+                gatilloNuevoTocado(); gatilloNuevoTocado(); terminarElLargo()      // + + Listo · el largo
+                empezarAncho(); gatilloNuevoTocado(); gatilloNuevoTocado()         // Alto: + +
+                listoMedir()                                                         // Listo -> tiene que ser PARED
             case 36:
                 medida("wall", 14, 4); listoMedir(); resolverPared("Drywall")
                 n.zonaVista = "floor"
@@ -11058,7 +11183,7 @@ extension ARMeasureViewController {
                 medida("wall", 14, nil); guardarMedir(ReglasDeMedir.baseboard(largo: 14, shoe: true))
                 medida("wall", 14, nil); resolverPared(ReglasDeMedir.drywallDeUnPie)
                 medida("wall", 14, 4); resolverPared("Drywall")
-                medida("floor", 12, 10); guardarMedir(ReglasDeMedir.alfombra(largo: 12, ancho: 10, pad: true))
+                medida("floor", 12, 10); resolverPiso("Carpet")          // piso "si": Carpet + Carpet Pad, sin preguntar
                 medida("ceiling", 12, 10); resolverTecho("Drywall")
                 abrirHojaDelCuarto()
             default: break
@@ -11093,6 +11218,13 @@ struct ReglasDeMedir {
     static let paredConInsulacion: Set<String> = ["Drywall", "Plaster", "Paneling", "Drywall (1 ft cut)"]
     static let techoConInsulacion: Set<String> = ["Drywall", "Popcorn / Texture", "Plaster"]
     static let conUnderlayment: Set<String> = ["Laminate", "Hardwood", "Vinyl (LVP)"]
+    static let conPad: Set<String> = ["Carpet"]
+    /// Lo que va debajo de este piso, con el nombre que va al reporte: "Carpet Pad" (carpet), "Underlayment" (laminate,
+    /// hardwood, vinyl) o nil (tile, lo escrito a mano). La pregunta del nivel "¿Tiene underlayment o padding?" decide los dos.
+    static func debajoDelPiso(_ material: String) -> String? {
+        if conPad.contains(material) { return "Carpet Pad" }
+        return conUnderlayment.contains(material) ? "Underlayment" : nil
+    }
 
     /// ¿Esta pared lleva insulación? nil = preguntar (una vez en esa pared).
     static func insulacionDePared(_ ajuste: String?, afuera: Bool?, respuesta: Bool?) -> Bool? {
@@ -11102,9 +11234,9 @@ struct ReglasDeMedir {
         default: return respuesta                        // mixto: una vez en cada pared
         }
     }
-    /// ¿Este piso lleva underlayment? false si el material no lleva; nil = preguntar (una vez en ese cuarto).
+    /// ¿Este piso lleva underlayment o padding? false si el material no lleva; nil = preguntar (una vez en ese cuarto).
     static func underlayment(_ ajuste: String?, material: String, respuesta: Bool?) -> Bool? {
-        guard conUnderlayment.contains(material) else { return false }
+        guard debajoDelPiso(material) != nil else { return false }
         switch ajuste { case "si": return true; case "no": return false; default: return respuesta }
     }
     /// ¿El techo lleva insulación? nil = preguntar (una vez en ese cuarto).
@@ -11125,12 +11257,10 @@ struct ReglasDeMedir {
         Guardado(material: material, largo: largo, ancho: nil, companero: nil, unidad: "LF", unidadCompanero: nil)
     }
     static func piso(_ material: String, largo: Double, ancho: Double, underlayment: Bool) -> Guardado {
-        let lleva = underlayment && conUnderlayment.contains(material)
-        return Guardado(material: material, largo: largo, ancho: ancho, companero: lleva ? "Underlayment" : nil, unidad: "SF", unidadCompanero: lleva ? "SF" : nil)
+        let comp = underlayment ? debajoDelPiso(material) : nil
+        return Guardado(material: material, largo: largo, ancho: ancho, companero: comp, unidad: "SF", unidadCompanero: comp == nil ? nil : "SF")
     }
-    static func alfombra(largo: Double, ancho: Double, pad: Bool) -> Guardado {
-        Guardado(material: "Carpet", largo: largo, ancho: ancho, companero: pad ? "Carpet Pad" : nil, unidad: "SF", unidadCompanero: pad ? "SF" : nil)
-    }
+    static func alfombra(largo: Double, ancho: Double, pad: Bool) -> Guardado { piso("Carpet", largo: largo, ancho: ancho, underlayment: pad) }
     static func techo(_ material: String, largo: Double, ancho: Double, insulacion: Bool) -> Guardado {
         let lleva = insulacion && techoConInsulacion.contains(material)
         return Guardado(material: material, largo: largo, ancho: ancho, companero: lleva ? "Insulation" : nil, unidad: "SF", unidadCompanero: lleva ? "SF" : nil)
@@ -11142,8 +11272,8 @@ struct ReglasDeMedir {
         var x = g; x.companero = si ? "Insulation" : nil; x.unidadCompanero = si ? "SF" : nil; return x
     }
     static func conUnderlayment(_ g: Guardado, _ si: Bool) -> Guardado {
-        var x = g; let lleva = si && conUnderlayment.contains(g.material)
-        x.companero = lleva ? "Underlayment" : nil; x.unidadCompanero = lleva ? "SF" : nil; return x
+        var x = g; let comp = si ? debajoDelPiso(g.material) : nil
+        x.companero = comp; x.unidadCompanero = comp == nil ? nil : "SF"; return x
     }
     static func pies(_ x: Double) -> String {
         let r = (x * 10).rounded() / 10
