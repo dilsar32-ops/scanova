@@ -190,7 +190,8 @@ ok("medir primero no llama a cambiarSeccion: la parte va por elegirParteNueva ->
 ok("siguen siendo 5 caminos a cambiarSeccion", len(re.findall(r'cambiarSeccion\((sec|clave)\)', v)) == 5)
 ok("la parte y el cuarto solo cambian entre una medida y otra (la regla madre)", 'guard !bloqueoDeParte() else' in bloque(v, 'fileprivate func revisarMedirPrimero')
    and 'medidaEnCurso' in bloque(v, 'fileprivate func bloqueoDeParte') and 'n.preguntaMedir != nil' in bloque(v, 'fileprivate func bloqueoDeParte'))
-ok("'¿Ya terminó con esta pared?' desde 1 medida en esa pared, y 'Continuar' la calla", 'medidasEnEstaPared() > 0' in bloque(v, 'private func pedirCambio') and 'if n.cierreCallado { return }' in bloque(v, 'private func pedirCambio'))
+# 16 oct: no pregunta si la pared ya está completa, y "Continuar" vale 20 s (antes congelaba parte, pared y cuarto hasta guardar).
+ok("'¿Ya terminó con esta pared?' desde 1 medida en esa pared (no si ya está completa), y 'Continuar' la calla 20 s", 'medidasEnEstaPared() > 0, !(n.paredActual.map { estadoDeLaPared($0) == "completa" } ?? false)' in bloque(v, 'private func pedirCambio') and 'if n.cierreCallado && Date().timeIntervalSince(n.cierreCalladoDesde) < 20 { return }' in bloque(v, 'private func pedirCambio'))
 # Su prueba (16 oct, 3:31): "no puedo seguir midiendo más de una medida… eso ya lo teníamos arreglado". Medir es como
 # siempre: el largo por esquinas sin límite (lo cierra "Listo · el largo"), y el alto o el ancho también por esquinas.
 gat = bloque(v, 'fileprivate func gatilloMedir')
@@ -219,7 +220,11 @@ ok("la bitácora anota medir primero (cada +, la parte de la medida, cada cambio
    and 'anotarMedir("guardar"' in bloque(v, 'fileprivate func guardarMedir') and 'anotarMedir("resumen"' in v
    and '(medirPrimero && nueva.medirActivo)' in bloque(v, 'fileprivate func anotarBitacora'))
 ok("en medir primero el seguro de la parte es solo una medida a medias o algo abierto", 'return medidaEnCurso || (n.preguntaMedir != nil && !(n.preguntaMedir == .parteEntera && n.eleccionAuto)) || n.ajusteAbierto' in bloque(v, 'fileprivate func bloqueoDeParte'))
-ok("pared y techo en 1 s; el piso pide 2 s (leer la pantalla no es el piso)", 'estable(por: 1.0, ahora: ahora)' in v and 'estable(por: 2.0, ahora: ahora) != "floor"' in v)
+# 16 oct: EL LECTOR DE LA PARTE (rayo contra el plano + clase de ARKit + estimado del láser + inclinación) con su puerta de cambio.
+rpa = bloque(v, 'fileprivate func revisarParteQueApunta')
+ok("la parte sale del LectorDeParte y cambia por su puerta (0.4 s; el piso quieto pide más)", 'let v = LectorDeParte.votar(e)' in rpa and 'n.puerta.meter(v, t: ahora, grados: m.grados, quieto: quieto)' in rpa and 'estable(por:' not in rpa)
+ok("CUÁL pared, solo con el plano confirmado por el láser; sin plano confiable no hay pared", 'if !confiable { n.puertaPared.soltar(); n.paredVista = nil; n.paredCandidata = nil }' in rpa)
+ok("si el plano casi no calza con el láser 3 s, se reubica sola (la misma rueda)", 'empezarAReubicar("rayo-no-calza")' in rpa and 'frac < 0.3' in rpa)
 ok("la maqueta 38 recorre su prueba por las funciones de verdad (+, Listo el largo, Alto, Listo)", 'case 38:' in v and 'nueva.puntosDeMaqueta' in bloque(v, '@objc private func addTapped') and v.count('gatilloNuevoTocado(); gatilloNuevoTocado(); terminarElLargo()') == 2)
 ok("Terminar y mandar sigue por el camino de siempre", 'self.nueva.terminarDeVerdad = true\n            self.terminarNuevoTocado()' in v)
 ok("el corte de 1 pie va en pie lineal también en la cámara", 'if m.contains("1 ft cut") { return .lineal }' in v)
@@ -240,7 +245,7 @@ ok("la ayuda del panel del piso habla de underlayment o padding", 'debajo del ca
 ok("lo contestado con la pregunta vieja no cuenta: la llave del nivel es v2", 'private static let llaveAjuste = "scanova.medirPrimero.ajuste.v2"' in v)
 ok("la maqueta 37 guarda el carpet por las reglas de verdad (resolverPiso)", 'resolverPiso("Carpet")' in bloque(v, 'private func maquetaMedirPrimeroPaso') and 'ReglasDeMedir.alfombra(' not in v[:v.index('struct ReglasDeMedir {')])
 ok("lo contestado del nivel se guarda por trabajo y nivel", 'Self.llaveAjuste + "|" + trabajoId + "|" + nivelActual' in v and 'arVC.trabajoId = call.getString("trabajo")' in plg)
-ok("las maquetas 24-47 no se enciman con las del laboratorio (18-23)", 'arVC.porMovimiento = (24...47).contains(paso)' in plg and '(18...23).contains(paso)' in plg)
+ok("las maquetas 24-54 no se enciman con las del laboratorio (18-23)", 'arVC.porMovimiento = (24...54).contains(paso)' in plg and '(18...23).contains(paso)' in plg)
 # ---- LA VENTANA "¿COMPLETO O PARCIAL?" SALE SOLA (16 oct, su pedido: "que ya no pregunte fijar; mira la pared y le da las
 # opciones, mira arriba techo completo o parcial, abajo piso; al escoger, engancha") ----
 rm = bloque(v, 'fileprivate func revisarMedirPrimero')
@@ -253,16 +258,20 @@ ok("sale sola sin nada a medias, sin otra cosa abierta, con cuarto y sin una par
 ok("cocina, baño o materiales escogidos a mano se miden como siempre (sin la ventana)", 'if n.parteAMano && !["wall", "floor", "ceiling"].contains(section) { return false }' in et)
 re2 = bloque(v, 'fileprivate func revisarEleccion')
 ok("la ventana sigue a donde apunta: si cambia la parte o la pared se vuelve a pintar; si ya no toca, se cierra",
-   'if n.preguntaMedir == nil { abrirEleccion(); return }' in re2 and 'if f != n.firmaEleccion { n.firmaEleccion = f; pintarCamaraNueva() }' in re2
-   and 'cerrarPregunta()' in re2 and '"\\(parteParaFijar() ?? "")|\\(paredApuntada() ?? -1)|\\(items.count)"' in v)
+   'if n.preguntaMedir == nil { abrirEleccion(); return }' in re2
+   and 'if f != n.firmaEleccion, !n.panelScroll.isTracking, ahora - n.ventanaCambioEn >= 0.3 {' in re2
+   and 'n.firmaEleccion = f; n.ventanaCambioEn = ahora; anotarVentana("cambia"); pintarCamaraNueva()' in re2
+   and 'cerrarPregunta()' in re2 and '"\\(parteParaFijar() ?? "")|\\(paredApuntada() ?? -1)|\\(items.count)|\\(ubicacionReciente())"' in v)
 ok("la ventana que sale sola NO frena el cuarto ni la parte (siguen al teléfono)", '!(n.preguntaMedir == .parteEntera && n.eleccionAuto)' in bloque(v, 'fileprivate func bloqueoDeParte'))
 ok("al cambiar lo que ve el teléfono se revisa la ventana en el momento", 'if medirPrimero && n.medirActivo { revisarEleccion() }' in v)
 en = bloque(v, 'fileprivate func engancharParte')
-ok("al escoger, la parte se ENGANCHA (como escogerla a mano) con la pared QUE ENSEÑÓ la tarjeta (otra pared = empieza otra)",
-   'n.parteAMano = true' in en and 'elegirParteNueva(p)' in en and 'if section == "wall", let i = pared {' in en and 'if i != n.paredActual { empezarPared() }' in en)
+# 16 oct: lo de la ventana ya NO es "a mano" (eso trabó la parte 2 minutos); lo protegen el largo del plano o enganchada.
+ok("al escoger, la parte se ENGANCHA (sin quedar 'a mano') con la pared QUE ENSEÑÓ la tarjeta (otra pared = empieza otra)",
+   'n.parteAMano = true' not in en and 'elegirParteNueva(p)' in en and 'if section == "wall", let i = pared {' in en and 'if i != n.paredActual { empezarPared() }' in en)
 pa = bloque(v, 'private func paredApuntada')
-ok("la pared a la que apunta es la de AHORA: ubicado en este nivel y 1 s quieto (nunca la última que vio)",
-   'guard ubicacionBase(), let c = n.paredCandidata, CACurrentMediaTime() - c.desde >= 1.0 else { return nil }' in pa and 'paredVista' not in pa.split('if maqueta > 0')[1].split('\n', 1)[1])
+# 16 oct: la que dice el rayo contra el plano confirmado por el láser (0.5 s), y solo mientras le sigue apuntando (0.6 s).
+ok("la pared a la que apunta es la de AHORA: ubicado y el plano lo dice ahorita (nunca la última que vio)",
+   'guard ubicacionReciente(), CACurrentMediaTime() - n.ultimoPDeLaPared <= 0.6 else { return nil }' in pa)
 ok("completo de una pared sin la pared vista no se acepta", 'if p == "wall", pared == nil { revisarEleccion(); return }' in bloque(v, 'fileprivate func escogerCompleta'))
 ok("al cambiar de cuarto se olvida la pared vista (era de otro cuarto)", 'n.paredVista = nil; n.paredCandidata = nil' in bloque(v, 'fileprivate func arreglarMedirPrimero'))
 ok("el piso/techo completo solo con el plano de este nivel", 'nueva.nivelDelPlano == nivelActual || maqueta > 0' in bloque(v, 'fileprivate func datosPisoEntero'))
@@ -329,14 +338,53 @@ ok("la pared resta sus puertas y ventanas; el piso/techo lo que sobra de la caja
    and 'ReglasDeMedir.conLaFormaDelCuarto(g, area: pe.area)' in cp and 'section == pe.seccion' in cp)
 ok("la insulación de la pared completa mira la pared completa del plano", 'claseDeLaMedida(tramosFijos: [(indice: $0, t0: 0, t1: pe.largo)])' in bloque(v, 'private func claseParaInsulacion'))
 ok("'No era completo' y Deshacer lo quitan completo (nunca una guardada)", 'cancelarMedidaEnCurso(hablar: false)' in bloque(v, 'fileprivate func cancelarParteEntera')
-   and 'cancelarParteEntera(); return' in bloque(v, 'fileprivate func deshacerMedir'))
+   and 'cancelarParteEntera(aParcial: false); revisarEleccion(); pintarCamaraNueva(); return' in bloque(v, 'fileprivate func deshacerMedir'))
+cpe = bloque(v, 'fileprivate func cancelarParteEntera')
+ok("'No era completa · medir con +' deja el + listo en PARCIAL de esa parte y pared (la ventana no vuelve a taparlo)", 'n.parteAMano = false; n.enganchada = aParcial' in cpe and 'n.eleccionAuto = false' in cpe)
+ok("lo escogido se suelta solo con la REGLA (sin nada marcado, la parte nueva cuadra con la inclinación y hubo giro)",
+   'struct ReglaDeSoltar {' in v and 'if let porque = r.suelta { soltarLoEscogido(porque); revisarEleccion() }' in bloque(v, 'fileprivate func revisarMedirPrimero'))
+ok("la ventana respeta la parte escogida a mano en el panel", 'if n.parteAMano, partes.contains(section) { return section }' in bloque(v, 'fileprivate func parteParaFijar'))
+ok("Reubicar: tocar 'Ubicado' vuelve a buscar con la rueda, rápido, y para al ser firme o a los 12 s", 'm.alTocarEstado = { [weak self] in self?.reubicarAMano() }' in v and 'n.minimapa.ubicando = true' in v and 'dura > 12' in v and 'ponerEstado("Ubicando…"' in v)
 ok("los totales de la cámara restan lo completo", 'max(0, w * largo - menos)' in bloque(v, 'private func cuentaDe') and 'menos: x.menos' in bloque(v, 'private func totalesTexto'))
 ok("las maquetas 39-45: pared (sale sola, material, guardada, sin alto), techo, piso en L y parcial enganchada", 'case 39, 40, 41, 42:' in v and 'case 43, 44, 45:' in v)
+# ---- 16 oct, la revisión con la bitácora 388DF319: lo escogido manda, la pared completa solo con la ubicación confirmada ----
+rm = bloque(v, 'fileprivate func revisarMedirPrimero')
+ok("lo escogido manda (a mano o 'Área parcial'): el paso 2 y la primera esquina no lo cambian",
+   'fileprivate var parteFija: Bool { nueva.parteAMano || nueva.enganchada }' in v
+   and 'if !parteFija, let z = n.zonaVista, z != section, seccionesDisponibles[z] != nil { pedirCambio(.parte(z)); return }' in rm
+   and 'pathPoints.isEmpty, !parteFija,' in bloque(v, 'fileprivate func gatilloMedir') and '!n.parteAMano' in bloque(v, 'fileprivate func revisarParteDeLaMedida'))
+ok("Deshacer ya no suelta lo escogido (su Techo a mano se queda)", 'soltarLoEscogido("deshacer")' not in v)
+ok("enganchada en un parcial de pared adopta una pared, nunca la cambia", 'else if !n.enganchada, let pa = n.paredActual, pv != pa { pedirCambio(.pared(pv)); return }' in rm)
+ok("el cuarto por el mapa solo con la ubicación confirmada hace poco", 'if ubicacionReciente(), let aqui = cuartoDondeEsta(), Self.clave(aqui) != Self.clave(roomName),' in rm)
+cpe2 = bloque(v, 'fileprivate func cancelarParteEntera')
+ok("'No era completa' no hereda la pared equivocada", 'if parte == "wall" { n.paredActual = paredApuntada() }' in cpe2 and 'if parte == "wall", let i = pared { n.paredActual = i }' not in cpe2)
+pc = bloque(v, 'private func pedirCambio')
+ok("'¿Ya terminó?' pide lo nuevo sostenido 1.2 s, y un cuarto nuevo siempre pregunta",
+   'case .parte: if ahora - n.zonaVistaDesde < Self.esperaParaPreguntar { return }' in pc
+   and 'case .pared: if ahora - n.paredVistaDesde < Self.esperaParaPreguntar { return }' in pc
+   and 'if case .cuarto = d {} else if n.cierreCallado && Date().timeIntervalSince(n.cierreCalladoDesde) < 20 { return }' in pc
+   and 'static let esperaParaPreguntar: Double = 1.2' in v
+   and 'if case .some(.cuarto(let c)) = s.nueva.cambioPendiente { s.nueva.cuartoCallado = (c, Date()) }' in v)
+ok("la ventana no se rehace bajo el dedo: la firma del panel es la de revisarEleccion y los toques de 0.6 s no cuentan",
+   '\\(n.preguntaMedir == .parteEntera ? n.firmaEleccion : "")' in bloque(v, 'private func pintarPanelNuevo')
+   and 'firmaDeLaEleccion()' not in bloque(v, 'private func pintarPanelNuevo') and 'CACurrentMediaTime() - s.nueva.ventanaCambioEn >= 0.6' in v and 'CACurrentMediaTime() - s.nueva.ventanaParteEn >= 0.6' in v)
+ok("'Pared completa' solo con la ubicación confirmada y apuntándole todavía a esa pared (documento del seguro)",
+   'if p == "wall", maqueta == 0, !(ubicacionReciente() && paredApuntada() == pared) {' in bloque(v, 'fileprivate func escogerCompleta')
+   and 'anotarMedir("completa-rechazada"' in v and 'let iPared = esPared && ubicacionReciente() ? paredApuntada() : nil' in v
+   and '"Sin confirmar la ubicación · toque arriba para reubicar"' in v)
+ok("prender 'a mano' en el panel se anota", 'anotarMedir("a-mano", ["prende": "panel", "parte": section])' in bloque(v, 'fileprivate func arreglarMedirPrimero'))
+ok("las maquetas 49-54 (lo escogido, la ventana, sin confirmar, reubicar, ¿ya terminó?)", 'case 49:' in v and 'case 54:' in v)
+rpa = bloque(v, 'fileprivate func revisarParteQueApunta')
+ok("el detector: pared por láser fuerte, sin muebles, la inclinación sola no decide, y 'calza' asimétrica",
+   'let confiable = ubicacionReciente() && (n.calzas.count < 5 || frac >= 0.6)' in rpa
+   and 'planoFuerte: n.calzas.count >= 5 && frac >= 0.6 && !m.pisoAdivinado' in rpa and 'if !paredDeVerdad { vp.pared = nil }' in rpa
+   and 'if v.fuente == "I" { viejo = .nada }' in rpa and 'else if g.d > dPlano + tol { n.calzas.append(false) }' in rpa
+   and 'n.paredVista = i; n.paredVistaDesde = ahora' in rpa)
 pm2 = bloque(v, 'fileprivate func armarPanelMedir')
 ok("la pregunta con SU diseño para pared, techo y piso: '¿Qué extensión se retiró?', completa (plano) y Área parcial (puntos)",
    '"¿Qué extensión se retiró?"' in pm2 and 'esPared ? "Pared completa" : (parte == "floor" ? "Piso completo" : "Techo completo")' in pm2
    and 'TarjetaParedEntera(parcial: true, titulo: "Área parcial", sub: esPared ? "Marcar puntos y altura" : "Marcar puntos y ancho"' in pm2
-   and 'completa.accion = { [weak self] in self?.escogerCompleta(parte, pared: iPared) }' in pm2 and 'parcial.accion = { [weak self] in self?.escogerParcial(parte, pared: iPared) }' in pm2
+   and 's.escogerCompleta(parte, pared: iPared) }' in pm2 and 's.escogerParcial(parte, pared: iPared) }' in pm2
    and 'habilitada: d != nil' in pm2 and 'let parte = parteParaFijar() ?? section' in pm2
    and '"‹ Deshacer la última guardada"' in pm2 and '"Otra parte · cocina, baño, materiales"' in pm2)
 ok("cada pantalla del material dice el número con su resta", 'let menosCurso = restaEnCurso(L, S), A = max(0, L * S - menosCurso)' in pm2 and pm2.count('cuenta(), "¿Qu') == 3)

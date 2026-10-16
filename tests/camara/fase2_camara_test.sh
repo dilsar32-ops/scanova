@@ -111,7 +111,8 @@ ok("el puente recibe las paredes del plano", 'call.getObject("paredesPorCuarto")
 ok("Scanova le manda a la cámara las paredes del plano", 'experiencia: EXPERIENCIA_CAMARA, paredesPorCuarto' in med and 'AYUDA.paredes' in med)
 # ---- 15 oct: ubicarse dentro del plano con el LiDAR ----
 ok("la cámara junta las paredes verticales que ve el LiDAR (solo con plano y en la pantalla nueva)", 'p.alignment == .vertical' in v and 'guard experienciaNueva, !planoPorCuarto.isEmpty else { return }' in v)
-ok("cada segundo se ubica contra el cuarto escogido, y una dudosa no tumba una segura", 'Date().timeIntervalSince(n.ultimoUbicar) > 1' in v and 'if ac.seguro || !(n.acomodo?.seguro ?? false)' in v)
+# 16 oct: cada segundo; cada 0.4 s si está reubicando o la ubicación dejó de confirmarse (arrancó 10 ft corrida y tardó 80 s).
+ok("cada segundo se ubica contra el cuarto escogido (0.4 s si duda), y una dudosa no tumba una segura", 'Date().timeIntervalSince(n.ultimoUbicar) > intervalo' in v and 'let intervalo = (n.reubicandoDesde != nil || !n.firme || sinConfirmar > 4) ? 0.4 : 1.0' in v and 'if ac.seguro || !(n.acomodo?.seguro ?? false)' in v)
 ok("las ventanas y puertas que reconoce el iPhone sirven de señas", 'case .window: clase = .ventana' in v and 'case .door: clase = .puerta' in v)
 ok("la sugerencia usa primero la ubicación (sirve con cortes parciales) y luego el largo", v.index('UbicadorEnPlano.paredMedida(ac') < v.index('// 2. Sin ubicarse: por el largo'))
 ok("el minimapa sale con cualquier plano (aunque haya un panel abierto), y dice cuando todavía no se ubica", 'guard !planoPorCuarto.isEmpty else { m.isHidden = true; n.columnaJuntoAlMapa?.isActive = false; return }' in bloque(v, 'private func pintarMinimapa') and 'n.panel.isHidden' not in bloque(v, 'private func pintarMinimapa') and '"Buscando paredes…"' in v)
@@ -132,7 +133,7 @@ ok("con el teléfono muy caliente no se toman cuadros", 'guard termico != .criti
 ok("salir con grabaciones sin guardar pregunta antes de borrarlas", '¿Salir sin guardar la grabación?' in lab)
 # ---- 15 oct: la ubicación se queda al cambiar de cuarto (mismo dibujo) ----
 ub = bloque(v, 'fileprivate func ubicarseEnElPlano')
-ok("la ubicación se borra al cambiar de NIVEL", 'if n.acomodoNivel != nivelActual { n.acomodoNivel = nivelActual; n.acomodo = nil; n.acomodoMarco = nil }' in ub)
+ok("la ubicación se borra al cambiar de NIVEL", 'if n.acomodoNivel != nivelActual { n.acomodoNivel = nivelActual; n.acomodo = nil; n.acomodoMarco = nil; n.calzas = []; n.puertaPared.soltar(); n.paredVista = nil }' in ub)
 ok("al cambiar de cuarto SE QUEDA si es el mismo dibujo (y se espera mientras se escoge)", 'if n.acomodoCuarto != roomName, !roomName.isEmpty {' in ub and 'else if let m = marcoDe(roomName), m != n.acomodoMarco { n.acomodo = nil; n.acomodoMarco = nil }' in ub)
 ok("con una página vieja (sin dibujo) se comporta como antes", 'if n.acomodoMarco == nil { n.acomodo = nil }' in ub)
 ok("ya ubicado se afina contra TODA la planta, y solo acepta una respuesta segura y cerca", 'paredes: paredesPlanta' in ub and 'simd_length(ac.aplicar(c) - actual.aplicar(c)) < 2.0' in ub and '< 0.17' in ub)
@@ -146,9 +147,22 @@ ok("Scanova manda el dibujo de cada cuarto (0 si el plano está juntado)", "marc
 fz = bloque(v, 'fileprivate func pintarFaseUbicarse')
 ok("al abrir con plano, lo primero es la fase de ubicarse", 'nueva.ubicandose = !planoPorCuarto.isEmpty && maqueta == 0' in bloque(v, 'private func armarCamaraNueva'))
 ok("en la fase solo se ve la mira y el plano grande (ni botones, ni muelle, ni panel)", 'for v in [n.columna, n.muelle, n.panel, n.tarjeta, n.minimapa, n.pista] { v.isHidden = true }' in fz and '"Buscando su ubicación"' in fz)
-ok("la fase manda sobre la pantalla y el cuadro por cuadro de siempre", 'if nueva.ubicandose { pintarFaseUbicarse(); return }' in bloque(v, 'fileprivate func pintarCamaraNueva') and 'ubicarseEnElPlano(); pintarMinimapa(); pintarFaseUbicarse()' in bloque(v, 'fileprivate func tickCamaraNueva'))
-ok("busca sin necesidad de escoger cuarto (toda la planta)", 'let paredes = forma?.paredes ?? paredesPlanta' in ub)
-ok("si en el cuarto escogido no queda seguro, busca en toda la casa", 'if !ac.seguro, forma != nil, paredesPlanta.count > paredes.count' in ub)
+ok("la fase manda sobre la pantalla y el cuadro por cuadro de siempre", 'if nueva.ubicandose { pintarFaseUbicarse(); return }' in bloque(v, 'fileprivate func pintarCamaraNueva') and 'ubicarseEnElPlano()' in bloque(v, 'fileprivate func tickCamaraNueva') and 'pintarMinimapa(); pintarFaseUbicarse() }' in bloque(v, 'fileprivate func tickCamaraNueva'))
+# 16 oct: un solo resolvedor, TODA la planta (antes primero el cuarto escogido: aceptaba ubicaciones que la casa no confirmaba).
+ok("busca en toda la planta (y sin planta, en el cuarto escogido)", 'let paredes = paredesPlanta.isEmpty ? (forma?.paredes ?? []) : paredesPlanta' in ub)
+ok("solo paredes de verdad para ubicarse (no muebles: sofá, gabinete, tina)", 'guard Self.esParedDeVerdad(p, pisoY: pisoMundo) else { descartados += 1; continue }' in ub and 'arriba - piso >= 1.9 && arriba - abajo >= 1.2' in v)
+ok("reubicando, la misma ubicación rechazada no se acepta hasta ver algo nuevo (una pared nueva o 3 ft más)",
+   'if ac.seguro, let rech = n.acomodoRechazado, !evidNueva, let c = cam,' in ub and 'rechazoHasta' not in v and 'n.planosAlTocar = Set(n.planosVistos.keys)' in v)
+# ---- 16 oct, la revisión con la bitácora: reubicarse sola y no con los mismos datos ----
+ok("reubicar a mano no corre con el laboratorio, y el laboratorio apaga la rueda",
+   'guard !planoPorCuarto.isEmpty, n.reubicandoDesde == nil, !lab.activo else { return }' in bloque(v, 'fileprivate func reubicarAMano')
+   and 'nueva.reubicandoDesde = nil; nueva.minimapa.ubicando = false' in bloque(v, 'fileprivate func entrarLaboratorio'))
+ok("después de reubicarse se suelta lo que salió de la ubicación de antes (sin tocar lo guardado)", 'fileprivate func alReubicarse(salto: Double, porque: String)' in v)
+ok("con lo firme, la de ahora solo se cambia si la casa la contradice (la lejana explica 4 o más)", 'let explica = !n.firme || (resp.map { $0.puntaje >= pAct + 4 } ?? false)' in ub)
+ok("Ubicado pide además que crezca lo visto (no 3 respuestas con los mismos planos)", 'n.coincidencias >= 3 && n.ubicadoDesde == nil && crecio && ac.puntaje >= 8' in ub)
+ok("sin confirmar hace rato el letrero lo dice (gris)", 'else if !ubicacionReciente() { m.ponerEstado("Sin confirmar", color: Claro.gris, reubicar: true) }' in v)
+ok("con calor se apaga la malla del láser y al salir del laboratorio no se vuelve a prender", 'if !nueva.mallaApagada, ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) { c.sceneReconstruction = .mesh }' in bloque(v, 'private func salirLaboratorio'))
+ok("los cuadros lentos no cuentan las capturas, y la fase de ubicarse se anota", 'if dt < 1.0 {' in bloque(v, 'fileprivate func tickCamaraNueva') and 'anotarMedir("fase"' in v)
 ok("una respuesta que pone el teléfono AFUERA de la casa no vale", 'UbicadorEnPlano.dentroDeLaCasa(ac.aplicar(c)' in ub and 'ac.seguro = false' in ub)
 ok("se dice Ubicado solo con 3 respuestas seguidas en el mismo lugar (1 ft, 0.1 rad)", 'n.coincidencias >= 3 && n.ubicadoDesde == nil' in ub and '< 1.0' in ub and '< 0.1' in ub)
 ok("ya ubicado se afina con todas las paredes vistas, sin brincar", 'UbicadorEnPlano.afinar(mejor, paredes: paredesPlanta, vistos: vistos)' in ub)

@@ -165,6 +165,18 @@ for planta in plantas where planta.count >= 2 {
 }
 print("    contra la planta entera: seguros bien \(plantaBien), seguros mal \(plantaMal)")
 ok("afinando contra la planta entera, nunca 'seguro' en el lugar equivocado", plantaMal == 0)
+ok("con la puntuación por traslape, 6 o más 'seguro' bien contra la planta entera", plantaBien >= 6, "\(plantaBien)")
+// ---- 16 oct: pared de verdad (pura), evidencia que crece y la caja ----
+ok("pared de verdad: ARKit wall de 0.9 m que llega a 2.4 m (piso 0): sí", U.esParedDeVerdad(abajo: 1.5, arriba: 2.4, clasePared: true, pisoY: 0))
+ok("pared de verdad: ARKit wall con tope a 0.9 m (gabinete, refri bajo): no", !U.esParedDeVerdad(abajo: 0.0, arriba: 0.9, clasePared: true, pisoY: 0))
+ok("pared de verdad: sin clase, de 0.5 a 2.1 m: sí", U.esParedDeVerdad(abajo: 0.5, arriba: 2.1, clasePared: false, pisoY: 0))
+ok("pared de verdad: sin clase con tope a 1.0 m (sofá): no", !U.esParedDeVerdad(abajo: 0.2, arriba: 1.0, clasePared: false, pisoY: 0))
+ok("pared de verdad: sin piso visto, 1.7 m de alto: sí", U.esParedDeVerdad(abajo: 0.3, arriba: 2.0, clasePared: false, pisoY: nil))
+ok("evidencia: 1.4 ft más y margen 9 no crece; 1.5 ft más o margen 10 sí",
+   !U.evidenciaCrecio(desde: 10, ahora: 11.4, margen: 9) && U.evidenciaCrecio(desde: 10, ahora: 11.5, margen: 9) && U.evidenciaCrecio(desde: 10, ahora: 11.4, margen: 10))
+ok("piesDePared cuenta solo las paredes (hasta 20 ft cada una)",
+   U.piesDePared([U.Visto(seg: U.Segmento(a: SIMD2(0, 0), b: SIMD2(30, 0)), clase: .pared), U.Visto(seg: U.Segmento(a: SIMD2(0, 0), b: SIMD2(3, 0)), clase: .pared),
+                  U.Visto(seg: U.Segmento(a: SIMD2(0, 0), b: SIMD2(3, 0)), clase: .ventana)]) == 23)
 
 // AFINAR CON TODAS LAS PAREDES (15 oct, su prueba: "me sacaba hasta afuera"). Paredes vistas con ruido, como las del
 // LiDAR (cada una corrida hasta 5 in y torcida hasta 1°): ubicar con dos deja el error de esas dos; afinar lo baja.
