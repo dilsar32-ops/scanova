@@ -93,6 +93,19 @@ ok("un mueble 1 m antes de la pared (sin clase): no vota",
 ok("el láser y el plano no calzan pero ARKit dice pared: pared por la clase (A), sin número",
    { let v = L.votar(entrada(0, d: 1.2, y: 1.4, clase: "wall", vertical: true, rayo: r0, confiable: true)); return v.parte == .wall && v.fuente == "A" && v.pared == nil }())
 ok("P en la unión pared-techo: neutro (esquina)", L.votar(entrada(30, rayo: rayo(30)!, confiable: true)).fuente == "e")
+// Su 2a prueba con la 180 (bitácora AD166C54, 4:08 pm): a 26-30° arriba, justo en la línea pared-techo; el plano y la clase de ARKit
+// decían "techo" y el láser calzaba, pero salía "e" y nunca cambió a techo.
+let rU = rayo(31)!
+ok("en la unión pared-techo el plano dice techo (con el margen chico)", rU.parte == .ceiling && rU.margen < 2.5)
+ok("en la unión, plano + ARKit dicen techo y el láser calza: TECHO (fuente A, peso 0.8)",
+   { let v = L.votar(entrada(31, d: rU.dist * 0.3048, y: 2.47, clase: "ceiling", vertical: false, rayo: rU, confiable: true)); return v.parte == .ceiling && v.peso == 0.8 && v.fuente == "A" }())
+ok("en la unión, ARKit dice pared: sigue neutro (no adivina)",
+   L.votar(entrada(31, d: rU.dist * 0.3048, y: 2.3, clase: "wall", vertical: true, rayo: rU, confiable: true)).fuente == "e")
+ok("en la unión, el láser no calza con el plano: decide la clase de ARKit como siempre (A, peso 1), no la regla nueva",
+   { let v = L.votar(entrada(31, d: rU.dist * 0.3048 * 0.6, y: 2.47, clase: "ceiling", vertical: false, rayo: rU, confiable: true)); return v.fuente == "A" && v.peso == 1.0 }())
+let rP = rayo(-38)!
+ok("en la unión pared-piso, plano + ARKit dicen piso y el láser calza: PISO",
+   rP.margen < 2.5 && { let v = L.votar(entrada(-38, d: rP.dist * 0.3048, y: 0, clase: "floor", vertical: false, rayo: rP, confiable: true)); return v.parte == .floor && v.fuente == "A" }())
 ok("P por una puerta: neutro", L.votar(entrada(-10, rayo: rayo(-10, puertas: [puerta])!, confiable: true)).parte == nil)
 ok("sin plano confiable no se usa el rayo", L.votar(entrada(0, rayo: r0, confiable: false)).fuente != "P")
 // ---- SU BITÁCORA 388DF319 ----

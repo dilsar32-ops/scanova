@@ -11294,7 +11294,15 @@ struct LectorDeParte {
             if ok || e.d == nil {
                 if r.porPuerta { return .neutro("n") }
                 let borde = max(2.5, atan(0.3 / max(r.dist, 0.5)) * 180 / .pi)
-                if r.margen < borde { return .neutro("e") }
+                if r.margen < borde {
+                    // (16 oct, su 2a prueba con la 180: apuntaba a 25-30° arriba, justo a la línea pared-techo, y nunca cambió a techo).
+                    // En la unión el plano solo no decide; pero si la clase que ARKit le puso a lo que toca el láser dice LO MISMO
+                    // (techo mirando arriba, piso mirando abajo) y el láser calza, son dos fuentes de acuerdo: vota, con menos peso.
+                    let deAcuerdo = (r.parte == .ceiling && e.clase == "ceiling" && e.grados >= 15)
+                        || (r.parte == .floor && e.clase == "floor" && e.grados <= -15)
+                    if ok, deAcuerdo { return Voto(parte: r.parte, peso: 0.8, pared: nil, fuente: "A") }
+                    return .neutro("e")
+                }
                 // CUÁL pared, solo si el láser la confirma AHORA y el plano ya calzó varias veces (nunca con el plano solo).
                 let conIndice = ok && e.planoFuerte && r.parte == .wall
                 return Voto(parte: r.parte, peso: ok ? (e.planoFuerte ? 1.0 : 0.8) : 0.5, pared: conIndice ? r.pared : nil, fuente: "P")
