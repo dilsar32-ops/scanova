@@ -150,6 +150,7 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
                 var mapa: [String: (paredes: [UbicadorEnPlano.ParedPlano], senas: [UbicadorEnPlano.SenaPlano])] = [:]
                 var marcos: [String: Int] = [:]
                 var pisos: [String: (area: Double, largo: Double, ancho: Double, aprox: Bool)] = [:]
+                var contornos: [String: [SIMD2<Double>]] = [:]
                 for (cuarto, valor) in formas {
                     guard let f = valor as? [String: Any] else { continue }
                     if let m = num(f["marco"]) { marcos[cuarto] = Int(m) }
@@ -168,9 +169,14 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
                     if let pz = f["piso"] as? [Any], pz.count >= 3, let a = num(pz[0]), let l = num(pz[1]), let w = num(pz[2]), a > 1, l > 0, w > 0 {
                         pisos[cuarto] = (a, l, w, pz.count >= 4 ? (num(pz[3]) ?? 0) > 0.5 : false)
                     }
+                    // El contorno del piso (16 oct): para pintarlo en el mapita.
+                    let ct: [SIMD2<Double>] = ((f["contorno"] as? [[Any]]) ?? []).compactMap { q in
+                        guard q.count >= 2, let x = num(q[0]), let y = num(q[1]) else { return nil }; return SIMD2(x, y) }
+                    if ct.count >= 3 { contornos[cuarto] = ct }
                 }
                 arVC.planoPorCuarto = mapa
                 arVC.pisoPorCuarto = pisos
+                arVC.contornoPorCuarto = contornos
                 arVC.marcoPorCuarto = marcos
             }
             if let areas = call.getObject("areasPorCuarto") {
@@ -262,7 +268,7 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
         arVC.maqueta = paso
         arVC.laboratorio = (11...13).contains(paso) || (18...23).contains(paso)
         // 24-37: medir primero, el material al final (16 oct).
-        arVC.porMovimiento = (24...45).contains(paso)
+        arVC.porMovimiento = (24...46).contains(paso)
         arVC.modo = "recorrido"
         arVC.alcance = "nivel"
         arVC.nivelActual = "2nd Floor"

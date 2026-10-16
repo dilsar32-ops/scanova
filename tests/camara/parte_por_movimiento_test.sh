@@ -192,7 +192,7 @@ ok("sin acomodo no hay firme (y la bitácora dice por qué)", 'if n.acomodo == n
 ok("fuera de la fase: 3 respuestas seguras seguidas en el mismo lugar; una dudosa la quita", 'n.confirmacionesFuera >= 3 { n.firme = true' in ub and 'n.firme = false; n.confirmacionesFuera = 0; n.candidatoFuera = nil' in ub)
 ok("ya ubicado, cada respuesta aceptada confirma", 'n.ultimaConfirmacion = Date()' in ub)
 ok("y lo que ya se probaba sigue igual", 'if ac.seguro || !(n.acomodo?.seguro ?? false)' in ub and 'n.coincidencias >= 3 && n.ubicadoDesde == nil' in ub)
-ok("un corte del rastreo quita lo firme", 'nueva.firme = false; nueva.confirmacionesFuera = 0' in bloque(v, 'func sessionWasInterrupted'))
+ok("un corte del rastreo quita lo firme", 'n.firme = false; n.confirmacionesFuera = 0' in bloque(v, 'func sessionWasInterrupted'))
 ok("el plano que manda la página es de un nivel", 'nueva.nivelDelPlano = planoPorCuarto.isEmpty ? nil : nivelActual' in bloque(v, 'fileprivate func armarCamaraNueva'))
 # ---- qué pared es ----
 cm = bloque(v, 'fileprivate func claseDeLaMedida')
@@ -212,8 +212,9 @@ ok("nada de sceneDepth ni de la malla con clases en la cámara", 'meshWithClassi
 ok("siguen siendo 5 caminos a cambiarSeccion", len(re.findall(r'cambiarSeccion\((sec|clave)\)', v)) == 5)
 ok("nadie le pone el compañero a lo ya guardado", re.search(r'items\[[^\]]+\]\.companion\s*=', v) is None)
 prendidas = sorted(re.findall(r'includeCompanion = ([^\n;]+)', v))
-# Los 17 de antes y UNO nuevo: medir primero guarda con el compañero que salió de sus respuestas del nivel (guardarMedir).
-ok("los sitios que prenden/apagan la insulación: los 17 de antes + el de medir primero", prendidas == sorted(['false'] * 10 + ['(orden == .ponerCompanero)', '(ultima.companion != nil)', '!niega', 'true', 'true', 'true', 'comp', 'g.companero != nil']))
+# Los 17 de antes y DOS nuevos: medir primero guarda con el compañero que salió de sus respuestas del nivel (guardarMedir),
+# y el baseboard que la pared completa guarda sola (16 oct, "¿qué incluye?") lleva el suyo.
+ok("los sitios que prenden/apagan la insulación: los 17 de antes + los 2 de medir primero", prendidas == sorted(['false'] * 10 + ['(orden == .ponerCompanero)', '(ultima.companion != nil)', '!niega', 'true', 'true', 'true', 'comp', 'g.companero != nil', 'gb.companero != nil']))
 ok("las preguntas de voz siguen como estaban; los paneles, más el de medir primero", 'fileprivate enum PanelCamara: Equatable { case nivel, cuarto, parte, material, voz, sigue, medir }' in v and 'case masOtraSeccion  // "¿cambiamos de sección, o pasamos a otro cuarto?"\n    }' in v)
 ok("la voz al entrar a un cuarto sigue igual", 'Apunte el teléfono a lo que va a medir' not in v)
 ok("'(p == .sigue ? 0.7 : 0.6)' sigue igual", 'view.bounds.height * (p == .sigue ? 0.7 : 0.6)' in v)

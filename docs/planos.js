@@ -2,8 +2,8 @@
 // (el mismo escáner de Field Reports, que ya viene dentro de la app: plugin RoomScan) y se dibuja con el
 // mismo código de Field Reports (plano.js, copiado por tools/extraer_plano.py). Un escaneo por piso;
 // un escaneo nuevo no borra el anterior (queda de historial), se ve el más reciente.
-import * as plano from './plano.js?v=2026-10-16-7';
-import { authFetch, esAparato } from './app.js?v=2026-10-16-7';
+import * as plano from './plano.js?v=2026-10-16-8';
+import { authFetch, esAparato } from './app.js?v=2026-10-16-8';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
@@ -107,6 +107,8 @@ export async function paredesParaCamara(trabajoId, nivelId){
           const a = Math.max(...xs) - Math.min(...xs), b = Math.max(...ys) - Math.min(...ys);
           const r2 = v => Math.round(v * 100) / 100;
           forma.piso = [r2(mm.floorSqFt), r2(Math.max(a, b)), r2(Math.min(a, b)), (mm.guessedFt || 0) > 1 ? 1 : 0];
+          // Y su contorno, para pintar el piso en el mapita de la cámara (verde completo, amarillo parcial).
+          forma.contorno = poly.map(q => [r2(q.x), r2(q.y)]);
         }
       }catch(e){}
       if(forma.paredes.length >= 3) FORMAS[nombre] = forma;

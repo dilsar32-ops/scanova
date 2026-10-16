@@ -230,7 +230,7 @@ ok("la página del nivel: 'Piso · ¿Tiene underlayment o padding?' con Sí / No
    and 'el underlayment y el padding salen solos' in aj)
 pm = bloque(v, 'fileprivate func armarPanelMedir')
 ok("ya no hay pregunta aparte del pad", 'case .pad' not in v and '.pad)' not in v and '¿Lleva pad?' not in v
-   and 'fileprivate enum PreguntaMedir: Equatable { case que, otroLineal, shoe, matPared, insulPared, piso, underCuarto, techo, techoCuarto, lineal1, cierre, cuarto, segunda, parteEntera }' in v)
+   and 'fileprivate enum PreguntaMedir: Equatable { case que, otroLineal, shoe, matPared, insulPared, piso, underCuarto, techo, techoCuarto, lineal1, cierre, cuarto, segunda, parteEntera, incluye }' in v)
 ok("el carpet va por resolverPiso como los demás pisos", 'listaDeMateriales(ReglasDeMedir.materialesPiso, sugerido: nil, sub: "\\(pies(A)) pies²") { s, m in s.resolverPiso(m) }' in pm)
 ok("mixto: '¿<cuarto> tiene underlayment o padding?' una vez por cuarto (padding si es carpet)",
    '"¿\\(roomName) tiene underlayment o padding?"' in pm and 'ReglasDeMedir.debajoDelPiso(m) == "Carpet Pad" ? "padding" : "underlayment"' in pm
@@ -240,7 +240,7 @@ ok("la ayuda del panel del piso habla de underlayment o padding", 'debajo del ca
 ok("lo contestado con la pregunta vieja no cuenta: la llave del nivel es v2", 'private static let llaveAjuste = "scanova.medirPrimero.ajuste.v2"' in v)
 ok("la maqueta 37 guarda el carpet por las reglas de verdad (resolverPiso)", 'resolverPiso("Carpet")' in bloque(v, 'private func maquetaMedirPrimeroPaso') and 'ReglasDeMedir.alfombra(' not in v[:v.index('struct ReglasDeMedir {')])
 ok("lo contestado del nivel se guarda por trabajo y nivel", 'Self.llaveAjuste + "|" + trabajoId + "|" + nivelActual' in v and 'arVC.trabajoId = call.getString("trabajo")' in plg)
-ok("las maquetas 24-45 no se enciman con las del laboratorio (18-23)", 'arVC.porMovimiento = (24...45).contains(paso)' in plg and '(18...23).contains(paso)' in plg)
+ok("las maquetas 24-46 no se enciman con las del laboratorio (18-23)", 'arVC.porMovimiento = (24...46).contains(paso)' in plg and '(18...23).contains(paso)' in plg)
 # ---- LA VENTANA "¿COMPLETO O PARCIAL?" SALE SOLA (16 oct, su pedido: "que ya no pregunte fijar; mira la pared y le da las
 # opciones, mira arriba techo completo o parcial, abajo piso; al escoger, engancha") ----
 rm = bloque(v, 'fileprivate func revisarMedirPrimero')
@@ -281,9 +281,25 @@ mm = bloque(v, 'fileprivate func pintarMuelleMedir')
 ok("el muelle queda como estaba (Listo, MEDIDA sin tocar)", 'n.derecho.isEnabled = listo' in mm and 'riel(n.rielMaterial, "MEDIDA", medidaDelRiel(), "material al final", activo: false)' in mm
    and '@objc fileprivate func rielMaterialTocado() { if medirPrimero && nueva.medirActivo { return }' in v)
 ap = bloque(v, 'fileprivate func aceptarParteEntera')
+sp = bloque(v, 'fileprivate func seguirConLaParteEntera')
 ok("'Completa' es un largo dictado del plano (sin esquinas) y va al material de esa parte", 'largoDictado = true' in ap and 'pathTotalFeet = d.largo' in ap
-   and 'abrirPregunta(Self.preguntaDelMaterial(d.seccion))' in ap and 'pathPoints.isEmpty, widthPoints.isEmpty' in ap)
-ok("una pared sin el alto en el plano: se marca solo el alto con +", 'empezarAncho()' in ap)
+   and 'abrirPregunta(Self.preguntaDelMaterial(pe.seccion))' in sp and 'seguirConLaParteEntera()' in ap and 'pathPoints.isEmpty, widthPoints.isEmpty' in ap)
+ok("una pared sin el alto en el plano: se marca solo el alto con +", 'empezarAncho()' in sp)
+# "Pared completa" (16 oct, su pedido): primero pregunta qué incluye, y el baseboard se calcula solo.
+ok("la pared completa pregunta qué incluye antes del material", 'if d.seccion == "wall" { abrirPregunta(.incluye); return }' in ap)
+ci = bloque(v, 'fileprivate func contestarIncluye')
+ok("'¿qué incluye?' guarda baseboard y shoe molding en la parte", 'pe.conBaseboard = base; pe.conShoe = base && shoe' in ci and 'seguirConLaParteEntera()' in ci)
+gm = bloque(v, 'fileprivate func guardarMedir')
+ok("al guardar la pared completa con baseboard, el baseboard sale solo (largo menos las puertas)", 'ReglasDeMedir.baseboardDeLaPared(largo: pe.largo, aberturas: pe.aberturas)' in gm)
+ok("una pared ya completa no vuelve a dar 'completa o parcial'", '" ya está " + (esPared ? "completa" : "completo")' in v)
+# El mapita (16 oct): transparente; verde la pared completa, amarillo la parcial, negro sin tocar; el piso igual; el techo sin color.
+ok("el mapita es transparente", 'backgroundColor = .clear' in bloque(v, 'fileprivate final class MinimapaCamara'))
+mc = bloque(v, 'fileprivate final class MinimapaCamara')
+ok("el mapita va sobre un vidrio que desenfoca, solo hasta donde llega el mapa (y 'Ubicado' en otro vidrio)",
+   mc.count('UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialLight))') == 2
+   and 'g.dibujo.insetBy(dx: -Self.orillaVidrio, dy: -Self.orillaVidrio)' in mc and 'dueno?.dibujar(bounds)' in v)
+ok("el plano grande de la fase de ubicarse no lleva vidrio (ya va sobre su tarjeta)", 'n.mapaGrande.conVidrio = false' in v)
+ok("verde = completa, amarillo = parcial", 'static let verde' in v and 'static let amarillo' in v and 'colorPared' in v and 'colorPiso' in v)
 ok("el piso y el techo completos salen del área del cuarto en el plano (piso: área, largo, ancho, aprox)",
    'pisoPorCuarto.first(where: { Self.clave($0.key) == clave })' in bloque(v, 'fileprivate func datosPisoEntero')
    and 'pisos[cuarto] = (a, l, w, pz.count >= 4 ? (num(pz[3]) ?? 0) > 0.5 : false)' in plg)
@@ -318,7 +334,18 @@ ok("el salto de la cámara a media medida solo cuenta para ESA medida (antes nun
 ok("pegado a una pared del cuarto (fuera de todos) sigue en ese cuarto", 'forma.paredes.contains(where: { Self.distanciaASegmento(p, $0.seg) <= 2.0 }) { return roomName }' in bloque(v, 'fileprivate func cuartoDondeEsta'))
 ok("el puntito del mapa no se sale del cuarto (solo el dibujo)", 'let tel = telefonoEnElCuarto(' in v and 'enLaPared + hacia / l * 0.5' in bloque(v, 'fileprivate func telefonoEnElCuarto'))
 ok("la bitácora anota cuándo y por qué se pierde o vuelve la ubicación, y dónde está en el plano", 'anotarMedir("ubicacion", ["firme": n.firme' in rp
-   and '"tel": telefonoEnPlano()' in rp and 'n.porqueFirme = "buscar-dudosa"' in v and 'nueva.porqueFirme = "interrumpida"' in v)
+   and '"tel": telefonoEnPlano()' in rp and 'n.porqueFirme = "buscar-dudosa"' in v and 'n.porqueFirme = "interrumpida"' in v)
+# LOS CORTES DEL RASTREO (16 oct, su prueba: cada captura cortaba la cámara; una vez el teléfono brincó 15 ft y se congeló).
+vr = bloque(v, 'fileprivate func vigilarElRastreo')
+ok("ARKit trata de volver al mismo mundo tras un corte (solo la cámara nueva)", 'return experienciaNueva && maqueta == 0' in bloque(v, 'func sessionShouldAttemptRelocalization'))
+ok("si el rastreo no vuelve en 10 s tras el corte, la cámara arranca limpia", 'reiniciarElRastreo("no-volvio")' in vr and '> 10' in vr)
+ok("un brinco de más de 1.5 m en un corte corto = el mundo cambió: arranca limpia", 'if salto > 1.5 && duro < 15 { reiniciarElRastreo("salto"); return }' in vr)
+ok("la imagen congelada o el corte que no acaba: primero se vuelve a correr sin borrar", 'relanzarLaCamara("congelada")' in vr and 'relanzarLaCamara("corte-sin-fin")' in vr)
+rr = bloque(v, 'private func reiniciarElRastreo')
+ok("el reinicio limpio tira la medida a medias, no las guardadas, y nunca va en ciclo", 'cancelarMedidaEnCurso(hablar: false)' in rr and 'n.reinicios < 6' in rr and '.resetTracking, .removeExistingAnchors' in rr and 'items.removeAll' not in rr)
+ub = bloque(v, 'fileprivate func ubicarseEnElPlano')
+ok("sin lo firme 5 s, una respuesta lejana que se repite 3 veces reemplaza a la vieja", 'n.lejanoSeguidas >= 3' in ub and 'n.porqueFirme = "reubicada"' in ub and 'dentroDeLaCasa(ac.aplicar(c)' in ub)
+ok("cada captura de pantalla y cada cambio del rastreo van a la bitácora", 'userDidTakeScreenshotNotification' in v and 'anotarMedir("rastreo", ["estado": estado])' in vr)
 try:
     web = rd(fr + '/www/index.html')
     ok("Field Reports no manda la bandera", 'porMovimiento' not in web)
