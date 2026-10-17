@@ -5,10 +5,10 @@
 // Nunca la lectura asíncrona del portapapeles: en el iPhone solo entrega PNG y en Chrome pide permiso. El evento 'paste'
 // entrega las fotos completas en todos lados.
 // Al cargar no toca la página (app.js importa proyecto.js, que importa este, que importa app.js).
-import { $, registrarAtras } from './app.js?v=2026-10-17-2';
-import * as fotos from './fotos.js?v=2026-10-17-2';
-import * as trabajos from './trabajos.js?v=2026-10-17-2';
-import * as panel from './panel.js?v=2026-10-17-2';
+import { $, registrarAtras } from './app.js?v=2026-10-17-3';
+import * as fotos from './fotos.js?v=2026-10-17-3';
+import * as trabajos from './trabajos.js?v=2026-10-17-3';
+import * as panel from './panel.js?v=2026-10-17-3';
 
 // ---------- puro (para las pruebas) ----------
 export const T_NADA = 'No photo found. Copy a photo, then paste it here.';

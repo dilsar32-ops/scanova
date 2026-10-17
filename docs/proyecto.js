@@ -1,17 +1,17 @@
 // Scanova · la ficha de un proyecto (diseño de Amilcar, 12 oct 2026): portada, nombre, dirección, etapa, cliente,
 // encargado y fecha; pestañas Rooms · Photos · Dry Logs · Floor Plan · Measurements · Notes · Documents · Activity.
 // Rooms = niveles (Basement, First Floor…) y sus cuartos (Kitchen…). Photos = las fotos por nivel y por cuarto.
-import { $, $$, authFetch, irA, atras, esManager, PERFIL, marcarLimpio, preguntar } from './app.js?v=2026-10-17-2';
-import * as trabajos from './trabajos.js?v=2026-10-17-2';
-import * as fotos from './fotos.js?v=2026-10-17-2';
-import * as panel from './panel.js?v=2026-10-17-2';
-import * as planos from './planos.js?v=2026-10-17-2';
-import * as camara from './camara.js?v=2026-10-17-2';
-import * as detalles from './detalles.js?v=2026-10-17-2';
-import * as drylog from './drylog.js?v=2026-10-17-2';
-import * as documentos from './documentos.js?v=2026-10-17-2';
-import * as medidas from './medidas.js?v=2026-10-17-2';
-import * as pegar from './pegar.js?v=2026-10-17-2';
+import { $, $$, authFetch, irA, atras, esManager, PERFIL, marcarLimpio, preguntar } from './app.js?v=2026-10-17-3';
+import * as trabajos from './trabajos.js?v=2026-10-17-3';
+import * as fotos from './fotos.js?v=2026-10-17-3';
+import * as panel from './panel.js?v=2026-10-17-3';
+import * as planos from './planos.js?v=2026-10-17-3';
+import * as camara from './camara.js?v=2026-10-17-3';
+import * as detalles from './detalles.js?v=2026-10-17-3';
+import * as drylog from './drylog.js?v=2026-10-17-3';
+import * as documentos from './documentos.js?v=2026-10-17-3';
+import * as medidas from './medidas.js?v=2026-10-17-3';
+import * as pegar from './pegar.js?v=2026-10-17-3';
 
 const esc = (v) => trabajos.esc(v);
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -351,13 +351,43 @@ function pintarPronto(){
 }
 
 // ---------- escoger un cuarto (mover fotos o la cámara) ----------
+// Los niveles y cuartos del PLANO que todavía no están en el proyecto (17-oct, su pedido: "que vengan del plano y sin
+// detector"). Un nivel del plano es el nivel del proyecto donde se guardó; si se guardó sin nivel, el del mismo nombre;
+// si no hay, va como nivel nuevo (se crea solo si tocan algo de él). Un cuarto que ya existe en ese nivel (mismo nombre,
+// sin importar mayúsculas ni acentos) no se repite. Sale [{ nivel (el del proyecto o null), nombre, cuartos: [nombres] }].
+export const claveNombre = (s) => String(s || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ')
+  .replace(/^1st floor$/, 'first floor').replace(/^2nd floor$/, 'second floor').replace(/^3rd floor$/, 'third floor');
+export function sugerenciasDelPlano(delPlano, niveles, cuartos){
+  const out = []; let sinNombre = 0;
+  (delPlano || []).forEach((p) => {
+    let nivel = (p.nivel_id && (niveles || []).find(n => n.id === p.nivel_id)) || null;
+    if(!nivel && p.nivel_id && !p.nombre) return;   // su nivel ya no está y el escaneo no dice cuál era: no se adivina
+    if(!nivel && p.nombre) nivel = (niveles || []).find(n => claveNombre(n.nombre) === claveNombre(p.nombre)) || null;
+    const nombre = nivel ? nivel.nombre : (String(p.nombre || '').trim() || 'Level ' + (++sinNombre));
+    // La lista viene del más nuevo al más viejo: si ese piso ya lo dio un plano más reciente, el viejo no se mezcla.
+    if(out.some(x => nivel ? x.nivel && x.nivel.id === nivel.id : !x.nivel && claveNombre(x.nombre) === claveNombre(nombre))) return;
+    const g = { nivel, nombre, cuartos: [] }; out.push(g);
+    const hay = new Set((cuartos || []).filter(c => nivel && c.nivel_id === nivel.id).map(c => claveNombre(c.nombre)));
+    (p.cuartos || []).forEach(c => { const k = claveNombre(c); if(!k || hay.has(k) || g.cuartos.some(x => claveNombre(x) === k)) return; g.cuartos.push(String(c).trim()); });
+  });
+  return out.filter(g => g.cuartos.length);
+}
 let AL_ESCOGER = null;
+let DEL_PLANO = { tid: '', niveles: [] };   // lo que dice el plano del proyecto abierto (se relee cada vez que se abre la hoja)
 // Escoger nivel/cuarto (mover fotos o la cámara). Aquí mismo se crean el nivel y el cuarto si todavía no existen.
 let ESC_TITULO = '', ESC_ACTUAL = null, ESC_ABRIR = '';
 export function escogerCuarto(titulo, actual, fn){
   AL_ESCOGER = fn; ESC_TITULO = titulo; ESC_ACTUAL = actual || null; ESC_ABRIR = '';
+  if(!T || DEL_PLANO.tid !== T.id) DEL_PLANO = { tid: T ? T.id : '', niveles: [] };
   pintarEscoger();
   $('#hojaCuarto').hidden = false;
+  // Los cuartos del plano llegan después (se leen los planos guardados); si la hoja sigue abierta para lo mismo, se repinta.
+  const tid = T && T.id, para = fn;
+  if(tid) planos.nivelesDelPlanoDe(tid).then(l => {
+    if(!T || T.id !== tid) return;
+    DEL_PLANO = { tid, niveles: l || [] };
+    if(AL_ESCOGER === para && !$('#hojaCuarto').hidden) pintarEscoger();
+  }).catch(() => {});
 }
 function pintarEscoger(){
   $('#cuartoTitulo').textContent = ESC_TITULO;
@@ -367,10 +397,17 @@ function pintarEscoger(){
   const tipos = (nid) => '<div class="chips envolver cuarto-nuevo">' + TIPOS_CUARTO.map(r => `<button type="button" class="chip" data-crear-cuarto="${esc(nid)}" data-tipo="${esc(r)}">${esc(r)}</button>`).join('') + '</div>';
   const usados = new Set(NIVELES.map(x => x.nombre));
   const rapidos = '<div class="chips envolver cuarto-nuevo">' + NIVELES_RAPIDOS.filter(r => !usados.has(r) || r === 'Other').map(r => `<button type="button" class="chip" data-crear-nivel="${esc(r)}">${esc(r)}</button>`).join('') + '</div>';
-  const niveles = NIVELES.map(n => '<h4 class="cuarto-nivel">' + esc(n.nombre) + '</h4>' + cuartosDe(n.id).map(c => op({ nivel_id:n.id, cuarto_id:c.id }, c.nombre, n.nombre, 'casa')).join('') + op({ nivel_id:n.id }, 'Whole ' + n.nombre, 'No specific room', 'cubo') +
-      (ESC_ABRIR === n.id ? '<p class="cuarto-ayuda">Pick the new room:</p>' + tipos(n.id) : `<button type="button" class="pdet-link cuarto-agregar" data-abrir-tipos="${esc(n.id)}">${IC('mas')}Add room to ${esc(n.nombre)}</button>`)).join('');
-  $('#cuartoLista').innerHTML = (NIVELES.length ? niveles : '<p class="cuarto-ayuda">This project has no levels yet. Tap one to add it:</p>' + rapidos) +
-    (NIVELES.length ? (ESC_ABRIR === '+nivel' ? '<h4 class="cuarto-nivel">New level</h4>' + rapidos : `<button type="button" class="pdet-link cuarto-agregar cuarto-nivel-nuevo" data-abrir-tipos="+nivel">${IC('mas')}Add level</button>`) : '') +
+  // Lo del plano que todavía no está en el proyecto: misma fila que un cuarto, con "From floor plan" abajo. Se agrega al
+  // proyecto solo si lo tocan (data-escoger-plano); nada se crea por abrir la hoja.
+  const sug = DEL_PLANO.tid === (T && T.id) ? sugerenciasDelPlano(DEL_PLANO.niveles, NIVELES, CUARTOS) : [];
+  const opPlano = (g, cuarto) => `<button type="button" class="cap-fila cuarto-op" data-escoger-plano="${esc(JSON.stringify({ nivel_id: g.nivel ? g.nivel.id : null, nivel: g.nombre, cuarto: cuarto || null }))}"><span class="cap-foto">${IC(cuarto ? 'casa' : 'cubo')}</span><span class="cap-texto"><b>${esc(cuarto || 'Whole ' + g.nombre)}</b><small>${esc(cuarto ? g.nombre + ' · From floor plan' : 'No specific room · From floor plan')}</small></span></button>`;
+  const delPlanoEn = (n) => { const g = sug.find(x => x.nivel && x.nivel.id === n.id); return g ? g.cuartos.map(c => opPlano(g, c)).join('') : ''; };
+  const nuevosDelPlano = sug.filter(g => !g.nivel).map(g => '<h4 class="cuarto-nivel">' + esc(g.nombre) + '</h4>' + g.cuartos.map(c => opPlano(g, c)).join('') + opPlano(g, null)).join('');
+  const niveles = NIVELES.map(n => '<h4 class="cuarto-nivel">' + esc(n.nombre) + '</h4>' + cuartosDe(n.id).map(c => op({ nivel_id:n.id, cuarto_id:c.id }, c.nombre, n.nombre, 'casa')).join('') + delPlanoEn(n) + op({ nivel_id:n.id }, 'Whole ' + n.nombre, 'No specific room', 'cubo') +
+      (ESC_ABRIR === n.id ? '<p class="cuarto-ayuda">Pick the new room:</p>' + tipos(n.id) : `<button type="button" class="pdet-link cuarto-agregar" data-abrir-tipos="${esc(n.id)}">${IC('mas')}Add room to ${esc(n.nombre)}</button>`)).join('') + nuevosDelPlano;
+  const hayNiveles = NIVELES.length || nuevosDelPlano;
+  $('#cuartoLista').innerHTML = (hayNiveles ? niveles : '<p class="cuarto-ayuda">This project has no levels yet. Tap one to add it:</p>' + rapidos) +
+    (hayNiveles ? (ESC_ABRIR === '+nivel' ? '<h4 class="cuarto-nivel">New level</h4>' + rapidos : `<button type="button" class="pdet-link cuarto-agregar cuarto-nivel-nuevo" data-abrir-tipos="+nivel">${IC('mas')}Add level</button>`) : '') +
     '<h4 class="cuarto-nivel">Other</h4>' + op({}, 'No room', 'Keep it without a room', 'archivo') + '<p class="aviso" id="cuartoHojaAviso"></p>';
 }
 async function crearNivel(nombre){
@@ -406,6 +443,25 @@ async function crearCuarto(nivel_id, nombre, tipo){
   CUARTOS.push(fila); pintarTodo(); return fila;
 }
 function cerrarEscoger(){ $('#hojaCuarto').hidden = true; AL_ESCOGER = null; }
+// Tocó un nivel o cuarto del plano que no está en el proyecto: se agrega igual que en Measurements (antes se releen los
+// niveles y cuartos, para no crear un segundo "Kitchen" que otro del equipo agregó hace un minuto; si no se pueden leer,
+// no se crea nada) y las fotos van ahí. Solo lo que tocó: nunca otro cuarto del plano.
+let DEL_PLANO_OCUPADO = false;
+async function escogerDelPlano(p){
+  if(DEL_PLANO_OCUPADO) throw new Error('one moment, still adding the last one');
+  DEL_PLANO_OCUPADO = true;
+  try{
+    const tid = T && T.id; if(!tid) throw new Error('no project open');
+    await refrescarCuartos(tid);
+    let nivel = (p.nivel_id && NIVELES.find(n => n.id === p.nivel_id)) || NIVELES.find(n => claveNombre(n.nombre) === claveNombre(p.nivel)) || null;
+    if(!nivel){ if(!String(p.nivel || '').trim()) throw new Error('the floor plan does not say which level'); nivel = await crearNivel(String(p.nivel).trim()); }
+    mismoProyecto(tid);
+    if(!p.cuarto) return { nivel_id: nivel.id };
+    const cuarto = CUARTOS.find(c => c.nivel_id === nivel.id && claveNombre(c.nombre) === claveNombre(p.cuarto)) || await crearCuarto(nivel.id, String(p.cuarto).trim(), TIPOS_CUARTO.find(t => t !== 'Other' && claveNombre(t) === claveNombre(p.cuarto)) || null);
+    mismoProyecto(tid);
+    return { nivel_id: nivel.id, cuarto_id: cuarto.id };
+  } finally { DEL_PLANO_OCUPADO = false; }
+}
 
 // ---------- formas: nivel y cuarto ----------
 // De dónde se abrió la forma del nivel: al guardar se regresa ahí (Dry Log o Floor Plan), no a Levels & Rooms.
@@ -657,6 +713,10 @@ export function conectar(){
       el.disabled = true;
       crearCuarto(nid, nombre, tipo).then(c => { const fn = AL_ESCOGER; cerrarEscoger(); if(fn) fn({ nivel_id: c.nivel_id, cuarto_id: c.id }); })
         .catch(err => { el.disabled = false; const a = $('#cuartoHojaAviso'); if(a) a.textContent = 'Could not add the room. ' + String(err && err.message || err); });
+      return; }
+    if((el = q('[data-escoger-plano]'))){ const p = JSON.parse(el.dataset.escogerPlano); const fn = AL_ESCOGER; el.disabled = true;
+      escogerDelPlano(p).then(d => { if(AL_ESCOGER !== fn) return; cerrarEscoger(); if(fn) fn(d); })
+        .catch(err => { el.disabled = false; const a = $('#cuartoHojaAviso'); if(a) a.textContent = 'Could not add it. ' + String(err && err.message || err); });
       return; }
     if((el = q('[data-escoger]'))){ const d = JSON.parse(el.dataset.escoger); const fn = AL_ESCOGER; cerrarEscoger(); if(fn) fn(d); return; }
     if(q('[data-cerrar-cuarto]') || e.target.id === 'hojaCuarto'){ cerrarEscoger(); return; }

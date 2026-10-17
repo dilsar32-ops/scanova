@@ -2,8 +2,8 @@
 // (el mismo escáner de Field Reports, que ya viene dentro de la app: plugin RoomScan) y se dibuja con el
 // mismo código de Field Reports (plano.js, copiado por tools/extraer_plano.py). Un escaneo por piso;
 // un escaneo nuevo no borra el anterior (queda de historial), se ve el más reciente.
-import * as plano from './plano.js?v=2026-10-17-2';
-import { authFetch, esAparato, esManager, preguntar } from './app.js?v=2026-10-17-2';
+import * as plano from './plano.js?v=2026-10-17-3';
+import { authFetch, esAparato, esManager, preguntar } from './app.js?v=2026-10-17-3';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
@@ -133,6 +133,57 @@ export async function paredesParaCamara(trabajoId, nivelId){
 // La forma de cada cuarto del último plano pedido (la llena paredesParaCamara, para no pedir el plano dos veces).
 let FORMAS = {};
 export function formasParaCamara(){ return FORMAS; }
+// LOS NIVELES Y CUARTOS DEL PLANO PARA LA HOJA "Photos go to…" (17-oct, su pedido: "que vengan del plano y sin detector").
+// Solo lee lo guardado: el plano más reciente de cada piso, sus cuartos con nombre (nunca "Room N" sin nombre ni la orden
+// "nuevo cuarto"). Nada se crea aquí: la hoja los ENSEÑA, y solo el que la persona toca se agrega al proyecto.
+// Sale [{ nivel_id, nombre, cuartos: [nombres] }]; nivel_id = el piso del proyecto donde se guardó el plano (o null), nombre =
+// el nombre del nivel que dice el escaneo ('' si no dice ninguno; nunca se inventa la planta).
+const PLANTA_A_NIVEL = { 'Basement': 'Basement', '1st Floor': 'First Floor', '2nd Floor': 'Second Floor', '3rd Floor': 'Third Floor', 'Attic': 'Attic' };
+export function nombreDeNivelDelPlano(d){
+  if(!d) return '';
+  const L = nivelDelPlano(d), nom = d.inspection && d.inspection.nombresDeNivel;
+  let n = nom && nom[String(L)] ? String(nom[String(L)]).trim() : '';
+  if(!n && d._nivelBase){ const i0 = PLANTAS.indexOf(d._nivelBase); if(i0 >= 0 && PLANTAS[i0 + (Math.max(1, +L || 1) - 1)]) n = PLANTAS[i0 + (Math.max(1, +L || 1) - 1)]; }
+  return PLANTA_A_NIVEL[n] || n;
+}
+const claveNombre = (s) => String(s || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ');
+export function nivelesDePlanos(lista){
+  const out = [], vistos = new Set();
+  (lista || []).forEach(p => {
+    if(!p || !p.data) return;
+    let d; try{ d = prepararPlano(p.data); }catch(e){ return; }
+    if(!d) return;
+    const nombre = nombreDeNivelDelPlano(d);
+    // Un piso = su nivel del proyecto; los planos sin nivel se separan por el nombre que dice el escaneo.
+    const llave = p.nivel_id ? 'n:' + p.nivel_id : 's:' + claveNombre(nombre);
+    if(vistos.has(llave)) return;   // la lista viene del más nuevo al más viejo: manda el más reciente
+    vistos.add(llave);
+    const L = nivelDelPlano(d), ya = new Set(), cuartos = [];
+    (d.rooms || []).forEach(r => {
+      if(!r || r.deleted || !(r.walls || []).length || (r.level || 1) !== L) return;
+      const n = String(r.roomName || '').trim();
+      if(!n || esOrdenDeCuarto(n) || ya.has(claveNombre(n))) return;
+      ya.add(claveNombre(n)); cuartos.push(n);
+    });
+    out.push({ nivel_id: p.nivel_id || null, nombre, cuartos });   // aunque quede vacío: así el más nuevo tapa a los viejos de ese piso
+  });
+  return out;
+}
+// Los planos del proyecto para esa hoja: los ya cargados por Floor Plan, o se piden; y los que esperan señal en el teléfono
+// (un sótano sin señal) van primero porque son los más nuevos. Si no se pueden leer: [] (la hoja queda como siempre).
+export async function nivelesDelPlanoDe(trabajoId){
+  if(!trabajoId) return [];
+  let lista = null;
+  if(CARGADO === trabajoId && T && T.id === trabajoId) lista = PLANOS;
+  else {
+    try{
+      const r = await authFetch('/rest/v1/fotos_planos?trabajo_id=eq.' + encodeURIComponent(trabajoId) + '&borrado_at=is.null&select=id,nivel_id,created_at,data&order=created_at.desc&limit=60');
+      lista = r.ok ? await r.json() : [];
+    }catch(e){ lista = []; }
+  }
+  const pend = leerPendientes().map(x => x && x.fila).filter(f => f && f.trabajo_id === trabajoId && !(lista || []).some(p => p.id === f.id));
+  return nivelesDePlanos(pend.reverse().concat(lista || []));
+}
 // El plano que se ve de cada piso: el más reciente (la lista viene ordenada del más nuevo al más viejo).
 export const planoDe = (planos, nivelId) => (planos || []).find(p => (p.nivel_id || SIN_NIVEL) === (nivelId || SIN_NIVEL)) || null;
 // El escaneo sale del iPhone con el ángulo con que se sostuvo el teléfono. Field Reports lo endereza al
