@@ -1,17 +1,17 @@
 // Scanova · la ficha de un proyecto (diseño de Amilcar, 12 oct 2026): portada, nombre, dirección, etapa, cliente,
 // encargado y fecha; pestañas Rooms · Photos · Dry Logs · Floor Plan · Measurements · Notes · Documents · Activity.
 // Rooms = niveles (Basement, First Floor…) y sus cuartos (Kitchen…). Photos = las fotos por nivel y por cuarto.
-import { $, $$, authFetch, irA, atras, esManager, PERFIL, marcarLimpio, preguntar } from './app.js?v=2026-10-17-3';
-import * as trabajos from './trabajos.js?v=2026-10-17-3';
-import * as fotos from './fotos.js?v=2026-10-17-3';
-import * as panel from './panel.js?v=2026-10-17-3';
-import * as planos from './planos.js?v=2026-10-17-3';
-import * as camara from './camara.js?v=2026-10-17-3';
-import * as detalles from './detalles.js?v=2026-10-17-3';
-import * as drylog from './drylog.js?v=2026-10-17-3';
-import * as documentos from './documentos.js?v=2026-10-17-3';
-import * as medidas from './medidas.js?v=2026-10-17-3';
-import * as pegar from './pegar.js?v=2026-10-17-3';
+import { $, $$, authFetch, irA, atras, esManager, PERFIL, marcarLimpio, preguntar } from './app.js?v=2026-10-17-4';
+import * as trabajos from './trabajos.js?v=2026-10-17-4';
+import * as fotos from './fotos.js?v=2026-10-17-4';
+import * as panel from './panel.js?v=2026-10-17-4';
+import * as planos from './planos.js?v=2026-10-17-4';
+import * as camara from './camara.js?v=2026-10-17-4';
+import * as detalles from './detalles.js?v=2026-10-17-4';
+import * as drylog from './drylog.js?v=2026-10-17-4';
+import * as documentos from './documentos.js?v=2026-10-17-4';
+import * as medidas from './medidas.js?v=2026-10-17-4';
+import * as pegar from './pegar.js?v=2026-10-17-4';
 
 const esc = (v) => trabajos.esc(v);
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -227,7 +227,7 @@ function pintarMedidas(){ if(TAB === 'medidas' && T) medidas.pintar(T, NIVELES, 
 // Documents (14-oct): los reportes del secado (Dry Log y Equipment) con su PDF.
 function pintarDocumentos(){ if(TAB === 'documentos' && T) documentos.pintar(T, NIVELES, CUARTOS); }
 // Floor Plan (su diseño): solo se dibuja cuando la pestaña está abierta (el plano pesa).
-function pintarPlano(){ if(TAB === 'plano' && T) planos.abrir(T, NIVELES, () => abrirFormaNivel(null)); }
+function pintarPlano(){ if(TAB === 'plano' && T) planos.abrir(T, NIVELES, () => abrirFormaNivel(null), CUARTOS); }
 
 // ---------- Rooms ----------
 function miniDe(lista){ const f = ordenarFotos(lista, 'nuevas')[0]; return f ? (URLS[f.id] || '') : ''; }

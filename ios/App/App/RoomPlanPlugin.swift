@@ -71,6 +71,13 @@ public class RoomPlanPlugin: CAPPlugin, CAPBridgedPlugin, QLPreviewControllerDat
             vc.nivelBase = call.getString("nivelBase") ?? ""
             // Los niveles REALES del proyecto, para la bandeja de la cámara.
             if let lista = call.getArray("niveles", String.self) { vc.nivelesDelProyecto = lista }
+            // Los cuartos que el personal ya creó en el proyecto (opcional; sin ellos, como antes).
+            if let l = call.getArray("cuartosDelNivel", String.self) { vc.cuartosDelNivel = l }
+            if let o = call.getObject("cuartosPorNivel") {
+                var m: [String: [String]] = [:]
+                for (k, v) in o { if let arr = v as? [Any] { m[k] = arr.compactMap { $0 as? String } } }
+                vc.cuartosPorNivel = m
+            }
             vc.onFinish = { [weak self, weak vc] outcome in
                 self?.scanInProgress = false
                 guard let vc = vc else { return }

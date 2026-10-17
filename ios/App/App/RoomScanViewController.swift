@@ -375,6 +375,37 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
     // Los niveles REALES del proyecto, mandados por la web (Scanova: los del
     // trabajo; Field Reports: sus plantas). Si no llegan, las de siempre.
     var nivelesDelProyecto: [String] = []
+    // LOS CUARTOS QUE YA HIZO EL PERSONAL (17-oct, Scanova): primero se crean
+    // los niveles y cuartos a mano en Photos y el plano se escanea después. La
+    // web manda los cuartos de cada nivel; los botones los enseñan primero y lo
+    // dicho/escrito se empareja con el nombre del proyecto. Vacío (Field
+    // Reports, páginas viejas) = exactamente como antes.
+    var cuartosDelNivel: [String] = []
+    var cuartosPorNivel: [String: [String]] = [:]
+    private func cuartosDelProyectoAhora() -> [String] {
+        let nivel = nivelSeleccionado ?? nivelBase
+        if let l = cuartosPorNivel[nivel] { return l }
+        if let k = cuartosPorNivel.keys.first(where: { Self.sinAcentos($0) == Self.sinAcentos(nivel) }) { return cuartosPorNivel[k] ?? [] }
+        return nivel == nivelBase || cuartosPorNivel.isEmpty ? cuartosDelNivel : []
+    }
+    private func nombreDelProyecto(_ dicho: String) -> String {
+        let lista = cuartosDelProyectoAhora()
+        let otros = usadosPorOtros()
+        let n = CuartosDelProyecto.emparejar(dicho, con: lista, traducir: Self.enIngles, usados: otros) ?? dicho
+        // Con cuartos del proyecto: nunca dos cuartos con el mismo nombre.
+        guard !lista.isEmpty else { return n }
+        let tomados = Set(otros.map { CuartosDelProyecto.normal($0) })
+        guard tomados.contains(CuartosDelProyecto.normal(n)) else { return n }
+        var k = 2
+        while tomados.contains(CuartosDelProyecto.normal("\(n) \(k)")) { k += 1 }
+        return "\(n) \(k)"
+    }
+    // Nombres ya puestos a OTROS cuartos de este escaneo (sin el cuarto activo).
+    private func usadosPorOtros() -> [String] {
+        var u = voiceNames.compactMap { $0 }
+        if let a = nombreActual(), let i = u.lastIndex(where: { CuartosDelProyecto.normal($0) == CuartosDelProyecto.normal(a) }) { u.remove(at: i) }
+        return u
+    }
     private var posicionTimer: Timer?
     private var posicionCamara: CGPoint?
     private var terminarAlAcabarCuarto = false
@@ -1221,6 +1252,17 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
         if eligiendoNivel {
             nivelSeleccionado = nivelDeTexto(t) ?? (t.isEmpty ? nil : t)
             pintarBandeja()
+        } else if !cuartosDelProyectoAhora().isEmpty {
+            pintarChips()
+            // Mientras lo escrito aún da sugerencias del proyecto y no es un nombre
+            // exacto, no se guarda solo: espera a que toque una o cierre el teclado.
+            let libres = CuartosDelProyecto.disponibles(proyecto: cuartosDelProyectoAhora(), usados: voiceNames.compactMap { $0 }, conservar: nombreActual())
+            let s = CuartosDelProyecto.sugerencias(t, en: libres)
+            if !t.isEmpty, !s.isEmpty, !s.contains(where: { CuartosDelProyecto.normal($0) == CuartosDelProyecto.normal(t) }) {
+                campoTimer?.invalidate()
+                campoTimer = nil
+                return
+            }
         }
         // Lo escrito (o dictado con el teclado) se guarda solo al dejar de
         // escribir: ya no hay que tocar un botón de abajo para que cuente.
@@ -1281,7 +1323,21 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
     }
 
     private func nombresDeCuarto() -> [String] {
-        var nombres = Self.roomOptionNames
+        // Con cuartos del proyecto en este nivel: SOLO esos, sin los ya puestos en este
+        // escaneo, y al escribir solo los que empiezan con lo escrito.
+        let delProyecto = cuartosDelProyectoAhora()
+        if !delProyecto.isEmpty {
+            let libres = CuartosDelProyecto.disponibles(proyecto: delProyecto, usados: voiceNames.compactMap { $0 }, conservar: nombreActual())
+            let escrito = campo.isFirstResponder ? (campo.text ?? "") : ""
+            if !libres.isEmpty {
+                let s = CuartosDelProyecto.sugerencias(escrito, en: libres)
+                return s.isEmpty ? libres : s
+            }
+            // Ya se usaron todos los del proyecto: los de siempre, para que la bandeja nunca quede vacía.
+            let tomados = Set(voiceNames.compactMap { $0 }.map { CuartosDelProyecto.normal($0) })
+            return Self.roomOptionNames.filter { !tomados.contains(CuartosDelProyecto.normal($0)) }
+        }
+        var nombres = CuartosDelProyecto.botones(proyecto: cuartosDelProyectoAhora(), deSiempre: Self.roomOptionNames)
         // Los del proyecto: los que ya se usaron en este plano y los que este
         // teléfono ya aprendió de él.
         let usados = voiceNames.compactMap { $0 } + learnedRoomNames.sorted().map { $0.prefix(1).uppercased() + $0.dropFirst() }
@@ -1337,7 +1393,7 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
                 if self.eligiendoNivel {
                     self.seleccionarNivel(valor)
                 } else {
-                    self.campo.resignFirstResponder()
+                    self.cerrarCampoSinAplicar()
                     self.applyHeardOrTappedName(valor, viaButton: true)
                 }
             }, for: .touchUpInside)
@@ -4497,7 +4553,10 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
     // accepted through that same window. Once the room-done card is
     // showing, the same action corrects that room's name directly and
     // refreshes the card immediately.
-    private func applyHeardOrTappedName(_ name: String, viaButton: Bool) {
+    private func applyHeardOrTappedName(_ dichoONombre: String, viaButton: Bool) {
+        // Lo dicho o escrito toma el nombre del cuarto del proyecto si se parece claro.
+        // Un botón de la lista de siempre ("Bedroom") es una elección: no se cambia.
+        let name = viaButton && Self.roomOptionNames.contains(dichoONombre) ? dichoONombre : nombreDelProyecto(dichoONombre)
         // A deliberate tap always resolves an open room-split question
         // immediately as a plain rename, never as a new room - only
         // "Cuarto nuevo" (voice or its own button) can ever split a room.
@@ -5426,7 +5485,7 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
             func esNombreCreible(_ nombre: String, pidiendo: Bool) -> Bool {
                 let k = nombre.split(separator: " ").count
                 guard k <= 4, !esGeneral, !esSiNo, !esControl, !Self.isMoveOnPhrase(nombre.lowercased()), !Self.traeOrden(nombre) else { return false }
-                return isKnownRoomWord(nombre) || micReciente || (pidiendo && k <= 3)
+                return isKnownRoomWord(nombre) || CuartosDelProyecto.emparejar(nombre, con: cuartosDelProyectoAhora(), traducir: Self.enIngles, usados: voiceNames.compactMap { $0 }) != nil || micReciente || (pidiendo && k <= 3)
             }
             if !esGeneral {
                 if state == .roomDonePrompt, aviso != nil {
@@ -5454,6 +5513,7 @@ class RoomScanViewController: UIViewController, RoomCaptureViewDelegate, AVSpeec
                         return
                     }
                     if case .roomName(let nombre) = classifyVoiceCommand(raw), !Self.traeOrden(nombre), esNombreCreible(nombre, pidiendo: false) {
+                        let nombre = nombreDelProyecto(nombre)
                         learnRoomName(nombre)
                         pendingRoomNameAfterGap = nombre
                         speak("Entendido, el siguiente es \(Self.enIngles(nombre)).") {}
@@ -6147,5 +6207,72 @@ final class DelegadoEnVivo: NSObject, RoomCaptureSessionDelegate {
     }
     func captureSession(_ session: RoomCaptureSession, didEndWith data: CapturedRoomData, error: (any Error)?) {
         original?.captureSession(session, didEndWith: data, error: error)
+    }
+}
+
+// EMPAREJAR CON LOS CUARTOS DEL PROYECTO (17-oct). Lógica pura (se prueba sola con swiftc).
+// Solo emparejamientos claros: igual (sin mayúsculas/acentos, o traducido), o lo dicho cabe
+// entero en UN solo cuarto del proyecto ("master" -> "Master Bedroom"). Si cabe en dos, o los
+// números no cuadran ("bedroom 2" vs "Bedroom 1"), no se empareja: se queda lo dicho.
+struct CuartosDelProyecto {
+    static let relleno: Set<String> = ["the", "a", "room", "el", "la", "los", "las", "de", "del", "cuarto", "my", "mi"]
+    static func normal(_ s: String) -> String {
+        let b = s.lowercased().folding(options: .diacriticInsensitive, locale: Locale(identifier: "es"))
+        let solo = b.unicodeScalars.map { CharacterSet.alphanumerics.contains($0) ? String($0) : " " }.joined()
+        return solo.split(separator: " ").joined(separator: " ")
+    }
+    static func palabras(_ s: String) -> [String] { normal(s).split(separator: " ").map(String.init) }
+    // Palabras de tipo de cuarto: lo que falte decir del nombre del proyecto solo puede ser
+    // de estas ("master" -> "Master Bedroom" sí; "bedroom" -> "Master Bedroom" no).
+    static let tipos: Set<String> = ["bedroom", "bed", "bathroom", "bath", "closet", "kitchen", "hallway", "hall", "office", "garage", "laundry", "living", "dining", "family", "den", "basement", "attic", "stairs", "entry", "foyer", "pantry", "utility", "storage", "dormitorio", "recamara", "habitacion", "bano", "cocina", "sala", "comedor", "pasillo", "oficina", "lavanderia", "sotano", "garaje", "escalera"]
+    static func emparejar(_ dicho: String, con lista: [String], traducir: (String) -> String = { $0 }, usados: [String] = []) -> String? {
+        let limpios = lista.filter { !normal($0).isEmpty }
+        guard !limpios.isEmpty else { return nil }
+        let formas = Array(Set([normal(dicho), normal(traducir(dicho))])).filter { !$0.isEmpty }
+        guard !formas.isEmpty else { return nil }
+        // 1. Igual.
+        let iguales = limpios.filter { c in formas.contains(normal(c)) || formas.contains(normal(traducir(c))) }
+        if Set(iguales.map { normal($0) }).count == 1 { return iguales[0] }
+        if iguales.count > 1 { return nil }
+        // 2. Lo dicho cabe entero en un solo cuarto.
+        func cabe(_ forma: String, _ c: String) -> Bool {
+            let d = forma.split(separator: " ").map(String.init).filter { !relleno.contains($0) }
+            guard !d.isEmpty else { return false }
+            let cs = Array(Set(palabras(c) + palabras(traducir(c))))
+            let numsD = Set(d.filter { $0.allSatisfy(\.isNumber) })
+            let numsC = Set(palabras(c).filter { $0.allSatisfy(\.isNumber) })
+            if numsD != numsC { return false }
+            let pega: (String, String) -> Bool = { w, x in x == w || (w.count >= 4 && x.hasPrefix(w)) }
+            guard d.allSatisfy({ w in cs.contains { pega(w, $0) } }) else { return false }
+            // Lo que no se dijo del nombre del proyecto solo puede ser tipo de cuarto o relleno.
+            let pc = palabras(c).filter { !relleno.contains($0) }
+            return pc.allSatisfy { x in tipos.contains(x) || d.contains { pega($0, x) } }
+        }
+        let tomados = Set(usados.map { normal($0) })
+        let caben = limpios.filter { c in !tomados.contains(normal(c)) && formas.contains { cabe($0, c) } }
+        if Set(caben.map { normal($0) }).count == 1 { return caben[0] }
+        return nil
+    }
+    // Los del proyecto que aún no tiene otro cuarto de este escaneo (el activo se queda).
+    static func disponibles(proyecto: [String], usados: [String], conservar: String? = nil) -> [String] {
+        let tomados = Set(usados.map { normal($0) }).subtracting(conservar.map { [normal($0)] } ?? [])
+        return botones(proyecto: proyecto, deSiempre: []).filter { !tomados.contains(normal($0)) }
+    }
+    // Sugerencias al escribir: el nombre o alguna de sus palabras empieza con lo escrito.
+    static func sugerencias(_ escrito: String, en lista: [String]) -> [String] {
+        let e = normal(escrito)
+        guard !e.isEmpty else { return lista }
+        return lista.filter { c in
+            let n = normal(c)
+            return n.hasPrefix(e) || palabras(c).contains { $0.hasPrefix(e) }
+        }
+    }
+    static func botones(proyecto: [String], deSiempre: [String]) -> [String] {
+        var out: [String] = []
+        for n in proyecto + deSiempre {
+            let t = n.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !t.isEmpty, !out.contains(where: { normal($0) == normal(t) }) { out.append(t) }
+        }
+        return out
     }
 }

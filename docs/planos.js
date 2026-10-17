@@ -2,8 +2,8 @@
 // (el mismo escáner de Field Reports, que ya viene dentro de la app: plugin RoomScan) y se dibuja con el
 // mismo código de Field Reports (plano.js, copiado por tools/extraer_plano.py). Un escaneo por piso;
 // un escaneo nuevo no borra el anterior (queda de historial), se ve el más reciente.
-import * as plano from './plano.js?v=2026-10-17-3';
-import { authFetch, esAparato, esManager, preguntar } from './app.js?v=2026-10-17-3';
+import * as plano from './plano.js?v=2026-10-17-4';
+import { authFetch, esAparato, esManager, preguntar } from './app.js?v=2026-10-17-4';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
@@ -12,7 +12,7 @@ const SIN_NIVEL = 'sin';
 const PLANTAS = ['Basement', '1st Floor', '2nd Floor', '3rd Floor', 'Attic'];
 
 let PL_CERRADO = false;   // teléfono: todos los niveles cerrados (se ven solo sus tarjetas)
-let T = null, NIVELES = [], PLANOS = [], NIV_SEL = null, VISTA = '2d', REJILLA = true, ZOOM = 1, CARGADO = '', AVISO = '', AVISO_OK = false, OCUPADO = false, AL_NIVEL = null, MENU = false;
+let T = null, CUARTOS_P = [], NIVELES = [], PLANOS = [], NIV_SEL = null, VISTA = '2d', REJILLA = true, ZOOM = 1, CARGADO = '', AVISO = '', AVISO_OK = false, OCUPADO = false, AL_NIVEL = null, MENU = false;
 const PZ = { s: 1, x: 0, y: 0 }, PZ_GRANDE = { s: 1, x: 0, y: 0 };   // acercamiento con los dedos (teléfono)
 
 // ---------- puras (para las pruebas) ----------
@@ -308,7 +308,14 @@ function nivelElegido(){
 }
 
 // ---------- dibujar ----------
-export function abrir(trabajo, niveles, alNivel){
+// Los cuartos que el personal ya creó a mano en Photos, por nivel, para los botones de la cámara (17-oct).
+export function cuartosParaLaCamara(niveles, cuartos, nivelBase){
+  const por = {};
+  (niveles || []).forEach(n => { por[n.nombre] = (por[n.nombre] || []).concat((cuartos || []).filter(c => c.nivel_id === n.id).map(c => String(c.nombre || '').trim()).filter(Boolean)); });
+  return { cuartosPorNivel: por, cuartosDelNivel: por[nivelBase] || [] };
+}
+export function abrir(trabajo, niveles, alNivel, cuartos){
+  CUARTOS_P = cuartos || [];
   if(!T || T.id !== trabajo.id){ PLANOS = []; NIV_SEL = null; PL_CERRADO = false; ZOOM = 1; VISTA = '2d'; CARGADO = ''; AVISO = ''; }
   T = trabajo; NIVELES = niveles || []; AL_NIVEL = alNivel || null;
   if(CARGADO !== T.id && CARGADO !== 'cargando') cargar(); else pintar();
@@ -583,7 +590,9 @@ async function escanear(){
   let niv = nivelElegido(); OCUPADO = true; avisar('');
   try{
     // Los niveles REALES del trabajo viajan a la bandeja de la cámara; el que se escoja ahí es el que manda.
-    const r = await RS.scan({ nivelBase: niv && niv.id !== SIN_NIVEL ? niv.nombre : '', niveles: NIVELES.map(n => n.nombre) });
+    const base = niv && niv.id !== SIN_NIVEL ? niv.nombre : '';
+    // Los cuartos ya creados del proyecto: la cámara los enseña primero y empareja lo dicho con ellos.
+    const r = await RS.scan(Object.assign({ nivelBase: base, niveles: NIVELES.map(n => n.nombre) }, cuartosParaLaCamara(NIVELES, CUARTOS_P, base)));
     if(!r || r.cancelled){ OCUPADO = false; if(r && r.error) avisar(r.error); return; }
     if(r.nivelBase){ const m = NIVELES.find(n => n.nombre === r.nivelBase); if(m) niv = m; }
     // La planta estándar que se escogió en la cámara (sótano, 1st Floor…) le da nombre al nivel en la hoja, igual
