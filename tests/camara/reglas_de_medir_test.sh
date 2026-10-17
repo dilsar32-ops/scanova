@@ -214,6 +214,10 @@ ok("un pedacito de piso (0.2 m²) no es el piso", R.pisoBajoLasEsquinas([(y: -1.
 ok("esquinas en la línea del corte: el piso de abajo vale", R.pisoBajoLasEsquinas([(y: -1.40, area: 8)], esquinasY: [-0.79]) == -1.40)
 ok("un piso arriba de las esquinas no es el suyo", R.pisoBajoLasEsquinas([(y: -0.90, area: 8)], esquinasY: [-1.40]) == nil)
 ok("sin esquinas: el piso más grande", R.pisoBajoLasEsquinas([(y: -1.40, area: 8), (y: -1.58, area: 20)], esquinasY: []) == -1.58)
+ok("(revisión 4) esquinas en la línea de un corte de 4 ft (1.22 m): el piso vale", R.pisoBajoLasEsquinas([(y: 0, area: 8)], esquinasY: [1.22]) == 0 && R.pisoBajoLasEsquinas([(y: -1.40, area: 8)], esquinasY: [-0.18]) == -1.40)
+ok("(revisión 4) con el piso de abajo visto por la escalera gana el de este piso; 3 m abajo no es piso", R.pisoBajoLasEsquinas([(y: 0, area: 8), (y: -2.8, area: 30)], esquinasY: [1.6]) == 0 && R.pisoBajoLasEsquinas([(y: -3.0, area: 8)], esquinasY: [0]) == nil)
+ok("(revisión 4) el subfloor es otra capa del piso; Carpet, Tile o lo escrito sin esas palabras no", R.esOtraCapaDelPiso("Subfloor") && R.esOtraCapaDelPiso("Plywood subfloor") && R.esOtraCapaDelPiso("OSB") && !R.esOtraCapaDelPiso("Carpet") && !R.esOtraCapaDelPiso("Tile") && !R.esOtraCapaDelPiso("Marble"))
+ok("(revisión 4) clóset por su nombre", R.esNombreDeCloset("Closet") && R.esNombreDeCloset("clóset del master") && R.esNombreDeCloset("Pantry") && R.esNombreDeCloset("Walk-in") && !R.esNombreDeCloset("Bedroom 2") && !R.esNombreDeCloset("Hallway"))
 ok("dos + desde el piso son el alto del nivel; un parche alto o sin piso no", R.arrancaEnElPiso([0.03, 0.62], piso: 0) && !R.arrancaEnElPiso([0.5, 1.1], piso: 0) && !R.arrancaEnElPiso([0.03, 0.6], piso: nil))
 ok("(revisión) el alto del nivel y el baseboard del corte usan el MISMO medio pie", R.arrancaEnElPiso([0.152, 1], piso: 0) && !R.arrancaEnElPiso([0.153, 1], piso: 0) && abs(R.arranqueDelPiso / 3.28084 - 0.1524) < 1e-4)
 let cb = R.cuadroDeBanda(SIMD3(0, 0.02, 0), SIMD3(3, 0.02, 1), piso: 0, alto: 0.61)
@@ -268,7 +272,8 @@ ok("(revisión) la puerta siempre corta, aunque el plano diga que empieza a 3 ft
    igual(R.baseboardDeLaPared(largo: 12, aberturas: [R.Abertura(p: SIMD2(6, 0), esVentana: false, ancho: 4, alto: 6.7, abajo: 3)]), 8) && R.pasoElevado == 2.5)
 ok("(revisión) baseboard repetido: 11 de la pared + 14 medidos en una de 11 sí; 6 de un corte + 5 en una de 11 no; sin plano sí",
    R.baseboardDeMas(ya: 11, nuevo: 14, cabe: 11) && !R.baseboardDeMas(ya: 6, nuevo: 5, cabe: 11) && !R.baseboardDeMas(ya: 6, nuevo: 5.4, cabe: 11)
-   && R.baseboardDeMas(ya: 6, nuevo: 6, cabe: 11) && R.baseboardDeMas(ya: 1, nuevo: 1, cabe: nil))
+   && R.baseboardDeMas(ya: 6, nuevo: 6, cabe: 11) && R.baseboardDeMas(ya: 1, nuevo: 1, cabe: nil)
+   && !R.baseboardDeMas(ya: 10, nuevo: 10.6, cabe: 20) && R.baseboardDeMas(ya: 10, nuevo: 20, cabe: 20))
 ok("(revisión) dos + desde el piso: la línea de arriba sobre el piso (0.61 m = 2 ft)", igual(R.altoSobreElPiso([0.0, 0.6096], piso: 0), 2.0) && R.altoSobreElPiso([0.5, 1.1], piso: 0) == nil && R.altoSobreElPiso([0.0, 0.6], piso: nil) == nil)
 ok("(revisión) el + de abajo 0.4 ft arriba del piso (marcado 1.6, la línea a 2.0): no es el alto del nivel; parejo sí",
    R.altoDelNivelDeDosPuntos([0.1219, 0.6096], piso: 0, marcado: 1.6) == nil && igual(R.altoDelNivelDeDosPuntos([0.01, 0.6096], piso: 0, marcado: 1.97), 1.97)
@@ -424,7 +429,33 @@ cf = bloque(v, 'fileprivate func contenidoDeLaFranja')
 ok("una parte que ya tiene medida (amarilla o verde) no vuelve a ofrecer 'completa' (revisión 2: salvo trim, crown o tackless solos)",
    'guard !tapaLoCompleto(pared: i, parte: "wall"), let d = datosParedEntera(i) else { return nil }' in cf and 'guard !tapaLoCompleto(pared: nil, parte: parte), let d = datosPisoEntero(parte)' in cf
    and 'private static let noTapanLoCompleto: Set<String> = ["Trim", "Crown Molding", "Tackless Strip"]' in v
-   and '&& !(it.width == nil && Self.noTapanLoCompleto.contains(it.material)) }' in bloque(v, 'fileprivate func tapaLoCompleto'))
+   and '&& !(it.width == nil && Self.noTapanLoCompleto.contains(it.material))' in bloque(v, 'fileprivate func tapaLoCompleto'))
+# ---- (revisión 4) ----
+ok("(revisión 4) sin la ubicación (pared adivinada) no se pregunta '¿Es la pared N? Ya lleva baseboard': se guarda sin pared",
+   'if baseboardSinSaberLaPared(donde, que: "corte-base") { return false }' in v and 'if baseboardSinSaberLaPared(donde, que: "baseboard") { return false }' in v
+   and 'nueva.paredSinSaber = true' in bloque(v, 'private func baseboardSinSaberLaPared') and 'guard donde.adivinada else { return false }' in bloque(v, 'private func baseboardSinSaberLaPared'))
+ok("(revisión 4) al perder la ubicación (reinicio, corte del rastreo) la pared de antes se suelta",
+   'if medirPrimero, !medidaEnCurso { empezarPared() }' in bloque(v, 'private func reiniciarElRastreo') and 'if medirPrimero { n.paredCandidata = nil; n.paredVista = nil; if !medidaEnCurso { empezarPared() } }' in bloque(v, 'func sessionWasInterrupted'))
+ok("(revisión 4) un parche de subfloor no es 'El piso ya está completo' ni esconde 'Piso completo'; 'Guardar igual' guarda lo de MEDIDA",
+   'ReglasDeMedir.esOtraCapaDelPiso(p.material) { return false }' in bloque(v, 'fileprivate func preguntarSiYaCompleta')
+   and 'ReglasDeMedir.esOtraCapaDelPiso(it.material)' in bloque(v, 'fileprivate func tapaLoCompleto')
+   and 'if let p = materialPuestoVigente(), p.parte == "floor" { resolverPiso(p.material) } else { abrirPregunta(.piso) }' in bloque(v, 'fileprivate func guardarSobreLoCompleto'))
+ok("(revisión 4) entrar al clóset del cuarto no dispara 'faltan N paredes': espera a un tercer cuarto; sin plano nunca es clóset",
+   'n.salidaPendiente = (antes, nivelActual)' in bloque(v, 'fileprivate func salioDelCuarto') and 'esClosetDe(c, de: antes)' in bloque(v, 'fileprivate func salioDelCuarto')
+   and 'guard !planoPorCuarto.isEmpty, ReglasDeMedir.esNombreDeCloset(c) else { return false }' in bloque(v, 'fileprivate func esClosetDe'))
+nq = bloque(v, 'fileprivate func noGuardarSobreLoCompleto')
+ok("(revisión 4) 'No guardar · medirla aparte' deja el material de MEDIDA para medirla otra vez (los otros 'No guardar' no)",
+   'let aparte = !(n.sobreCompleta?.otras.isEmpty ?? true)' in nq and nq.index('if aparte { n.materialPuesto = mat;') > nq.index('cancelarMedidaEnCurso(hablar: false)'))
+ok("(revisión 4) 'Es otra pared': nunca la insulación ni el afuera/adentro de la pared que tenía enfrente",
+   'let sinSaber = n.paredSinSaber && clase.paredes.isEmpty' in bloque(v, 'private func resolverPared') and 'respuesta: sinSaber ? nil : n.insulDePared[clave]' in bloque(v, 'private func resolverPared')
+   and 'guard !nueva.paredSinSaber,' in bloque(v, 'private func paredDeAfueraEnElPlano'))
+ok("(revisión 4) lo completo de otra sesión (partesGuardadas) cuenta como completo; sin la llave nada cambia",
+   'completaDeAntes(parte: "wall", pared: i)' in bloque(v, 'fileprivate func estadoDeLaPared') and 'completaDeAntes(parte: parte, pared: nil)' in bloque(v, 'fileprivate func estadoDeLaParte')
+   and 'guard maqueta == 0, !partesGuardadas.isEmpty else { return false }' in bloque(v, 'fileprivate func completaDeAntes') and 'call.getArray("partesGuardadas")' in plg)
+ok("(revisión 4) Deshacer el renglón del alto lo olvida en el momento; el alto del teléfono sin filas guardadas se borra",
+   'olvidarAltoSiSeDeshizo()' in bloque(v, '@objc private func undoTapped') and 'UserDefaults.standard.removeObject(forKey: llaveDelAlto())' in bloque(v, 'fileprivate func altoRecordado'))
+ok("(revisión 4) 'falta una pared' de otra captura: sin línea roja en otro marco y 'Volver' cambia el cuarto",
+   'mismoMarco(r.cuarto, roomName)' in v and 'elegirCuartoNuevo(f.cuarto)' in bloque(v, 'private func contestarFalta'))
 # El mapita (16 oct): transparente; verde la pared completa, amarillo la parcial, negro sin tocar; el piso igual; el techo sin color.
 ok("el mapita es transparente", 'backgroundColor = .clear' in bloque(v, 'fileprivate final class MinimapaCamara'))
 mc = bloque(v, 'fileprivate final class MinimapaCamara')
@@ -843,6 +874,17 @@ const cc = M.cuartosConParedes([{ seccion: 'wall', nivel: '2nd Floor', cuarto: '
   { seccion: 'floor', nivel: '2nd Floor', cuarto: 'Kitchen' }, { seccion: 'wall', nivel: '', cuarto: 'Hallway' }, { seccion: 'wall', nivel: '2nd Floor', cuarto: '' }]);
 ok('los cuartos con paredes ya guardadas, por nivel (sin repetir; el piso no cuenta)', JSON.stringify(cc) === JSON.stringify({ '2nd Floor': ['Bedroom 2'], '': ['Hallway'] }));
 ok('la página los manda a la cámara solo con las medidas cargadas', src.includes('const yaGuardadas = CARGADO === tid && !FALLO ? cuartosConParedes(') && src.includes('...(yaGuardadas ? { cuartosConParedes: yaGuardadas } : {})'));
+// ---- (revisión 4) ----
+const cb = M.cuartosConParedes([{ seccion: 'bathroom', material: 'Shower Tile', nivel: '1st Floor', cuarto: 'Bathroom' }, { seccion: 'bathroom', material: 'Greenboard', nivel: '1st Floor', cuarto: 'Laundry Room' },
+  { seccion: 'kitchen', material: 'Backsplash', nivel: '1st Floor', cuarto: 'Kitchen' }, { seccion: 'bathroom', material: 'Toilet', nivel: '1st Floor', cuarto: 'Half Bathroom' },
+  { seccion: 'bathroom', material: 'Floor Tile', nivel: '1st Floor', cuarto: 'Half Bathroom' }, { seccion: 'kitchen', material: 'Cabinets', nivel: '1st Floor', cuarto: 'Pantry' }]);
+ok('(revisión 4) Shower Tile, Greenboard y Backsplash cuentan como paredes; Toilet, Floor Tile y Cabinets no', JSON.stringify(cb) === JSON.stringify({ '1st Floor': ['Bathroom', 'Laundry Room', 'Kitchen'] }));
+ok('(revisión 4) la página manda el material para eso', src.includes('cuartosConParedes(FILAS.map(f => ({ seccion: f.seccion, material: f.material,'));
+const pg = M.partesYaGuardadas([{ seccion: 'wall', material: 'Drywall', largo: 12, ancho: 8.1, nivel: '2nd', cuarto: 'Bedroom 2' }, { seccion: 'wall', material: 'Baseboard', largo: 9, ancho: null, nivel: '2nd', cuarto: 'Bedroom 2' },
+  { seccion: 'floor', material: 'Carpet', largo: 14, ancho: 10, nivel: '2nd', cuarto: 'Bedroom 2' }, { seccion: 'kitchen', material: 'Cabinets', largo: 10, ancho: 2, nivel: '2nd', cuarto: 'Kitchen' }]);
+ok('(revisión 4) lo de pies² ya guardado va a la cámara (pared y piso; nunca el baseboard ni la cocina)', pg.length === 2 && pg[0].parte === 'wall' && pg[0].alto === 8.1 && pg[1].parte === 'floor'
+   && src.includes('...(partesGuardadas ? { partesGuardadas } : {})'));
+ok('(revisión 4) el editor desmarca la resta solo si cambió el tamaño', src.includes('const tamanoCambiado = (e) =>') && src.includes("ED.restaAuto = true; ED.restar0 = ED.restar; ED.restar = false;") && src.includes("largo0: String(f.largo)"));
 console.log(`\n  página: ${p} pasan, ${f} fallan`);
 process.exit(f ? 1 : 0);
 JSEOF

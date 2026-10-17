@@ -11,7 +11,7 @@
 //    del trabajo por partida; las notas; y el PDF "Measurements & Demo" (lo arma Documents).
 // Lo que cambia contra Field Reports: aquí el trabajo ya es el proyecto (cliente, dirección y fecha ya están), y los
 // niveles y cuartos son los del proyecto (los mismos de Photos y Dry Logs).
-import { $, authFetch, esAparato, esManager, preguntar, PERFIL } from './app.js?v=2026-10-16-13';
+import { $, authFetch, esAparato, esManager, preguntar, PERFIL } from './app.js?v=2026-10-17-1';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -212,15 +212,28 @@ export function filasDeCamara(medidas, base){
 }
 // (16-oct, revisión) Los cuartos de cada nivel que YA tienen paredes guardadas ({ nivel: [cuarto, …] }). La cámara no recibe esos
 // renglones (ni saben de qué pared del plano son): ahí no dice "falta una pared" de algo que puede estar ya guardado.
+// (revisión 4) Lo que va PARADO en la pared aunque se guarde en Kitchen o Bathroom (la misma lista que materialesParados de la cámara).
+// Un nombre escrito a mano que no está en ninguna lista también cuenta: contarlo de más solo calla a la cámara (el lado seguro).
+const DE_PARED = new Set(['Shower Tile', 'Shower Surround', 'Cement Board', 'Greenboard', 'Vapor Barrier', 'Backsplash']);
+const esDePared = (f) => f.seccion === 'wall' || ((f.seccion === 'bathroom' || f.seccion === 'kitchen')
+  && (DE_PARED.has(String(f.material || '').trim()) || !unidad(f.material)));
 export function cuartosConParedes(filas){
   const r = {};
   (filas || []).forEach(f => {
-    if(!f || f.seccion !== 'wall') return;
+    if(!f || !esDePared(f)) return;
     const c = String(f.cuarto || '').trim(); if(!c) return;
     const nv = String(f.nivel || '').trim(), l = r[nv] || (r[nv] = []);
     if(!l.some(x => norm(x) === norm(c))) l.push(c);
   });
   return r;
+}
+// (revisión 4) Los renglones de pies² de piso, pared y techo ya guardados ([{nivel, cuarto, parte, material, largo, alto}]): la cámara
+// solo los LEE para no ofrecer otra vez completo lo que ya está completo. Nunca vuelven a la lista.
+export function partesYaGuardadas(filas){
+  return (filas || []).filter(f => f && (f.seccion === 'floor' || f.seccion === 'wall' || f.seccion === 'ceiling') && num(f.largo) && num(f.ancho)
+    && unidad(f.material) !== 'LF' && unidad(f.material) !== 'EA')
+    .map(f => ({ nivel: String(f.nivel || '').trim(), cuarto: String(f.cuarto || '').trim(), parte: f.seccion, material: String(f.material || '').trim(),
+      largo: num(f.largo), alto: num(f.ancho) }));
 }
 // ---------- en la página ----------
 // Los niveles abiertos o cerrados (se recuerda mientras está abierta la página) y si se está borrando un nivel.
@@ -288,7 +301,13 @@ function pintarAqui(){
   const botones = `${cam ? `<button type="button" class="btn btn-accent" data-med-camara${CAMARA ? ' disabled' : ''}>${IC('regla')}Measure with camera</button>` : ''}
       <button type="button" class="btn ${cam ? 'btn-outline' : 'btn-accent'}" data-med-nuevo>${IC('mas')}Add by hand</button>
       ${g.total ? `<button type="button" class="btn btn-outline" data-med-pdf>${IC('bajar')}PDF</button>` : ''}`;
-  const alcance = ALCANCE ? `<div class="card med-alcance"><h3>What are you measuring?</h3>
+  // (17-oct, su pedido) Con niveles en el proyecto (los del plano) solo se escoge el nivel: la cámara ya sabe los cuartos.
+  const nivelesCam = NIVELES.map(n => ({ n, k: CUARTOS.filter(c => c.nivel_id === n.id).length }));
+  const alcance = ALCANCE && nivelesCam.length ? `<div class="card med-alcance"><h3>Which level?</h3>
+      <p class="med-nota-chica">The camera knows the rooms of the level from the floor plan.</p>
+      <div class="med-alcance-ops">${nivelesCam.map(({ n, k }) => `<button type="button" class="btn btn-outline" data-med-nivel-cam="${esc(n.id)}">${IC('dl-capas')}${esc(n.nombre)}${k ? ` <small>· ${k} ${k === 1 ? 'room' : 'rooms'}</small>` : ''}</button>`).join('')}</div>
+      <button type="button" class="btn btn-block med-cancelar" data-med-alcance-no>Cancel</button></div>`
+    : ALCANCE ? `<div class="card med-alcance"><h3>What are you measuring?</h3>
       <p class="med-nota-chica">Pick the level once; inside the camera you only say the rooms.</p>
       <div class="med-alcance-ops">
         <button type="button" class="btn btn-outline" data-med-alcance="cuarto">${IC('dl-cuarto')}One room</button>
@@ -420,13 +439,26 @@ function pintarEditor(){
          ${ED.seccion === 'wall' && sup ? '<p class="med-nota-chica">Walls are always length × height, in square feet, however tall the cut is.</p>' : ''}`)
       + `<p class="med-res" id="medRes">${res ? '= ' + esc(res) : ''}</p>` : ''}
     ${comp ? `<label class="med-acomp"><input type="checkbox" id="medAcomp"${ED.acomp ? ' checked' : ''}><span>Also add <b>${esc(comp)}</b> with the same size</span></label>` : ''}
-    ${ED.id && num(ED.menos) && conResta(mat, ED.ancho) ? `<label class="med-acomp"><input type="checkbox" id="medMenos"${ED.restar ? ' checked' : ''}><span>Subtract <b>${esc(String(r2(num(ED.menos))))} sq ft</b>${ED.menos_que ? ': ' + esc(ED.menos_que) : ''} (the whole wall, from the floor plan)</span></label>` : ''}
+    ${ED.id && num(ED.menos) && conResta(mat, ED.ancho) ? `<label class="med-acomp"><input type="checkbox" id="medMenos"${ED.restar ? ' checked' : ''}><span>Subtract <b>${esc(String(r2(num(ED.menos))))} sq ft</b>${ED.menos_que ? ': ' + esc(ED.menos_que) : ''} (from the floor plan, for the size the camera measured${ED.largo0 ? ': ' + esc(ED.largo0) + (ED.ancho0 ? ' × ' + esc(ED.ancho0) : '') + ' ft' : ''})<span class="med-nota-chica" id="medMenosNota">${tamanoCambiado(ED) ? ' The size changed: tick it again only if the doors are the same.' : ''}</span></span></label>` : ''}
     <p class="aviso" id="medEdAviso"></p>
     <div class="fila-botones">${ED.id && esManager() ? '<button type="button" class="btn btn-outline btn-rojo" data-med-borrar>Delete</button>' : ''}<button type="button" class="btn btn-outline" data-med-cerrar>Cancel</button><button type="button" class="btn btn-accent" data-med-guardar>Save</button></div>
     ${ED.id ? '' : '<button type="button" class="btn btn-block med-otra" data-med-guardar="otra">Save and add another</button>'}`;
 }
 // Lo que se resta de la medida que se edita (la pared entera), si sigue marcada "Subtract".
 const restaDe = (e) => e && e.id && e.restar && conResta(materialDe(e), e.ancho) ? num(e.menos) : 0;
+// (revisión 4) ¿Cambió el largo o el alto desde que se abrió? La resta de puertas era para ESE tamaño: se desmarca sola (una vez; él la
+// puede volver a marcar). Sin cambiar el tamaño no cambia nada.
+const tamanoCambiado = (e) => !!(e && e.id && num(e.menos) && e.largo0 != null && (num(e.largo) !== num(e.largo0) || num(e.ancho) !== num(e.ancho0)));
+function revisarResta(){
+  // Si él tocó la casilla a mano, se respeta. Si la quitó el código por un cambio de tamaño, se vuelve a poner al regresar al tamaño medido.
+  if(!ED || ED.restaMano) return;
+  const cambio = tamanoCambiado(ED);
+  if(cambio && !ED.restaAuto){ ED.restaAuto = true; ED.restar0 = ED.restar; ED.restar = false; }
+  else if(!cambio && ED.restaAuto){ ED.restaAuto = false; ED.restar = !!ED.restar0; }
+  else return;
+  const c = $('#medMenos'); if(c) c.checked = ED.restar;
+  const n = $('#medMenosNota'); if(n) n.textContent = cambio ? ' The size changed: tick it again only if the doors are the same.' : '';
+}
 function pintarResultado(){
   if(!ED) return; const mat = materialDe(ED), r = calcular(mat, ED.largo, esPorPieza(mat) ? '' : ED.ancho, restaDe(ED)), t = totalTexto(r.sqft, r.linear, r.piezas);
   const el = $('#medRes'); if(el) el.textContent = t ? '= ' + t : '';
@@ -556,7 +588,9 @@ async function lanzarCamara(alcance, d){
   let planoPorCuarto = {};
   try{ if(AYUDA.formas) planoPorCuarto = AYUDA.formas() || {}; }catch(e){ planoPorCuarto = {}; }
   // Lo ya guardado en otra sesión, solo con las medidas de ESTE proyecto cargadas bien (si no, no se manda: la cámara no lo dice).
-  const yaGuardadas = CARGADO === tid && !FALLO ? cuartosConParedes(FILAS.map(f => ({ seccion: f.seccion, nivel: nombreNivel(f.nivel_id, f.nivel_nombre), cuarto: nombreCuarto(f.cuarto_id, f.cuarto_nombre) }))) : null;
+  const yaGuardadas = CARGADO === tid && !FALLO ? cuartosConParedes(FILAS.map(f => ({ seccion: f.seccion, material: f.material, nivel: nombreNivel(f.nivel_id, f.nivel_nombre), cuarto: nombreCuarto(f.cuarto_id, f.cuarto_nombre) }))) : null;
+  // (revisión 4) Lo de pies² ya guardado (piso, pared, techo) para que la cámara no ofrezca otra vez completo lo que ya está completo.
+  const partesGuardadas = CARGADO === tid && !FALLO ? partesYaGuardadas(FILAS.map(f => ({ seccion: f.seccion, material: f.material, largo: f.largo, ancho: f.ancho, nivel: nombreNivel(f.nivel_id, f.nivel_nombre), cuarto: nombreCuarto(f.cuarto_id, f.cuarto_nombre) }))) : null;
   let oyente = null;
   try{ if(esManager() && ARMeasure.addListener) oyente = await ARMeasure.addListener('bitacora', l => { subirBitacora(tid, l); }); }catch(e){ oyente = null; }
   try{
@@ -566,7 +600,8 @@ async function lanzarCamara(alcance, d){
       // porMovimiento (16-oct): MEDIR PRIMERO, el material al final (el cuarto lo da el mapa, la parte el teléfono, y la
       // insulación y el underlayment salen de 3 preguntas del nivel). Primero solo el manager; después de su prueba se cambia
       // a true. `trabajo`: esas respuestas se guardan por trabajo y nivel. Un aparato viejo ignora las dos.
-      laboratorio: esManager(), porMovimiento: esManager(), trabajo: tid, ...(yaGuardadas ? { cuartosConParedes: yaGuardadas } : {}) });
+      // (17-oct) laboratorio: false, sin su botón: él pidió quitarlo (la cámara de 13 pasos ya hace lo que se probaba ahí).
+      laboratorio: false, porMovimiento: esManager(), trabajo: tid, ...(yaGuardadas ? { cuartosConParedes: yaGuardadas } : {}), ...(partesGuardadas ? { partesGuardadas } : {}) });
   }catch(e){ avisar('Could not open the measuring camera. ' + msg(e)); return; }
   finally{ try{ if(oyente && oyente.remove) await oyente.remove(); }catch(e){} if(BITACORA_PENDIENTE.length) subirBitacora(tid, null); }
   if(!res || res.cancelled){ if(res && res.error) avisar(res.error); return; }
@@ -642,6 +677,7 @@ export function conectar(){
     }
     if(q('[data-med-camara]')){ ALCANCE = !ALCANCE; pintarAqui(); return; }
     if(q('[data-med-alcance-no]')){ ALCANCE = false; pintarAqui(); return; }
+    if((el = q('[data-med-nivel-cam]'))){ const id = el.dataset.medNivelCam; ALCANCE = false; pintarAqui(); ULTIMO = { nivel_id: id, cuarto_id: null }; lanzarCamara('nivel', { nivel_id: id, cuarto_id: null }); return; }
     if((el = q('[data-med-alcance]'))){ const alc = el.dataset.medAlcance; ALCANCE = false; pintarAqui();
       if(AYUDA.escogerCuarto) AYUDA.escogerCuarto(alc === 'cuarto' ? 'Measure which room?' : 'Measure which level?', ULTIMO, (d) => lanzarCamara(alc, d));
       return; }
@@ -657,25 +693,25 @@ export function conectar(){
     if((el = q('[data-med-borrar-nivel]'))){ borrarNivel(el.dataset.medBorrarNivel); return; }
     if((el = q('[data-med-editar]'))){ const f = FILAS.find(x => x.id === el.dataset.medEditar); if(!f) return;
       abrirEditor({ id: f.id, nivel_id: f.nivel_id, cuarto_id: f.cuarto_id, nivel: f.nivel_nombre || '', cuarto: f.cuarto_nombre || '', seccion: f.seccion, material: f.material, largo: String(f.largo), ancho: f.ancho == null ? '' : String(f.ancho),
-        menos: num(f.menos), menos_que: String(f.menos_que || ''), restar: true }); return; }
+        menos: num(f.menos), menos_que: String(f.menos_que || ''), restar: true, largo0: String(f.largo), ancho0: f.ancho == null ? '' : String(f.ancho) }); return; }
     if(q('[data-med-nota]')){ guardarNota(); return; }
     if((el = q('[data-med-pdf]'))){ hacerPdf(el); return; }
   });
   document.addEventListener('input', (e) => {
     if(e.target.id === 'medNotaTxt'){ NOTA_ED = e.target.value; const b = document.querySelector('[data-med-nota]'); if(b) b.disabled = e.target.value === NOTA; return; }
     if(!ED) return;
-    if(e.target.id === 'medLargo'){ ED.largo = e.target.value; pintarResultado(); }
-    else if(e.target.id === 'medAncho'){ ED.ancho = e.target.value; pintarResultado(); }
+    if(e.target.id === 'medLargo'){ ED.largo = e.target.value; revisarResta(); pintarResultado(); }
+    else if(e.target.id === 'medAncho'){ ED.ancho = e.target.value; revisarResta(); pintarResultado(); }
     else if(e.target.id === 'medOtro'){
       // Al escribir el nombre aparece el largo (y el acompañante, si lo tiene): se vuelve a pintar SIN cerrar el teclado.
       const antes = formaDe(ED); ED.otro = e.target.value;
       if(antes !== formaDe(ED)){ const pos = e.target.selectionStart; pintarEditor(); const i = $('#medOtro'); if(i){ i.focus(); try{ i.setSelectionRange(pos, pos); }catch{} } }
     }
     else if(e.target.id === 'medAcomp'){ ED.acomp = e.target.checked; }
-    else if(e.target.id === 'medMenos'){ ED.restar = e.target.checked; pintarResultado(); }
+    else if(e.target.id === 'medMenos'){ ED.restar = e.target.checked; ED.restaMano = true; pintarResultado(); }
   });
   // Abrir o cerrar un nivel se recuerda ('toggle' no sube: se escucha en la captura).
   document.addEventListener('toggle', (e) => { const d = e.target; if(d && d.matches && d.matches('details.med-niv')) ABIERTO_NIV.set(d.dataset.medNiv, d.open); }, true);
-  document.addEventListener('change', (e) => { if(ED && e.target.id === 'medAcomp') ED.acomp = e.target.checked; if(ED && e.target.id === 'medMenos'){ ED.restar = e.target.checked; pintarResultado(); } });
+  document.addEventListener('change', (e) => { if(ED && e.target.id === 'medAcomp') ED.acomp = e.target.checked; if(ED && e.target.id === 'medMenos'){ ED.restar = e.target.checked; ED.restaMano = true; pintarResultado(); } });
   document.addEventListener('keydown', (e) => { if(e.key === 'Escape' && ED && hoja() && !hoja().hidden && !algoEncima()) cerrarEditor(); if(e.key === 'Enter' && ED && (e.target.id === 'medLargo' || e.target.id === 'medAncho')){ e.preventDefault(); guardarEditor(false); } });
 }

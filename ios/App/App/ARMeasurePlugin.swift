@@ -189,6 +189,15 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
                 for (nivel, lista) in ya { mapa[nivel] = (lista as? [Any])?.compactMap { $0 as? String } ?? [] }
                 arVC.cuartosConParedes = mapa
             }
+            // (revisión 4) Lo de pies² ya guardado (otra sesión): una pared, piso o techo completo no se ofrece otra vez. Sin la llave: [].
+            if let ya = call.getArray("partesGuardadas") {
+                arVC.partesGuardadas = ya.compactMap { v in
+                    guard let o = v as? [String: Any], let parte = o["parte"] as? String,
+                          let largo = (o["largo"] as? NSNumber)?.doubleValue, let alto = (o["alto"] as? NSNumber)?.doubleValue else { return nil }
+                    return (nivel: o["nivel"] as? String ?? "", cuarto: o["cuarto"] as? String ?? "", parte: parte,
+                            material: o["material"] as? String ?? "", largo: largo, alto: alto)
+                }
+            }
             if let areas = call.getObject("areasPorCuarto") {
                 var mapa: [String: Double] = [:]
                 for (clave, valor) in areas {

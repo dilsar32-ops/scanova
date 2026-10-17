@@ -1,17 +1,17 @@
 // Scanova · la ficha de un proyecto (diseño de Amilcar, 12 oct 2026): portada, nombre, dirección, etapa, cliente,
 // encargado y fecha; pestañas Rooms · Photos · Dry Logs · Floor Plan · Measurements · Notes · Documents · Activity.
 // Rooms = niveles (Basement, First Floor…) y sus cuartos (Kitchen…). Photos = las fotos por nivel y por cuarto.
-import { $, $$, authFetch, irA, atras, esManager, PERFIL, marcarLimpio, preguntar } from './app.js?v=2026-10-16-13';
-import * as trabajos from './trabajos.js?v=2026-10-16-13';
-import * as fotos from './fotos.js?v=2026-10-16-13';
-import * as panel from './panel.js?v=2026-10-16-13';
-import * as planos from './planos.js?v=2026-10-16-13';
-import * as camara from './camara.js?v=2026-10-16-13';
-import * as detalles from './detalles.js?v=2026-10-16-13';
-import * as drylog from './drylog.js?v=2026-10-16-13';
-import * as documentos from './documentos.js?v=2026-10-16-13';
-import * as medidas from './medidas.js?v=2026-10-16-13';
-import * as pegar from './pegar.js?v=2026-10-16-13';
+import { $, $$, authFetch, irA, atras, esManager, PERFIL, marcarLimpio, preguntar } from './app.js?v=2026-10-17-1';
+import * as trabajos from './trabajos.js?v=2026-10-17-1';
+import * as fotos from './fotos.js?v=2026-10-17-1';
+import * as panel from './panel.js?v=2026-10-17-1';
+import * as planos from './planos.js?v=2026-10-17-1';
+import * as camara from './camara.js?v=2026-10-17-1';
+import * as detalles from './detalles.js?v=2026-10-17-1';
+import * as drylog from './drylog.js?v=2026-10-17-1';
+import * as documentos from './documentos.js?v=2026-10-17-1';
+import * as medidas from './medidas.js?v=2026-10-17-1';
+import * as pegar from './pegar.js?v=2026-10-17-1';
 
 const esc = (v) => trabajos.esc(v);
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';

@@ -123,7 +123,7 @@ lab = v[v.index('PROBAR LO DEMOLIDO (laboratorio, solo manager)'):]
 ok("el botón de laboratorio exige la pantalla nueva Y la bandera laboratorio", 'guard experienciaNueva, laboratorio, !lab.armado else { return }' in bloque(v, 'fileprivate func armarBotonLaboratorio'))
 ok("el puente solo lo prende si la página lo manda", 'arVC.laboratorio = call.getBool("laboratorio") ?? false' in plg)
 ok("Field Reports NO manda el laboratorio", 'laboratorio' not in web)
-ok("Scanova lo manda solo para el manager", 'laboratorio: esManager()' in med)
+ok("Scanova ya no manda el laboratorio (17-oct, él lo quitó)", 'laboratorio: false' in med)
 ok("con el laboratorio abierto, la pantalla y el cuadro por cuadro de siempre no corren", 'if lab.activo { pintarLaboratorio(); return }' in bloque(v, 'fileprivate func pintarCamaraNueva') and 'if lab.activo { tickLaboratorio(); return }' in bloque(v, 'fileprivate func tickCamaraNueva'))
 ok("el laboratorio NO guarda medidas (nunca llama a bancarMedida ni toca items)", 'bancarMedida' not in lab and 'items.append' not in lab and 'onFinish' not in lab)
 ok("del cuadro de ARKit solo se COPIA (profundidad, confianza, pose) y el trabajo va en su propia fila", 'copiarProfundidad(prof.depthMap)' in lab and 'L.cola.async' in lab)

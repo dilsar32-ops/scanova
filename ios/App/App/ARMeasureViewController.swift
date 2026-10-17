@@ -331,6 +331,10 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
     // cámara, o a mano). Esos renglones no llegan aquí ni saben su pared: en esos cuartos no se dice "falta una pared". nil = la página
     // no lo mandó (vieja, o Field Reports): no se sabe, tampoco se dice.
     var cuartosConParedes: [String: [String]]?
+    // (revisión 4) Lo de pies² ya guardado en el servidor (otra sesión) del nivel del plano: {nivel, cuarto, parte, largo, alto}. Solo de
+    // lectura (nunca se manda otra vez): una pared, un piso o un techo que ya está COMPLETO ahí no se ofrece ni se guarda completo otra
+    // vez. Vacío = la página no lo mandó (vieja, Field Reports): como antes.
+    var partesGuardadas: [(nivel: String, cuarto: String, parte: String, material: String, largo: Double, alto: Double)] = []
     // El nivel se pregunta UNA vez por recorrido. Eso es todo el punto.
     var nivelActual: String = ""
     // "nivel" = un piso completo, cuarto por cuarto. "cuarto" = solo este.
@@ -7547,6 +7551,7 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
         if stage == .pickingMaterial || (stage == .measuringLength && pathPoints.isEmpty), !items.isEmpty, !medidaEnCurso {
             let last = items.removeLast()
             last.markers.forEach { $0.removeFromParentNode() }
+            olvidarAltoSiSeDeshizo()                 // (revisión 4) en el momento: otro renglón en el mismo lugar no lo revive
             say("Quité la última medida guardada.", .aviso)
             updateUI()
         }
@@ -8508,6 +8513,7 @@ fileprivate final class CamaraNueva {
     var cambioSoloHasta = Date.distantPast        // el riel PARTE dice "cambió sola" unos segundos
     var cuartoDesde: CFTimeInterval = 0           // cuándo cambió el cuarto ("falta una pared" pide unos segundos ya en el nuevo)
     var salidaDe: (nombre: String, nivel: String, desde: CFTimeInterval)?   // el cuarto que dejó con paredes por revisar
+    var salidaPendiente: (nombre: String, nivel: String)?   // (revisión 4) dejó ese cuarto solo para entrar a SU clóset: se revisa al ir a un tercero
     var noSeCorto: [String: Set<Int>] = [:]       // nivel|cuarto -> paredes que él dijo que no se cortaron
     let faltaCaja = UIView(), faltaTitulo = UILabel(), faltaSub = UILabel()
     var faltaVisible: (cuarto: String, nivel: String, paredes: [Int])?
@@ -9235,6 +9241,7 @@ extension ARMeasureViewController {
         n.camAntesDelCorte = nil; n.ultimaCamBuena = nil
         n.cuadroCambioEn = Date()
         n.paredCandidata = nil; n.paredVista = nil
+        if medirPrimero, !medidaEnCurso { empezarPared() }      // (revisión 4) sin ubicación, la pared de antes ya no es la de enfrente
         mostrarAvisoNuevo(aMedias ? "La cámara se reinició. La medida a medias se perdió: apunte a las paredes para volver a ubicarse y mídala otra vez."
                                   : "La cámara se reinició. Apunte a las paredes unos segundos para volver a ubicarse.", segundos: 5, alerta: true)
     }
@@ -9521,7 +9528,8 @@ extension ARMeasureViewController {
         // (13 pasos) A dónde apunta (lo que ofrece la franja, o lo que está midiendo) y lo que falta de un cuarto, en rojo.
         m.apuntada = section == "wall" ? (n.franjaContenido?.pared ?? (medidaEnCurso ? n.paredActual : nil)) : nil
         m.pisoApuntado = section == "floor" && (n.franjaContenido?.parte == "floor" || medidaEnCurso)
-        if let r = n.paredesEnRojo, let forma = planoPorCuarto.first(where: { Self.clave($0.key) == Self.clave(r.cuarto) })?.value {
+        // (revisión 4) Solo si ese cuarto está en el MISMO dibujo que el mapita: con otro marco la línea caería en cualquier lado.
+        if let r = n.paredesEnRojo, mismoMarco(r.cuarto, roomName), let forma = planoPorCuarto.first(where: { Self.clave($0.key) == Self.clave(r.cuarto) })?.value {
             let siguen = Set(paredesDe(r.cuarto, nivel: r.nivel).faltan)
             let rojas = r.paredes.filter { siguen.contains($0) && $0 < forma.paredes.count }.map { (forma.paredes[$0].seg.a, forma.paredes[$0].seg.b) }
             m.enRojo = rojas
@@ -12190,11 +12198,36 @@ extension ARMeasureViewController {
         if let f = n.faltaVisible { anotarMedir("falta-pared", ["que": "cambio-de-cuarto", "de": f.cuarto, "a": c]); cerrarFalta() }
         if let r = n.paredesEnRojo, Self.clave(r.cuarto) == Self.clave(antes) { n.paredesEnRojo = nil }   // salió otra vez: se revisa de nuevo
         if !antes.isEmpty, Self.clave(antes) != Self.clave(c) {
+            // (revisión 4) Regresó del clóset al cuarto: ya no hay nada pendiente de él.
+            if let q = n.salidaPendiente, Self.clave(q.nombre) == Self.clave(c), q.nivel == nivelActual { n.salidaPendiente = nil }
             let p = paredesDe(antes, nivel: nivelActual)
-            if p.medidas > 0, !p.faltan.isEmpty || !p.seguro { n.salidaDe = (antes, nivelActual, CACurrentMediaTime()) }
+            if p.medidas > 0, !p.faltan.isEmpty || !p.seguro, esClosetDe(c, de: antes) {
+                // (revisión 4) Entró al clóset de ESE cuarto (se corta desde adentro y regresa): todavía no se avisa.
+                n.salidaPendiente = (antes, nivelActual)
+                anotarMedir("falta-pared", ["que": "closet-espera", "de": antes, "a": c])
+            }
+            else if p.medidas > 0, !p.faltan.isEmpty || !p.seguro { n.salidaDe = (antes, nivelActual, CACurrentMediaTime()) }
             // Regresó al que le faltaba (revisión 2: en el MISMO nivel; Bathroom o Closet se repiten arriba).
             else if let s = n.salidaDe, Self.clave(s.nombre) == Self.clave(c), s.nivel == nivelActual { n.salidaDe = nil }
+            // (revisión 4) Del clóset a un TERCER cuarto: ahora sí se revisa el cuarto del clóset (antes que el clóset mismo).
+            if let q = n.salidaPendiente, Self.clave(q.nombre) != Self.clave(c), Self.clave(q.nombre) != Self.clave(antes) {
+                n.salidaPendiente = nil
+                let pq = paredesDe(q.nombre, nivel: q.nivel)
+                if pq.medidas > 0, !pq.faltan.isEmpty || !pq.seguro { n.salidaDe = (q.nombre, q.nivel, CACurrentMediaTime()) }
+            }
         }
+    }
+    /// (revisión 4) ¿`c` es el clóset de `antes`? Con el plano: se llama clóset o pantry, es chico (su caja ≤ 80 pies²) y está en el mismo
+    /// dibujo. Sin plano (Field Reports) nunca: todo queda como antes.
+    fileprivate func esClosetDe(_ c: String, de antes: String) -> Bool {
+        guard !planoPorCuarto.isEmpty, ReglasDeMedir.esNombreDeCloset(c) else { return false }
+        let k = Self.clave(c)
+        guard let forma = planoPorCuarto.first(where: { Self.clave($0.key) == k })?.value, !forma.paredes.isEmpty else { return false }
+        let ps = forma.paredes.flatMap { [$0.seg.a, $0.seg.b] }
+        let xs = ps.map { $0.x }, ys = ps.map { $0.y }
+        guard let x0 = xs.min(), let x1 = xs.max(), let y0 = ys.min(), let y1 = ys.max(), (x1 - x0) * (y1 - y0) <= 80 else { return false }
+        if let m1 = marcoDe(c), let m2 = marcoDe(antes), m1 != m2 { return false }
+        return true
     }
     private func empezarPared() {
         let n = nueva
@@ -12428,14 +12461,31 @@ extension ARMeasureViewController {
     /// Cómo va cada pared del plano en este cuarto: "completa" (verde), "parcial" (amarillo) o nil (sin medir).
     fileprivate func estadoDeLaPared(_ i: Int) -> String? {
         let mias = items.filter { $0.cuarto == roomName && (nivelActual.isEmpty || $0.nivel == nivelActual) && $0.parte == "wall" && $0.paredes.contains(i) }
-        if mias.contains(where: { $0.completa }) { return "completa" }
+        if mias.contains(where: { $0.completa }) || completaDeAntes(parte: "wall", pared: i) { return "completa" }
         return mias.isEmpty ? nil : "parcial"
     }
     /// Lo mismo del piso o del techo del cuarto.
     fileprivate func estadoDeLaParte(_ parte: String) -> String? {
         let mias = items.filter { $0.cuarto == roomName && (nivelActual.isEmpty || $0.nivel == nivelActual) && $0.parte == parte }
-        if mias.contains(where: { $0.completa }) { return "completa" }
+        if mias.contains(where: { $0.completa }) || completaDeAntes(parte: parte, pared: nil) { return "completa" }
         return mias.isEmpty ? nil : "parcial"
+    }
+    /// (revisión 4) ¿Esta pared (o el piso, o el techo) de este cuarto ya se guardó COMPLETA en otra sesión? La pared: un renglón de pies²
+    /// del largo de la pared del plano y de su alto (±0.2 ft; sin el alto del plano, 6.5 ft o más: un corte de 2 ft nunca es la pared). El
+    /// piso o el techo: el 90 % o más del piso del plano. Sin plano o sin lo guardado (Field Reports, maquetas): nunca.
+    fileprivate func completaDeAntes(parte: String, pared i: Int?) -> Bool {
+        guard maqueta == 0, !partesGuardadas.isEmpty else { return false }
+        let k = Self.clave(roomName)
+        let mias = partesGuardadas.filter { Self.clave($0.cuarto) == k && (nivelActual.isEmpty || Self.clave($0.nivel) == Self.clave(nivelActual))
+            && $0.parte == parte && $0.alto > 0 && !(parte == "floor" && ReglasDeMedir.esOtraCapaDelPiso($0.material)) }
+        guard !mias.isEmpty else { return false }
+        if parte == "wall" {
+            guard let i = i, let forma = formaDelCuarto(), i >= 0, i < forma.paredes.count else { return false }
+            let w = forma.paredes[i]
+            return mias.contains { abs($0.largo - w.seg.largo) <= 0.2 && (w.alto > 0 ? abs($0.alto - w.alto) <= 0.2 : $0.alto >= 6.5) }
+        }
+        guard let piso = pisoPorCuarto.first(where: { Self.clave($0.key) == k })?.value, piso.area > 0 else { return false }
+        return mias.contains { $0.largo * $0.alto >= 0.9 * piso.area }
     }
     /// (revisión 2) Lo que la pared, el piso o el techo COMPLETO nunca guarda otra vez (trim, crown, tackless: pies lineales sueltos):
     /// no esconde "Pared/Piso/Techo completo" ni lo rechaza. Todo lo demás sí: lo de pies², el drywall de 1 pie, el baseboard (la pared
@@ -12444,7 +12494,9 @@ extension ARMeasureViewController {
     fileprivate func tapaLoCompleto(pared i: Int?, parte: String) -> Bool {
         items.contains { it in it.cuarto == roomName && (nivelActual.isEmpty || it.nivel == nivelActual) && it.parte == parte
             && (parte != "wall" || it.paredes.contains(i ?? -1))
-            && !(it.width == nil && Self.noTapanLoCompleto.contains(it.material)) }
+            && !(it.width == nil && Self.noTapanLoCompleto.contains(it.material))
+            && !(parte == "floor" && ReglasDeMedir.esOtraCapaDelPiso(it.material)) }     // (revisión 4) el subfloor no esconde "Piso completo"
+            || completaDeAntes(parte: parte, pared: i)                                  // (revisión 4) ya completa en otra sesión
     }
     fileprivate static func preguntaDelMaterial(_ parte: String) -> PreguntaMedir {
         parte == "floor" ? .piso : (parte == "ceiling" ? .techo : .matPared)
@@ -12521,7 +12573,7 @@ extension ARMeasureViewController {
     }
     private func paredDeAfueraEnElPlano() -> Bool? {
         if maqueta > 0, let c = nueva.maquetaClase { return c == .afuera ? true : (c == .adentro ? false : nil) }
-        guard let i = nueva.paredActual ?? nueva.paredVista, let forma = formaDelCuarto(), i < forma.paredes.count else { return nil }
+        guard !nueva.paredSinSaber, let i = nueva.paredActual ?? nueva.paredVista, let forma = formaDelCuarto(), i < forma.paredes.count else { return nil }   // (revisión 4) "Es otra pared": nunca la de enfrente
         return forma.paredes[i].exterior
     }
     private func dondeMedir(conMedida: Bool) -> String {
@@ -12543,8 +12595,11 @@ extension ARMeasureViewController {
         let base = conLaParteEntera(unPie ? ReglasDeMedir.drywallCorte(largo: L, insulacion: false) : ReglasDeMedir.pared(material, largo: L, alto: S, insulacion: false))
         guard ReglasDeMedir.paredConInsulacion.contains(material) else { guardarMedir(base); return }
         let clase = claseParaInsulacion()
-        let clave = claveDePared(clase.paredes)
-        if let si = ReglasDeMedir.insulacionDePared(n.ajuste.paredes, afuera: clase.afuera, respuesta: n.insulDePared[clave]) {
+        // (revisión 4) "Es otra pared" (sin pared): nunca la respuesta de la que tenía enfrente; se pregunta (mixto) y la respuesta va a
+        // una llave que nadie lee, sin pisar la de esa pared.
+        let sinSaber = n.paredSinSaber && clase.paredes.isEmpty
+        let clave = sinSaber ? "\(nivelActual)|\(roomName)|?" : claveDePared(clase.paredes)
+        if let si = ReglasDeMedir.insulacionDePared(n.ajuste.paredes, afuera: clase.afuera, respuesta: sinSaber ? nil : n.insulDePared[clave]) {
             guardarMedir(ReglasDeMedir.conInsulacion(base, si))
         } else {
             n.porGuardar = base; n.clavePendiente = clave
@@ -13270,6 +13325,11 @@ extension ARMeasureViewController {
             caja.widthAnchor.constraint(equalTo: view.widthAnchor, constant: -56)
         ])
     }
+    /// (revisión 4) ¿Los dos cuartos están en el mismo dibujo (captura)? Sin saberlo (una sola captura, Field Reports): sí.
+    fileprivate func mismoMarco(_ a: String, _ b: String) -> Bool {
+        guard let ma = marcoDe(a), let mb = marcoDe(b) else { return true }
+        return ma == mb
+    }
     private func abrirFalta(cuarto: String, nivel: String, paredes: [Int], segundos: Double) {
         let n = nueva, caja = n.faltaCaja
         let k = paredes.count, cuales = ReglasDeMedir.textoParedes(paredes)
@@ -13277,7 +13337,8 @@ extension ARMeasureViewController {
         n.faltaVisible = (cuarto, nivel, paredes); n.faltaHasta = Date().addingTimeInterval(Self.faltaDura)
         n.paredesEnRojo = (cuarto, nivel, paredes)
         n.faltaTitulo.text = "\(cuarto): " + (k == 1 ? "falta 1 pared" : "faltan \(k) paredes")
-        n.faltaSub.text = conMayuscula + (k == 1 ? " no tiene medida. En el mapita sale en rojo." : " no tienen medida. En el mapita salen en rojo.")
+        n.faltaSub.text = conMayuscula + (k == 1 ? " no tiene medida." : " no tienen medida.")
+            + (mismoMarco(cuarto, roomName) ? (k == 1 ? " En el mapita sale en rojo." : " En el mapita salen en rojo.") : "")
         anotarMedir("falta-pared", ["que": "abre", "de": cuarto, "paredes": paredes.map { $0 + 1 }, "segundos": Int(segundos.rounded())])
         vibrar(.aviso)
         view.bringSubviewToFront(caja)
@@ -13303,6 +13364,12 @@ extension ARMeasureViewController {
         if volver {
             anotarMedir("falta-pared", ["que": "volver", "de": f.cuarto, "paredes": numeros])
             cerrarFalta()
+            // (revisión 4) En otra captura el mapa no lo puede cambiar solo: "Volver" lo cambia aquí mismo (el mismo toque).
+            if !mismoMarco(f.cuarto, roomName), f.nivel == nivelActual {
+                elegirCuartoNuevo(f.cuarto)
+                mostrarAvisoNuevo("Ahora: \(f.cuarto)", segundos: 3.5, sub: "Apunte a las paredes para ubicarse.", icono: "mappin.and.ellipse")
+                pintarCamaraNueva(); return
+            }
             let cuales = ReglasDeMedir.textoParedes(f.paredes)
             let conMayuscula = cuales.prefix(1).uppercased() + cuales.dropFirst()
             let sub = "El mapa lo cambia solo. " + conMayuscula + (f.paredes.count == 1 ? " sale en rojo." : " salen en rojo.")
@@ -13478,6 +13545,7 @@ extension ARMeasureViewController {
         let n = nueva
         guard medirPrimero, section == "wall", n.parteEntera == nil else { return false }
         let donde = paredesDeLoQueSeGuarda()
+        if baseboardSinSaberLaPared(donde, que: "baseboard") { return false }
         let ya = baseboardRepetido(en: donde.paredes, nuevo: pathTotalFeet)
         guard !ya.isEmpty else { return false }
         return preguntarBaseboardRepetido("baseboard", donde: donde, ya: ya, nuevo: pathTotalFeet)
@@ -13491,9 +13559,19 @@ extension ARMeasureViewController {
         let nuevo = ReglasDeMedir.baseboardDeLaPared(largo: pathTotalFeet, aberturas: c.aberturas)
         guard nuevo > 0.5 else { return false }
         let donde = paredesDeLoQueSeGuarda()
+        if baseboardSinSaberLaPared(donde, que: "corte-base") { return false }
         let ya = baseboardRepetido(en: donde.paredes, nuevo: nuevo)
         guard !ya.isEmpty else { return false }
         return preguntarBaseboardRepetido("corte-base", donde: donde, ya: ya, nuevo: nuevo)
+    }
+    /// (revisión 4) La pared es solo la que tenía enfrente (adivinada: sin la ubicación, paredActual se queda en la pared que acaba de
+    /// terminar). Preguntar "¿Es la pared 1? Ya lleva baseboard" saldría en CADA pared siguiente: no se pregunta, se guarda SIN pared
+    /// (lo mismo que "Es otra pared"), y "falta una pared" la cuenta como sin saber. true = así se guarda.
+    private func baseboardSinSaberLaPared(_ donde: (paredes: [Int], seguras: Bool, adivinada: Bool), que: String) -> Bool {
+        guard donde.adivinada else { return false }
+        nueva.paredSinSaber = true
+        anotarMedir("corte-sobre-completa", ["que": "sin-saber", "de": que, "paredes": donde.paredes.map { $0 + 1 }])
+        return true
     }
     private func preguntarBaseboardRepetido(_ que: String, donde: (paredes: [Int], seguras: Bool, adivinada: Bool), ya: [Int], nuevo: Double) -> Bool {
         let n = nueva
@@ -13528,6 +13606,8 @@ extension ARMeasureViewController {
         var llenas: [Int] = [], otras: [Int] = [], seguras = true, adivinada = false
         if que == "floor" || que == "ceiling" {
             guard section == que, estadoDeLaParte(que) == "completa" else { return false }
+            // (revisión 4) Un parche de subfloor (MEDIDA → Otro) no es el piso completo otra vez: se guarda sin preguntar.
+            if que == "floor", let p = materialPuestoVigente(), p.parte == "floor", ReglasDeMedir.esOtraCapaDelPiso(p.material) { return false }
         } else {
             // (revisión) Las MISMAS paredes donde se va a guardar: sin las esquinas en el plano, las que guardarMedir le pone (la clase de
             // la medida o la que tenía enfrente). Y las que NO están completas que el corte también cubre (el corte caminado).
@@ -13563,7 +13643,9 @@ extension ARMeasureViewController {
             else { n.incluyeDelCorte = (false, false); seguirConElCorte() }
         case "baseboard": abrirPregunta(.shoe)
         case "un-pie": resolverPared(ReglasDeMedir.drywallDeUnPie)
-        case "floor": abrirPregunta(.piso)
+        case "floor":
+            // (revisión 4) Lo que tocó en MEDIDA se guarda tal cual; sin él se escoge el piso (no el de la fila completa).
+            if let p = materialPuestoVigente(), p.parte == "floor" { resolverPiso(p.material) } else { abrirPregunta(.piso) }
         default: abrirPregunta(.techo)
         }
     }
@@ -13592,11 +13674,15 @@ extension ARMeasureViewController {
     /// "No guardar": la medida se tira (como cancelar); lo guardado no se toca.
     fileprivate func noGuardarSobreLoCompleto() {
         let n = nueva
+        // (revisión 4) "medirla aparte": se va a medir otra vez, con el material de MEDIDA que puso (Plaster, drywall de 1 pie).
+        let aparte = !(n.sobreCompleta?.otras.isEmpty ?? true)
         anotarMedir("corte-sobre-completa", ["que": "no-guardar", "de": n.sobreCompleta?.que ?? "", "paredes": (n.sobreCompleta?.paredes ?? []).map { $0 + 1 },
-                                             "otras": (n.sobreCompleta?.otras ?? []).map { $0 + 1 }, "adivinada": n.sobreCompleta?.adivinada ?? false])
+                                             "otras": (n.sobreCompleta?.otras ?? []).map { $0 + 1 }, "adivinada": n.sobreCompleta?.adivinada ?? false, "aparte": aparte])
         n.sobreCompleta = nil
         n.preguntaMedir = nil; n.porGuardar = nil; n.firmaPanel = ""
+        let mat = n.materialPuesto, matDonde = n.materialPuestoDonde, matCuarto = n.materialPuestoCuarto, matNivel = n.materialPuestoNivel, sinPiso = n.sinPisoPuesto
         cancelarMedidaEnCurso(hablar: false)
+        if aparte { n.materialPuesto = mat; n.materialPuestoDonde = matDonde; n.materialPuestoCuarto = matCuarto; n.materialPuestoNivel = matNivel; n.sinPisoPuesto = sinPiso }
         stage = .measuringLength
         pintarCamaraNueva()
     }
@@ -13669,10 +13755,22 @@ extension ARMeasureViewController {
         guard maqueta == 0, !trabajoId.isEmpty, !n.altoCargado.contains(nivelActual) else { return nil }
         n.altoCargado.insert(nivelActual)
         guard let d = UserDefaults.standard.dictionary(forKey: llaveDelAlto()), let p = d["pies"] as? Double, p > 0 else { return nil }
+        // (revisión 4) Solo si de verdad quedó guardado algo de pared en ese nivel (la página lo dice tras cargar bien): un "Mandar" que
+        // falló y se descartó no deja el alto. Sin la llave (Field Reports, carga fallida): como antes.
+        if let ya = cuartosConParedes, !ya.contains(where: { (Self.clave($0.key) == Self.clave(nivelActual) || Self.clave($0.key).isEmpty) && !$0.value.isEmpty }) {
+            UserDefaults.standard.removeObject(forKey: llaveDelAlto())
+            anotarMedir("alto-olvidado", ["porque": "sin-filas", "pies": (p * 10).rounded() / 10])
+            return nil
+        }
         let a = (pies: p, cuarto: d["cuarto"] as? String ?? "")
         n.altoDelNivel[nivelActual] = a
         anotarMedir("alto-cargado", ["pies": (p * 10).rounded() / 10, "de": a.cuarto])
         return a
+    }
+    /// (revisión 4) El renglón del alto del nivel se deshizo: se olvida YA (no solo cuando se vuelve a leer, que llega tarde si otro
+    /// renglón ocupa su lugar). Solo toca altosDeLaSesion (medir primero).
+    fileprivate func olvidarAltoSiSeDeshizo() {
+        if let f = nueva.altosDeLaSesion[nivelActual], items.count <= f.item { olvidarAlto("deshacer") }
     }
     fileprivate func recordarAlto(_ h: Double, item: Int) {
         let n = nueva
@@ -14748,8 +14846,9 @@ struct ReglasDeMedir {
     /// (ruido del piso, uno a cuatro escalones), como siempre: cortar de más nunca cobra de más.
     static let pasoElevado = 2.5
     /// (revisión del 16 oct) ¿El baseboard ya guardado en unas paredes más el nuevo pasa del que tienen en el plano (su largo menos sus
-    /// puertas y arcos), con medio pie de holgura? Dos pedazos distintos de la misma pared caben. Sin el plano (nil): sí, se pregunta.
-    static func baseboardDeMas(ya: Double, nuevo: Double, cabe: Double?) -> Bool { cabe.map { ya + nuevo > $0 + 0.5 } ?? true }
+    /// puertas y arcos), con holgura de medio pie o el 5% del plano (lo que sea más; el error de cinta crece con la pared: 10 + 10.6 en
+    /// 20 ft caben)? Dos pedazos distintos de la misma pared caben; un segundo tramo completo no. Sin el plano (nil): sí, se pregunta.
+    static func baseboardDeMas(ya: Double, nuevo: Double, cabe: Double?) -> Bool { cabe.map { ya + nuevo > $0 + max(0.5, 0.05 * $0) } ?? true }
     static func cortaElBaseboard(_ x: Abertura) -> Bool { !x.esVentana && !(x.esPaso && x.abajo >= pasoElevado) }
     /// (16 oct, idea 1) El corte arranca en el piso si su punto más bajo queda a medio pie o menos del piso que ve la cámara.
     static let arranqueDelPiso = 0.5
@@ -14864,8 +14963,19 @@ struct ReglasDeMedir {
         return x
     }
     static let drywallDeUnPie = "Drywall (1 ft cut)"
+    /// (revisión 4) Un clóset por su nombre (el del escaneo o el que le puso la página: "clóset del master", "Pantry", "Walk-in").
+    static func esNombreDeCloset(_ nombre: String) -> Bool {
+        let m = nombre.lowercased().folding(options: .diacriticInsensitive, locale: nil)
+        return ["closet", "pantry", "walk-in", "walk in"].contains { m.contains($0) }
+    }
     static let materialesPared = ["Drywall", "Plaster", "Paneling"]
     static let materialesPiso = ["Carpet", "Laminate", "Hardwood", "Vinyl (LVP)", "Tile"]
+    /// (revisión 4) Lo que va DEBAJO del piso terminado (Subfloor, Plywood, OSB…): otra línea del seguro, nunca el piso completo cobrado
+    /// dos veces. Solo estas palabras: un piso escrito a mano que no las lleva sigue tratándose como piso.
+    static func esOtraCapaDelPiso(_ material: String) -> Bool {
+        let m = material.lowercased()
+        return ["subfloor", "sub-floor", "sub floor", "plywood", "osb", "sleeper", "joist"].contains { m.contains($0) }
+    }
     static let materialesTecho = ["Drywall", "Popcorn / Texture", "Plaster"]
     static let paredConInsulacion: Set<String> = ["Drywall", "Plaster", "Paneling", "Drywall (1 ft cut)"]
     static let techoConInsulacion: Set<String> = ["Drywall", "Popcorn / Texture", "Plaster"]
@@ -14964,7 +15074,9 @@ struct ReglasDeMedir {
     static func pisoBajoLasEsquinas(_ pisos: [(y: Double, area: Double)], esquinasY: [Double]) -> Double? {
         let grandes = pisos.filter { $0.area >= 0.5 }
         guard let ref = esquinasY.min() else { return grandes.max(by: { $0.area < $1.area })?.y }
-        return grandes.filter { $0.y <= ref + 0.15 && ref - $0.y <= 1.2 }.max(by: { $0.y < $1.y })?.y
+        // (revisión 4) Hasta 2.6 m abajo: las esquinas en la línea de un corte de 4 o 5 ft (u 8 ft) también encuentran su piso; el más
+        // alto debajo de ellas sigue siendo el de este piso, nunca el de abajo visto por la escalera.
+        return grandes.filter { $0.y <= ref + 0.15 && ref - $0.y <= 2.6 }.max(by: { $0.y < $1.y })?.y
     }
     /// El alto de UN + en la línea del corte ("Otro alto"): del piso al punto, en pies. Vale solo si el punto cae SOBRE la pared marcada
     /// (a 0.3 m o menos de la línea de sus esquinas, en el piso) y entre 0.12 m y 3.7 m del piso.
@@ -15415,6 +15527,8 @@ extension ARMeasureViewController {
         n.firme = false; n.confirmacionesFuera = 0
         n.corteDesde = Date(); n.corteTermino = nil; n.relanzadaEn = nil
         n.camAntesDelCorte = n.ultimaCamBuena
+        // (revisión 4) Sin ubicación, la pared que tenía enfrente ya no es de fiar (como empezarAReubicar).
+        if medirPrimero { n.paredCandidata = nil; n.paredVista = nil; if !medidaEnCurso { empezarPared() } }
         anotarMedir("corte", ["fase": "empieza"])
     }
     func sessionInterruptionEnded(_ session: ARSession) {
