@@ -111,6 +111,10 @@ struct ARMeasureItem {
     // Lo que se le resta en pies² (las puertas y ventanas de una pared entera, 16 oct) y qué fue, en inglés; 0 = nada.
     var menos: Double = 0
     var menosQue: String = ""
+    // (17-oct) Los ids fijos del renglón y de su compañero en el servidor, y cuándo se midió (ms). Vacíos sin borrador (Field Reports).
+    var id: String = ""
+    var idComp: String = ""
+    var t: Double = 0
 }
 
 enum ARMeasureOutcome {
@@ -362,6 +366,21 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
     var medirPrimero: Bool { parteSolaActiva }
     // De qué trabajo es (lo manda la página): lo que contestó del nivel se guarda por trabajo y nivel.
     var trabajoId: String = ""
+    var borradorPedido = false                          // (17-oct) solo la página de Scanova lo pide
+    let sesionBorrador = UUID().uuidString.lowercased()
+    private let ordenBorrador = Date().timeIntervalSince1970 * 1000
+    private var guardaBorrador: Bool { borradorPedido && !trabajoId.isEmpty && maqueta == 0 }
+    // Un juego de ids por renglón, en el mismo orden que items: solo se agrega al final (bancarMedida) y se quita del final (Deshacer).
+    private var idsDeItems: [(id: String, idComp: String, t: Double)] = []
+    private func seguirIdsYBorrador() {
+        while idsDeItems.count < items.count {
+            idsDeItems.append((UUID().uuidString.lowercased(), UUID().uuidString.lowercased(), Date().timeIntervalSince1970 * 1000))
+        }
+        if idsDeItems.count > items.count { idsDeItems.removeLast(idsDeItems.count - items.count) }
+        guard guardaBorrador else { return }
+        BorradorCamara.escribir(trabajo: trabajoId, sesion: sesionBorrador, orden: ordenBorrador,
+                                medidas: ARMeasurePlugin.comoDiccionarios(itemsParaMandar()))
+    }
 
     // ============ EL ASISTENTE QUE HABLA ============
     //
@@ -5191,7 +5210,7 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
     // menos / menosQue: lo que se le resta (las puertas y ventanas de una pared entera, 16 oct); 0 = nada.
     private var items: [(length: Double, width: Double?, material: String, companion: String?,
                          nivel: String, cuarto: String, seccion: String, markers: [SCNNode], menos: Double, menosQue: String,
-                         paredes: [Int], completa: Bool, parte: String)] = []   // de qué paredes del plano es y si fue la parte COMPLETA (el mapita)
+                         paredes: [Int], completa: Bool, parte: String)] = [] { didSet { seguirIdsYBorrador() } }   // de qué paredes del plano es y si fue la parte COMPLETA (el mapita)
     // parte (revisión 3): la de la cámara al guardar (wall, floor, ceiling). `seccion` puede ser bathroom o kitchen (Greenboard, Backsplash
     // escritos en MEDIDA → Otro) y así sale en el reporte; lo de "ya está completa" y "falta una pared" mira la parte.
 
@@ -7745,14 +7764,17 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
     }
     // Lo guardado, tal como se manda a la web. Solo lo GUARDADO: una medida a medias no se inventa.
     private func itemsParaMandar() -> [ARMeasureItem] {
-        items.map {
-            ARMeasureItem(length: $0.length, width: $0.width, material: $0.material,
-                          companion: $0.companion, nivel: $0.nivel, cuarto: $0.cuarto,
-                          seccion: $0.seccion, menos: $0.menos, menosQue: $0.menosQue)
+        items.enumerated().map { i, it in
+            var m = ARMeasureItem(length: it.length, width: it.width, material: it.material,
+                          companion: it.companion, nivel: it.nivel, cuarto: it.cuarto,
+                          seccion: it.seccion, menos: it.menos, menosQue: it.menosQue)
+            if guardaBorrador, i < idsDeItems.count { m.id = idsDeItems[i].id; m.idComp = idsDeItems[i].idComp; m.t = idsDeItems[i].t }
+            return m
         }
     }
 
     @objc private func cancelTapped() {
+        if guardaBorrador { BorradorCamara.borrar(trabajo: trabajoId, sesion: sesionBorrador) }   // D6: "Salir" ya avisó dos veces que se pierden
         onFinish?(.cancelled)
     }
 

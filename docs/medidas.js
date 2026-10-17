@@ -11,7 +11,7 @@
 //    del trabajo por partida; las notas; y el PDF "Measurements & Demo" (lo arma Documents).
 // Lo que cambia contra Field Reports: aquí el trabajo ya es el proyecto (cliente, dirección y fecha ya están), y los
 // niveles y cuartos son los del proyecto (los mismos de Photos y Dry Logs).
-import { $, authFetch, esAparato, esManager, preguntar, PERFIL } from './app.js?v=2026-10-17-1';
+import { $, authFetch, esAparato, esManager, preguntar, PERFIL } from './app.js?v=2026-10-17-2';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -197,6 +197,7 @@ export function filasDeCamara(medidas, base){
     const cuarto = String(m.cuarto || (norm(nivel) === norm(base.nivel) ? base.cuarto : '') || '').trim().slice(0, 60);
     const fila = { nivel, cuarto, seccion, material,
       largo: pieza ? Math.max(1, Math.round(largo)) : r2(largo), ancho: ancho ? r2(ancho) : null, orden: base.orden + (k++) };
+    if(m.id) fila.id = String(m.id);                                   // (17-oct) el id fijo que puso la cámara
     // La pared entera (16-oct): las puertas y ventanas que se le restan. Solo en lo de superficie con su alto.
     const menos = num(m.menos);
     if(menos && conResta(material, ancho)){ fila.menos = r2(menos); fila.menos_que = String(m.menosQue || '').trim().slice(0, 120) || null; }
@@ -204,10 +205,17 @@ export function filasDeCamara(medidas, base){
     const comp = String(m.companion || '').trim();
     if(comp && !esPorPieza(comp)){
       const c = { ...fila, material: comp, orden: base.orden + (k++) };
+      if(m.id){ if(m.idComp) c.id = String(m.idComp); else delete c.id; }   // D2: nunca el mismo id que su medida
       if(!conResta(comp, c.ancho)){ delete c.menos; delete c.menos_que; }
       out.push(c);
     }
   });
+  return out;
+}
+// (17-oct) Lo que la cámara dejó en el teléfono sin mandar → filas con su id fijo. Sin id no se recupera: nunca se inventa uno.
+export function filasDeBorrador(sesiones){
+  let out = [];
+  (sesiones || []).forEach(s => { out = out.concat(filasDeCamara(s && s.medidas, { nivel: '', cuarto: '', orden: num(s && s.orden) || Date.now() }).filter(f => f.id)); });
   return out;
 }
 // (16-oct, revisión) Los cuartos de cada nivel que YA tienen paredes guardadas ({ nivel: [cuarto, …] }). La cámara no recibe esos
@@ -240,7 +248,7 @@ export function partesYaGuardadas(filas){
 const ABIERTO_NIV = new Map(); let BORRANDO = false;
 let T = null, NIVELES = [], CUARTOS = [], FILAS = [], NOTA = '', NOTA_ED = null, CARGADO = null, CARGANDO = false, FALTA_SQL = false, FALLO = '', AVISO = '', AVISO_OK = false;
 // Tres trabajos que pueden ir a la vez sin estorbarse: guardar del editor, guardar lo de la cámara y hacer el PDF.
-let ALCANCE = false, GUARDANDO = false, CAMARA = false, HACIENDO_PDF = false, ED = null, AYUDA = {}, ULTIMO = null;
+let ALCANCE = false, GUARDANDO = false, CAMARA = false, CAMARA_ABIERTA = false, HACIENDO_PDF = false, ED = null, AYUDA = {}, ULTIMO = null;
 // Lo que se guardó o borró mientras una carga venía en camino: se vuelve a poner encima de lo que llegó (sin repetir ni perder).
 let GEN = 0; const CAMBIOS = [];
 function anotar(c, trabajo){ GEN++; CAMBIOS.push({ ...c, gen: GEN, trabajo }); if(CAMBIOS.length > 300) CAMBIOS.splice(0, CAMBIOS.length - 300); }
@@ -258,6 +266,31 @@ const nuevoId = () => (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
 export function usar(ayuda){ AYUDA = ayuda || {}; }
 const caja = () => $('#panel-medidas');
 const camaraLista = () => !!(esAparato() && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.ARMeasure);
+// (17-oct) Lo que la cámara dejó guardado en el teléfono (la app se cerró antes de mandar) pasa a la tarjeta de "not saved yet".
+const PLUGIN = () => window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.ARMeasure;
+async function recogerBorrador(tid){
+  const A = PLUGIN(); if(!camaraLista() || !A || !A.borrador || CAMARA || CAMARA_ABIERTA) return;
+  let r; try{ r = await A.borrador({ trabajo: tid }); }catch(e){ return; }           // aparato viejo: no existe
+  const ses = (r && r.sesiones) || []; if(!ses.length) return;
+  const filas = filasDeBorrador(ses);
+  if(filas.length && !guardarPendientes(tid, unir(pendientes(tid) || [], filas))) return;   // no cupo: el teléfono lo guarda
+  soltarBorradorNativo(tid, ses.map(s => s.sesion));
+  if(T && T.id === tid) pintarAqui();
+}
+// (17-oct) Ya en el servidor: se sueltan las sesiones del teléfono cuyas medidas TODAS quedaron guardadas (si el localStorage
+// no cupo, el borrador seguía ahí y volvía a meter lo que alguien borró después).
+async function soltarBorradorGuardado(tid, guardadas){
+  const A = PLUGIN(); if(!camaraLista() || !A || !A.borrador) return;
+  try{
+    const ids = new Set((guardadas || []).map(f => f.id)), r = await A.borrador({ trabajo: tid });
+    const listas = ((r && r.sesiones) || []).filter(s => { const f = filasDeBorrador([s]); return f.length && f.every(x => ids.has(x.id)); });
+    soltarBorradorNativo(tid, listas.map(s => s.sesion));
+  }catch(e){}
+}
+function soltarBorradorNativo(tid, sesiones){
+  const A = PLUGIN(); sesiones = (sesiones || []).filter(Boolean);
+  if(sesiones.length && A && A.soltarBorrador) A.soltarBorrador({ trabajo: tid, sesiones }).catch(() => {});
+}
 export function pintar(t, niveles, cuartos){
   if(!t) return;
   if(!T || T.id !== t.id){ CARGADO = null; FILAS = []; NOTA = ''; NOTA_ED = null; ALCANCE = false; AVISO = ''; AVISO_OK = false; FALLO = ''; cerrarEditor(); }
@@ -286,7 +319,7 @@ async function cargar(){
     CARGADO = id;
   }catch(e){ if(T && T.id === id){ CARGADO = id; FALLO = 'Could not load the measurements. ' + msg(e); } }
   // Si mientras tanto se abrió otro proyecto, se carga ese (si no, se quedaba en "Loading…" para siempre).
-  finally{ CARGANDO = false; if(T && T.id !== id && CARGADO !== T.id) cargar(); else pintarAqui(); }
+  finally{ CARGANDO = false; if(T && T.id !== id && CARGADO !== T.id) cargar(); else { pintarAqui(); if(CARGADO === id) recogerBorrador(id); } }
 }
 const avisoHtml = () => `<p class="aviso${AVISO_OK ? ' ok' : ''}" id="medAviso">${esc(AVISO)}</p>`;
 function avisar(t, ok){ AVISO = t || ''; AVISO_OK = !!ok; const a = $('#medAviso'); if(a){ a.textContent = AVISO; a.classList.toggle('ok', AVISO_OK); } }
@@ -572,6 +605,7 @@ async function lanzarCamara(alcance, d){
   if(!camaraLista() || !ARMeasure){ avisar('Measuring with the camera works in the Scanova app on the iPhone.'); return; }
   if(CAMARA){ avisar('Still saving the last measurements from the camera…'); return; }
   if(!T) return; const tid = T.id;
+  await recogerBorrador(tid);
   if(pendientes(tid)){ avisar('First save (Try again) or discard the camera measurements that were not saved.'); return; }
   const nivel = NIVELES.find(n => n.id === d.nivel_id) || null, cuarto = CUARTOS.find(c => c.id === d.cuarto_id) || null;
   const cuartosPorPlanta = {}; NIVELES.forEach(n => { cuartosPorPlanta[n.nombre] = CUARTOS.filter(c => c.nivel_id === n.id).map(c => c.nombre); });
@@ -593,6 +627,7 @@ async function lanzarCamara(alcance, d){
   const partesGuardadas = CARGADO === tid && !FALLO ? partesYaGuardadas(FILAS.map(f => ({ seccion: f.seccion, material: f.material, largo: f.largo, ancho: f.ancho, nivel: nombreNivel(f.nivel_id, f.nivel_nombre), cuarto: nombreCuarto(f.cuarto_id, f.cuarto_nombre) }))) : null;
   let oyente = null;
   try{ if(esManager() && ARMeasure.addListener) oyente = await ARMeasure.addListener('bitacora', l => { subirBitacora(tid, l); }); }catch(e){ oyente = null; }
+  CAMARA_ABIERTA = true;   // la sesión abierta no se recoge como borrador (un Deshacer después dejaría una fantasma)
   try{
     res = await ARMeasure.measure({ modo: 'recorrido', alcance, nivel: nivel ? nivel.nombre : '', section: 'floor', materials: secciones.floor, secciones, cuartos, niveles,
       areasPorCuarto: {}, cuartosPorPlanta, areasPorPlanta: {}, crewName: String((PERFIL && PERFIL.full_name) || '').split(' ')[0], roomName: cuarto ? cuarto.nombre : '', roomAreaSqFt: 0, tema: TEMA_CAMARA, experiencia: EXPERIENCIA_CAMARA, paredesPorCuarto, planoPorCuarto,
@@ -601,14 +636,15 @@ async function lanzarCamara(alcance, d){
       // insulación y el underlayment salen de 3 preguntas del nivel). Primero solo el manager; después de su prueba se cambia
       // a true. `trabajo`: esas respuestas se guardan por trabajo y nivel. Un aparato viejo ignora las dos.
       // (17-oct) laboratorio: false, sin su botón: él pidió quitarlo (la cámara de 13 pasos ya hace lo que se probaba ahí).
-      laboratorio: false, porMovimiento: esManager(), trabajo: tid, ...(yaGuardadas ? { cuartosConParedes: yaGuardadas } : {}), ...(partesGuardadas ? { partesGuardadas } : {}) });
+      laboratorio: false, porMovimiento: esManager(), trabajo: tid, borrador: true, ...(yaGuardadas ? { cuartosConParedes: yaGuardadas } : {}), ...(partesGuardadas ? { partesGuardadas } : {}) });
   }catch(e){ avisar('Could not open the measuring camera. ' + msg(e)); return; }
-  finally{ try{ if(oyente && oyente.remove) await oyente.remove(); }catch(e){} if(BITACORA_PENDIENTE.length) subirBitacora(tid, null); }
+  finally{ CAMARA_ABIERTA = false; try{ if(oyente && oyente.remove) await oyente.remove(); }catch(e){} if(BITACORA_PENDIENTE.length) subirBitacora(tid, null); }
   if(!res || res.cancelled){ if(res && res.error) avisar(res.error); return; }
-  const nuevas = filasDeCamara(res.measurements, { nivel: nivel ? nivel.nombre : '', cuarto: cuarto ? cuarto.nombre : '', orden: Date.now() }).map(f => ({ ...f, id: nuevoId() }));
-  if(!nuevas.length) return;
-  guardarPendientes(tid, nuevas);
-  await guardarDeCamara(tid, nuevas);
+  const nuevas = filasDeCamara(res.measurements, { nivel: nivel ? nivel.nombre : '', cuarto: cuarto ? cuarto.nombre : '', orden: Date.now() }).map(f => f.id ? f : { ...f, id: nuevoId() });
+  if(!nuevas.length){ soltarBorradorNativo(tid, [res.sesion]); return; }
+  const todas = unir(pendientes(tid) || [], nuevas);
+  if(guardarPendientes(tid, todas)) soltarBorradorNativo(tid, [res.sesion]);      // D4: primero aquí, después se suelta el teléfono
+  await guardarDeCamara(tid, todas);
   // La cámara se cayó a media sesión, pero trajo lo que ya estaba guardado: se dice por qué terminó así.
   if(res.aviso) avisar(String(res.aviso));
 }
@@ -643,6 +679,7 @@ async function guardarDeCamara(tid, nuevas){
     }
     const out = await insertar(filas);
     soltarPendientes(tid);
+    soltarBorradorGuardado(tid, nuevas);
     out.forEach(f => anotar({ fila: f }, tid));
     if(T && T.id === tid){ FILAS = unir(FILAS, out); avisar(out.length + (out.length === 1 ? ' measurement added.' : ' measurements added.') + ' Review them below.', true); }
   }catch(e){ if(T && T.id === tid) avisar('The measurements were NOT saved yet. They are kept on this device: tap Try again. ' + msg(e)); }

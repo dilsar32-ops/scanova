@@ -11,7 +11,9 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
     public let jsName = "ARMeasure"
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "measure", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "isSupported", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "isSupported", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "borrador", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "soltarBorrador", returnType: CAPPluginReturnPromise)
     ]
 
     @objc func isSupported(_ call: CAPPluginCall) {
@@ -82,6 +84,7 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
             arVC.porMovimiento = call.getBool("porMovimiento") ?? false
             // De qué trabajo es: lo que contesta del nivel al empezar se guarda por trabajo y nivel.
             arVC.trabajoId = call.getString("trabajo") ?? ""
+            arVC.borradorPedido = call.getBool("borrador") ?? false      // (17-oct) solo la página de Scanova lo pide
             // EL NIVEL YA VIENE RESUELTO DESDE LA PANTALLA. Se escoge con el
             // dedo en Medidas, una sola vez, antes de abrir la camara: adentro
             // ya no se pregunta y se estampa en cada medida del recorrido.
@@ -212,27 +215,39 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
             // there is only ever one dismissal path to reason about.
             // La bitácora del laboratorio (16 oct): cada lote va a la página como evento "bitacora" (ella lo sube).
             arVC.onBitacora = { [weak self] lote in self?.notifyListeners("bitacora", data: lote) }
+            let sesion = arVC.sesionBorrador
             arVC.onFinish = { [weak arVC] outcome in
+                if BorradorCamara.abierta == sesion { BorradorCamara.abierta = nil }
                 guard let arVC = arVC else { return }
                 arVC.dismiss(animated: true) {
                     switch outcome {
                     case .cancelled:
                         call.resolve(["cancelled": true])
                     case .measured(let items):
-                        call.resolve(["cancelled": false, "measurements": Self.comoDiccionarios(items)])
+                        call.resolve(["cancelled": false, "measurements": Self.comoDiccionarios(items), "sesion": sesion])
                     case .fallo(let items, let porque):
                         // La cámara se cayó: lo guardado se entrega igual, con el porqué en "aviso".
                         // Sin medidas, es un cancelado con su "error" (la web ya sabe enseñarlo).
                         if items.isEmpty {
                             call.resolve(["cancelled": true, "error": porque])
                         } else {
-                            call.resolve(["cancelled": false, "measurements": Self.comoDiccionarios(items), "aviso": porque])
+                            call.resolve(["cancelled": false, "measurements": Self.comoDiccionarios(items), "aviso": porque, "sesion": sesion])
                         }
                     }
                 }
             }
+            if arVC.borradorPedido { BorradorCamara.abierta = sesion }
             presenter.present(arVC, animated: true)
         }
+    }
+
+    @objc func borrador(_ call: CAPPluginCall) {
+        call.resolve(["sesiones": BorradorCamara.leer(trabajo: call.getString("trabajo") ?? "")])
+    }
+    @objc func soltarBorrador(_ call: CAPPluginCall) {
+        let t = call.getString("trabajo") ?? ""
+        for s in (call.getArray("sesiones") as? [String]) ?? [] { BorradorCamara.borrar(trabajo: t, sesion: s) }
+        call.resolve()
     }
 
     static func comoDiccionarios(_ items: [ARMeasureItem]) -> [[String: Any]] {
@@ -244,6 +259,7 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
             if let companion = item.companion { d["companion"] = companion }
             // La pared entera (16 oct): lo que se resta de puertas y ventanas, y qué fue. Las páginas viejas no lo leen.
             if item.menos > 0 { d["menos"] = item.menos; d["menosQue"] = item.menosQue }
+            if !item.id.isEmpty { d["id"] = item.id; d["idComp"] = item.idComp; d["t"] = item.t }
             return d
         }
     }

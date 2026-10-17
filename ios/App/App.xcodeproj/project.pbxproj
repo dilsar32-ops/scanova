@@ -22,6 +22,7 @@
 		504EC30F1FED79650016851F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 504EC30E1FED79650016851F /* Assets.xcassets */; };
 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
+		B0C0A11017A000000000BC01 /* BorradorCamara.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0C0A11017A000000000BC02 /* BorradorCamara.swift */; };
 		6A09E685F1BAC89550D3C520 /* ARMeasurePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7B42327FAB600101B15ACEF /* ARMeasurePlugin.swift */; };
 		A1A7A0000000000000000001 /* AlarmaPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1A7A0000000000000000002 /* AlarmaPlugin.swift */; };
 		87FCE48F303D344590AAEBEF /* SceneKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FA075FD1712654799245F43 /* SceneKit.framework */; };
@@ -62,6 +63,7 @@
 		AF277DCFFFF123FFC6DF26C7 /* Pods_App.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_App.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		AF51FD2D460BCFE21FA515B2 /* Pods-App.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-App.release.xcconfig"; path = "Pods/Target Support Files/Pods-App/Pods-App.release.xcconfig"; sourceTree = "<group>"; };
 		C0F221F99E612B7B9C8E7B2A /* ARKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ARKit.framework; path = System/Library/Frameworks/ARKit.framework; sourceTree = SDKROOT; };
+		B0C0A11017A000000000BC02 /* BorradorCamara.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BorradorCamara.swift; sourceTree = "<group>"; };
 		C7B42327FAB600101B15ACEF /* ARMeasurePlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ARMeasurePlugin.swift; sourceTree = "<group>"; };
 		A1A7A0000000000000000002 /* AlarmaPlugin.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AlarmaPlugin.swift; sourceTree = "<group>"; };
 		F5182BA0E8176F583F0EF0A1 /* ARMeasureViewController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ARMeasureViewController.swift; sourceTree = "<group>"; };
@@ -150,6 +152,7 @@
 				2FAD9762203C412B000D30F8 /* config.xml */,
 				50B271D01FEDC1A000F3C39B /* public */,
 				C7B42327FAB600101B15ACEF /* ARMeasurePlugin.swift */,
+				B0C0A11017A000000000BC02 /* BorradorCamara.swift */,
 				A1A7A0000000000000000002 /* AlarmaPlugin.swift */,
 				F5182BA0E8176F583F0EF0A1 /* ARMeasureViewController.swift */,
 				7A11C0DE0001000000000002 /* VozAsistente.swift */,
@@ -306,6 +309,7 @@
 			files = (
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				6A09E685F1BAC89550D3C520 /* ARMeasurePlugin.swift in Sources */,
+				B0C0A11017A000000000BC01 /* BorradorCamara.swift in Sources */,
 				A1A7A0000000000000000001 /* AlarmaPlugin.swift in Sources */,
 				2FDDCA3478C2C2C74A8BA03D /* ARMeasureViewController.swift in Sources */,
 				7A11C0DE0001000000000001 /* VozAsistente.swift in Sources */,
@@ -485,7 +489,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = App/Scanova.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 202610185;
+				CURRENT_PROJECT_VERSION = 202610186;
 				DEVELOPMENT_TEAM = SCT9DU64JM;
 				INFOPLIST_FILE = App/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
@@ -519,7 +523,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = App/Scanova.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 202610185;
+				CURRENT_PROJECT_VERSION = 202610186;
 				DEVELOPMENT_TEAM = SCT9DU64JM;
 				INFOPLIST_FILE = App/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;

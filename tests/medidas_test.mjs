@@ -102,7 +102,7 @@ ok('una línea por unidad: SF y LF en dos renglones, nunca uno cortado', JSON.st
   ok('la pestaña ya no es "pronto"', !/Room measurements will live here/.test(pro) && /medidas\.pintar\(T, NIVELES, CUARTOS\)/.test(pro));
   const css = fs.readFileSync(new URL('../docs/estilo.css', import.meta.url), 'utf8');
   ok('el editor queda DEBAJO de la pregunta de borrar (78 < 80)', /\.hoja\.hoja-medida\{ z-index:78; \}/.test(css) && /\.fv-dialogo\{[^}]*z-index:80/.test(css));
-  ok('lo de la cámara se guarda primero en el aparato, con sus ids (no se repite al reintentar)', /guardarPendientes\(tid, nuevas\)/.test(src) && /resolution=ignore-duplicates/.test(src) && /id=in\.\(/.test(src));
+  ok('lo de la cámara se guarda primero en el aparato, con sus ids (no se repite al reintentar)', /guardarPendientes\(tid, todas\)/.test(src) && /resolution=ignore-duplicates/.test(src) && /id=in\.\(/.test(src));
   ok('antes de crear niveles o cuartos se releen del servidor', /AYUDA\.refrescar\(tid\)/.test(src) && /refrescar: refrescarCuartos/.test(pro));
   ok('el PDF escribe una línea por unidad y no parte un cuarto', /MD\.lineasUnidad\(x\)/.test(doc) && /cabe\(alto\(f\.length\)\)/.test(doc));
   ok('SQL: quien la anotó no se la pasa a otro', /created_by = auth\.uid\(\)\)\);\s*drop policy if exists "fotos_medidas borra"/.test(sql));
@@ -143,6 +143,22 @@ ok('una línea por unidad: SF y LF en dos renglones, nunca uno cortado', JSON.st
   const src = fs.readFileSync(new URL('../docs/medidas.js', import.meta.url), 'utf8');
   ok('el editor guarda, enseña y resta con la MISMA regla (editar un Paneling no le quita la resta)', src.includes("if(ed.id && num(ed.menos) && (!ed.restar || !conResta(mat, ancho))){ fila.menos = null; fila.menos_que = null; }")
      && src.includes("const restaDe = (e) => e && e.id && e.restar && conResta(materialDe(e), e.ancho) ? num(e.menos) : 0;") && src.includes('${ED.id && num(ED.menos) && conResta(mat, ED.ancho) ? `<label class="med-acomp">')); }
+
+// ---- (17-oct) lo de la cámara queda en el teléfono: ids fijos, nunca repetidos ----
+{ const b = { nivel: 'First Floor', cuarto: 'Kitchen', orden: 1 };
+  const m = { length: 10, width: 8, material: 'Drywall', companion: 'Insulation', seccion: 'wall', id: 'a', idComp: 'b', t: 5 };
+  const f1 = M.filasDeCamara([m], b);
+  ok('(17-oct) la medida y su compañero traen sus propios ids', f1.length === 2 && f1[0].id === 'a' && f1[1].id === 'b');
+  const { id, idComp, t, ...sinId } = m; const f2 = M.filasDeCamara([sinId], b);
+  ok('(17-oct) sin id (Field Reports / aparato viejo) ninguna fila trae id', f2.length === 2 && !('id' in f2[0]) && !('id' in f2[1]));
+  const f3 = M.filasDeCamara([{ ...sinId, id: 'a' }], b);
+  ok('(17-oct) id sin idComp: el compañero NO hereda el id de su medida', f3.length === 2 && f3[0].id === 'a' && !('id' in f3[1]));
+  const fb = M.filasDeBorrador([{ sesion: 's', orden: 100, medidas: [m, { ...sinId, material: 'Carpet', seccion: 'floor', companion: null }] }]);
+  ok('(17-oct) el borrador: solo filas con id, en su orden', fb.length === 2 && fb.every(f => f.id && f.orden >= 100) && fb[0].id === 'a' && fb[1].id === 'b');
+  const unir = (lista, nuevas) => { const mm = new Map(lista.map(x => [x.id, x])); nuevas.forEach(x => mm.set(x.id, x)); return [...mm.values()]; };
+  ok('(17-oct) recuperar dos veces lo mismo no repite nada', unir(unir([], fb), M.filasDeBorrador([{ sesion: 's', orden: 100, medidas: [m] }])).length === 2);
+  const src = fs.readFileSync(new URL('../docs/medidas.js', import.meta.url), 'utf8');
+  ok('(17-oct) la página usa el mismo unir que esta prueba', src.includes("const unir = (lista, nuevas) => { const m = new Map(lista.map(x => [x.id, x])); nuevas.forEach(x => m.set(x.id, x)); return [...m.values()]; };")); }
 
 console.log(`\nmedidas: ${pass} ok, ${fail} fallas`);
 if(fail) process.exit(1);
