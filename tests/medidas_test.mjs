@@ -126,5 +126,23 @@ ok('una línea por unidad: SF y LF en dos renglones, nunca uno cortado', JSON.st
   ok('Floor Plan en el teléfono: cada nivel es una tarjeta; la abierta enseña su plano y tocarla la cierra',
      /data-pl-tel-niv=/.test(pl) && /if\(id === nivelElegido\(\)\.id && !PL_CERRADO\) PL_CERRADO = true;/.test(pl) && /caja\.classList\.toggle\('pl-cerrado', PL_CERRADO\)/.test(pl)); }
 
+// 16-oct (segunda revisión): la resta de la cámara vale para TODA fila de área, como en la cámara — Paneling, lo escrito a mano —, no
+// solo para los materiales de la lista. Antes Paneling 12 × 8.1 menos la puerta llegaba como 97.2 SF (la ficha decía 77.1).
+{ const b = { nivel: 'First Floor', cuarto: 'Bedroom 2', orden: 1 };
+  const pan = M.filasDeCamara([{ length: 12, width: 8.1, material: 'Paneling', companion: 'Insulation', nivel: 'First Floor', cuarto: 'Bedroom 2', seccion: 'wall', menos: 20.1, menosQue: '1 door' }], b);
+  const neto = (x) => M.calcular(x.material, x.largo, x.ancho, x.menos).sqft;
+  ok('Paneling 12 × 8.1 − 20.1 = 77.1 SF, y su insulación igual, con "1 door"', pan.length === 2 && neto(pan[0]) === 77.1 && pan[1].material === 'Insulation' && neto(pan[1]) === 77.1 && pan[0].menos_que === '1 door' && pan[1].menos_que === '1 door');
+  const esc = M.filasDeCamara([{ length: 10, width: 3, material: 'Wainscoting', nivel: 'First Floor', cuarto: 'Bedroom 2', seccion: 'wall', menos: 9, menosQue: '1 door' },
+    { length: 20, width: 12, material: 'Cork', nivel: 'First Floor', cuarto: 'Bedroom 2', seccion: 'floor', menos: 40, menosQue: 'room shape' },
+    { length: 10, material: 'Chair rail', nivel: 'First Floor', cuarto: 'Bedroom 2', seccion: 'wall', menos: 9 },
+    { length: 14, material: 'Baseboard', nivel: 'First Floor', cuarto: 'Bedroom 2', seccion: 'wall', menos: 9 }], b);
+  ok('lo escrito a mano con alto lleva su resta (Wainscoting 30 − 9 = 21); el piso escrito, su "room shape" (240 − 40 = 200)', neto(esc[0]) === 21 && neto(esc[1]) === 200 && esc[1].menos_que === 'room shape');
+  ok('lo escrito sin alto y el baseboard nunca llevan resta', esc[2].menos === undefined && esc[3].menos === undefined);
+  ok('conResta: área sí (también lo escrito); pie lineal, pieza o sin ancho no', M.conResta('Paneling', 8.1) && M.conResta('Wainscoting', 3) && M.conResta('Drywall', 2)
+     && !M.conResta('Baseboard', 1) && !M.conResta('Drywall (1 ft cut)', 1) && !M.conResta('Toilet', 1) && !M.conResta('Paneling', 0) && !M.conResta('Paneling', ''));
+  const src = fs.readFileSync(new URL('../docs/medidas.js', import.meta.url), 'utf8');
+  ok('el editor guarda, enseña y resta con la MISMA regla (editar un Paneling no le quita la resta)', src.includes("if(ed.id && num(ed.menos) && (!ed.restar || !conResta(mat, ancho))){ fila.menos = null; fila.menos_que = null; }")
+     && src.includes("const restaDe = (e) => e && e.id && e.restar && conResta(materialDe(e), e.ancho) ? num(e.menos) : 0;") && src.includes('${ED.id && num(ED.menos) && conResta(mat, ED.ancho) ? `<label class="med-acomp">')); }
+
 console.log(`\nmedidas: ${pass} ok, ${fail} fallas`);
 if(fail) process.exit(1);

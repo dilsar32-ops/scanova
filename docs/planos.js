@@ -2,8 +2,8 @@
 // (el mismo escáner de Field Reports, que ya viene dentro de la app: plugin RoomScan) y se dibuja con el
 // mismo código de Field Reports (plano.js, copiado por tools/extraer_plano.py). Un escaneo por piso;
 // un escaneo nuevo no borra el anterior (queda de historial), se ve el más reciente.
-import * as plano from './plano.js?v=2026-10-16-12';
-import { authFetch, esAparato, esManager, preguntar } from './app.js?v=2026-10-16-12';
+import * as plano from './plano.js?v=2026-10-16-13';
+import { authFetch, esAparato, esManager, preguntar } from './app.js?v=2026-10-16-13';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
@@ -60,6 +60,19 @@ export function largoSinRepetir(paredes){
 // LAS PAREDES DE CADA CUARTO PARA LA CÁMARA DE MEDIR (su pedido del 15-oct: "si estamos en paredes interiores ya sabe
 // que no llevan insulación"). El GPS del teléfono no alcanza para saber junto a qué pared está; el plano sí sabe qué
 // paredes son de afuera y cuánto mide cada una. La cámara compara lo medido contra esto y SUGIERE (nunca marca sola).
+// Una puerta, ventana o paso del plano como lo lee la cámara de medir: [x, y, ventana (1/0), ancho, abajo (-1 = no se sabe), alto].
+// Un PASO SIN PUERTA (arco, 16-oct) lleva un 7o número 1: los aparatos viejos lo leen como puerta (se resta igual), los nuevos lo
+// nombran "opening". Un paso que en el plano se corrigió a puerta o ventana (_kindOverride) va como lo que se dijo, igual que el
+// PDF (fpRoomMeasurements). Uno quitado (_removed) no va.
+export function senaParaCamara(x, k){
+  if(!x || !x.position || x._removed) return null;
+  const tipo = k === 'openings' ? (x._kindOverride || 'opening') : (k === 'windows' ? 'window' : 'door');
+  const r2 = v => Math.round(v * 100) / 100;
+  const an = Number(x._widthOverrideFt || x.widthFt) || 0, al = Number(x._heightOverrideFt || x.heightFt) || 0, ab = x.bottomFt == null ? -1 : Number(x.bottomFt);
+  const s = [r2(x.position.x), r2(x.position.y), tipo === 'window' ? 1 : 0, r2(an), r2(ab), r2(al)];
+  if(tipo === 'opening') s.push(1);
+  return s;
+}
 export async function paredesParaCamara(trabajoId, nivelId){
   FORMAS = {};   // nunca la forma de otro proyecto o de otro piso
   try{
@@ -96,7 +109,8 @@ export async function paredesParaCamara(trabajoId, nivelId){
       // medir bajo una ventana. Los aparatos viejos leen solo los 3 primeros.
       // 5o y 6o (15-oct): a qué altura del piso empieza (-1 = el escaneo es viejo y no lo guardó) y su alto, para que la
       // malla de la casa deje el hueco de la puerta o la ventana en su lugar.
-      ['windows', 'doors'].forEach(k => (room[k] || []).forEach(x => { if(x && x.position && !x._removed){ const an = Number(x._widthOverrideFt || x.widthFt) || 0, al = Number(x._heightOverrideFt || x.heightFt) || 0, ab = x.bottomFt == null ? -1 : Number(x.bottomFt); forma.senas.push([Math.round(x.position.x * 100) / 100, Math.round(x.position.y * 100) / 100, k === 'windows' ? 1 : 0, Math.round(an * 100) / 100, Math.round(ab * 100) / 100, Math.round(al * 100) / 100]); } }));
+      // (16-oct) Y los PASOS SIN PUERTA (arcos): antes no se mandaban y "Pared completa" cobraba drywall y baseboard a lo ancho del arco.
+      ['windows', 'doors', 'openings'].forEach(k => (room[k] || []).forEach(x => { const s = senaParaCamara(x, k); if(s) forma.senas.push(s); }));
       // El piso (y el techo) completo del cuarto (16-oct, su pedido "todo el piso o corte parcial"): el área de verdad del
       // contorno, y su largo × ancho (la caja; el plano ya está enderezado). Con el contorno roto no se manda: la cámara
       // dice que lo mida. El 4o número = 1 si la app cerró sola un tramo del borde (el área es aproximada).

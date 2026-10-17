@@ -3,7 +3,7 @@
 //  - mientras escribe salen sugerencias: en la app del iPhone, de Apple Maps (las más cercanas primero);
 //    en la página web, de las direcciones de sus propios proyectos (no hay un servicio gratis para eso en la web).
 // Al escoger una sugerencia o usar el 📍 también se guarda el punto (lat/lng) del proyecto.
-import { $ } from './app.js?v=2026-10-16-12';
+import { $ } from './app.js?v=2026-10-16-13';
 
 // ---------- lo puro ----------
 const ESTADOS = { Alabama:'AL', Alaska:'AK', Arizona:'AZ', Arkansas:'AR', California:'CA', Colorado:'CO', Connecticut:'CT', Delaware:'DE', 'District of Columbia':'DC', Florida:'FL', Georgia:'GA', Hawaii:'HI', Idaho:'ID', Illinois:'IL', Indiana:'IN', Iowa:'IA', Kansas:'KS', Kentucky:'KY', Louisiana:'LA', Maine:'ME', Maryland:'MD', Massachusetts:'MA', Michigan:'MI', Minnesota:'MN', Mississippi:'MS', Missouri:'MO', Montana:'MT', Nebraska:'NE', Nevada:'NV', 'New Hampshire':'NH', 'New Jersey':'NJ', 'New Mexico':'NM', 'New York':'NY', 'North Carolina':'NC', 'North Dakota':'ND', Ohio:'OH', Oklahoma:'OK', Oregon:'OR', Pennsylvania:'PA', 'Rhode Island':'RI', 'South Carolina':'SC', 'South Dakota':'SD', Tennessee:'TN', Texas:'TX', Utah:'UT', Vermont:'VT', Virginia:'VA', Washington:'WA', 'West Virginia':'WV', Wisconsin:'WI', Wyoming:'WY' };

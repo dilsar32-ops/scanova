@@ -4,6 +4,7 @@ import ARKit
 import AVFoundation
 import Speech
 import CoreImage
+import CoreHaptics
 
 // Los colores de la cámara por papel (ver "EL TEMA" en ARMeasureViewController). Los de aquí son los de siempre
 // (Field Reports); Scanova manda los suyos en hex ("#2563EB" o con transparencia "#0F1A2EBD").
@@ -326,6 +327,10 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
     // la casa"). Mismo número = mismas coordenadas: ubicado una vez, sirve para todos esos cuartos. Vacío = no se sabe
     // (una página vieja): cada cuarto se trata como su propio dibujo, como antes.
     var marcoPorCuarto: [String: Int] = [:]
+    // (revisión del 16 oct) Los cuartos de cada nivel que YA tienen paredes guardadas en el servidor (de otra vez que se abrió la
+    // cámara, o a mano). Esos renglones no llegan aquí ni saben su pared: en esos cuartos no se dice "falta una pared". nil = la página
+    // no lo mandó (vieja, o Field Reports): no se sabe, tampoco se dice.
+    var cuartosConParedes: [String: [String]]?
     // El nivel se pregunta UNA vez por recorrido. Eso es todo el punto.
     var nivelActual: String = ""
     // "nivel" = un piso completo, cuarto por cuarto. "cuarto" = solo este.
@@ -3279,6 +3284,13 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
         selectedMaterial = nil
         yaAvisoFaltaAncho = false
         nueva.zonaAlPrimerPunto = nil
+        // (medir primero) Lo de ESTA medida se va con ella: el corte congelado y su "¿Qué incluye?" (idea 1), el alto y el material (3 y 5).
+        nueva.corte = nil; nueva.incluyeDelCorte = nil; nueva.ubicadaEnEsquina = []; nueva.incluyeSoloEsta = false
+        nueva.paredAlPrimerPunto = nil; nueva.paredSinSaber = false      // (revisión 3)
+        nueva.fichaCorteFirma = ""; nueva.fichaCorte = nil       // (revisión) la ficha de esta medida se va con ella
+        nueva.otroAlto = false; nueva.altoDeUnPunto = nil; nueva.altoVivo = nil; nueva.altoParaRecordar = nil; nueva.materialPuesto = nil; nueva.sinPisoPuesto = false
+        nueva.materialPuestoDonde = ""; nueva.materialPuestoCuarto = ""; nueva.materialPuestoNivel = ""
+        nueva.marcaOtroAlto?.removeFromParentNode(); nueva.marcaOtroAlto = nil
         medidaNueva()
         if hablar { say("Cancelado.", .aviso) }
         stage = (materials.isEmpty && !esRecorrido) ? .measuringLength : .pickingMaterial
@@ -4721,6 +4733,7 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
             return
         }
         pasoAbierto = nil
+        let antes = roomName, mismoNivel = nivel == nivelActual
         if nivel != nivelActual {
             // Igual que al tocar un nivel: la lista de cuartos y las areas de
             // ESE piso, o el candado de "no cabe" compara contra otro cuarto.
@@ -4728,6 +4741,7 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
             ponerCuartosDeLaPlanta(nivel)
         }
         cambiarCuarto(cuarto)
+        if medirPrimero, nueva.medirActivo, mismoNivel, Self.clave(roomName) != Self.clave(antes) { salioDelCuarto(antes, a: roomName) }
         preguntar(.queSeccion, "De vuelta en \(cuarto). ¿Piso, pared, techo, cocina, baño o materiales?")
     }
 
@@ -5173,7 +5187,9 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
     // menos / menosQue: lo que se le resta (las puertas y ventanas de una pared entera, 16 oct); 0 = nada.
     private var items: [(length: Double, width: Double?, material: String, companion: String?,
                          nivel: String, cuarto: String, seccion: String, markers: [SCNNode], menos: Double, menosQue: String,
-                         paredes: [Int], completa: Bool)] = []   // de qué paredes del plano es y si fue la parte COMPLETA (el mapita)
+                         paredes: [Int], completa: Bool, parte: String)] = []   // de qué paredes del plano es y si fue la parte COMPLETA (el mapita)
+    // parte (revisión 3): la de la cámara al guardar (wall, floor, ceiling). `seccion` puede ser bathroom o kitchen (Greenboard, Backsplash
+    // escritos en MEDIDA → Otro) y así sale en el reporte; lo de "ya está completa" y "falta una pared" mira la parte.
 
     private var displayLink: CADisplayLink?
 
@@ -7280,10 +7296,12 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
         // En la maqueta 38 (simulador, sin ARKit) cada + marca el siguiente punto de la lista: el recorrido de verdad.
         let deMaqueta: simd_float3? = maqueta > 0 && !nueva.puntosDeMaqueta.isEmpty ? nueva.puntosDeMaqueta.removeFirst() : nil
         guard let hit = deMaqueta ?? currentRaycastHit() else {
+            if medirPrimero && nueva.medirActivo { vibrar(.fallo); anotarMedir("vibra", ["tipo": "fallo", "porque": "sin-superficie"]) }
             flashNoSurfaceWarning()
             return
         }
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        // (16 oct) Medir primero: un golpecito LIGERO por esquina (dos al guardar, uno largo si algo no se pudo).
+        if medirPrimero && nueva.medirActivo { vibrar(.esquina) } else { UIImpactFeedbackGenerator(style: .medium).impactOccurred() }
 
         if stage == .measuringLength {
             // Every tap places a corner. The first just anchors the start;
@@ -7598,7 +7616,8 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
                       nivel: nivelActual, cuarto: roomName, seccion: seccionGuardada,
                       markers: currentMarkers + currentLines,
                       menos: resta?.menos ?? 0, menosQue: resta?.que ?? "",
-                      paredes: marca?.paredes ?? [], completa: marca?.completa ?? false))
+                      paredes: marca?.paredes ?? [], completa: marca?.completa ?? false, parte: section))
+        nueva.pegadaALaAnterior.remove(items.count - 1)   // (16 oct) un renglón nuevo en ese lugar no es pareja de nadie
         pathPoints = []
         pathTotalFeet = 0
         largoDictado = false
@@ -7716,6 +7735,7 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
             say(recibo + " Toque Sí, mandar.", .aviso)
             return
         }
+        guardarAltosEnElTelefono()          // (revisión 2) el alto del nivel va al teléfono solo con lo que se manda
         onFinish?(.measured(items: itemsParaMandar()))
     }
     // Lo guardado, tal como se manda a la web. Solo lo GUARDADO: una medida a medias no se inventa.
@@ -7760,6 +7780,7 @@ class ARMeasureViewController: UIViewController, ARSessionDelegate, UIPickerView
             let porque = guardadas.isEmpty
                 ? "La cámara se detuvo y no había medidas guardadas. Vuelva a abrirla."
                 : "La cámara se detuvo. Se guardaron las \(guardadas.count) medidas que ya llevaba; si había una a medias, vuelva a medirla."
+            if !guardadas.isEmpty { self.guardarAltosEnElTelefono() }     // (revisión 2) esas medidas sí se entregan
             self.onFinish?(.fallo(items: guardadas, porque: porque))
         }
     }
@@ -7803,8 +7824,8 @@ fileprivate enum Claro {
 }
 
 fileprivate enum PanelCamara: Equatable { case nivel, cuarto, parte, material, voz, sigue, medir }
-// MEDIR PRIMERO (16 oct): lo que se le pregunta al tocar Listo, "¿Ya terminó con esta pared?" y la hoja del cuarto.
-fileprivate enum PreguntaMedir: Equatable { case que, otroLineal, shoe, matPared, insulPared, piso, underCuarto, techo, techoCuarto, lineal1, cierre, cuarto, segunda, parteEntera, incluye }
+// MEDIR PRIMERO (16 oct): lo que se le pregunta al tocar Listo y la hoja de "Revisar y mandar" (.cierre y .parteEntera ya no se abren: 13 pasos).
+fileprivate enum PreguntaMedir: Equatable { case que, otroLineal, shoe, matPared, insulPared, piso, underCuarto, techo, techoCuarto, lineal1, cierre, cuarto, segunda, parteEntera, incluye, materialPuesto, sobreCompleta }
 // A dónde se va al cambiar (lo que pide el teléfono o el mapa, entre una medida y otra).
 fileprivate enum CambioDeLugar: Equatable { case parte(String), pared(Int), cuarto(String) }
 
@@ -7900,158 +7921,67 @@ fileprivate final class LosetaCamara: UIControl {
     }
 }
 
-// "¿Qué extensión se retiró?" (16 oct, con SU diseño: dos tarjetas con el dibujo de la pared de studs). Pared completa:
-// toda la pared en azul punteado con su puerta. Área parcial: el marco en gris y un corte abajo en azul con sus dos puntos.
-fileprivate final class DibujoParedEntera: UIView {
-    let parcial: Bool
-    let horizontal: Bool                                   // el piso o el techo: una losa vista de lado, no una pared
-    init(parcial: Bool, horizontal: Bool = false) {
-        self.parcial = parcial; self.horizontal = horizontal
-        super.init(frame: .zero); backgroundColor = .clear; isOpaque = false; isUserInteractionEnabled = false
-    }
+// (13 pasos) El dibujito de línea de la franja: la pared con su corte punteado, o la losa del piso (el techo, de cabeza).
+fileprivate final class IconoFranja: UIView {
+    let parte: String
+    init(parte: String) { self.parte = parte; super.init(frame: .zero); backgroundColor = .clear; isOpaque = false; isUserInteractionEnabled = false }
     required init?(coder: NSCoder) { fatalError("init(coder:) no se usa") }
-    override func draw(_ rect: CGRect) {
-        guard UIGraphicsGetCurrentContext() != nil else { return }
-        if horizontal { dibujarLosa(rect); return }
-        guard let g = UIGraphicsGetCurrentContext() else { return }
-        let w = rect.width, h = rect.height
-        // La pared en perspectiva: arriba sube hacia la derecha, abajo baja hacia la izquierda.
-        let tl = CGPoint(x: 0.06 * w, y: 0.26 * h), tr = CGPoint(x: 0.76 * w, y: 0.10 * h)
-        let br = CGPoint(x: 0.76 * w, y: 0.74 * h), bl = CGPoint(x: 0.06 * w, y: 0.96 * h)
-        func punto(_ u: CGFloat, _ v: CGFloat) -> CGPoint {
-            let a = CGPoint(x: tl.x + u * (tr.x - tl.x), y: tl.y + u * (tr.y - tl.y))
-            let b = CGPoint(x: bl.x + u * (br.x - bl.x), y: bl.y + u * (br.y - bl.y))
-            return CGPoint(x: a.x + v * (b.x - a.x), y: a.y + v * (b.y - a.y))
-        }
-        let grosor = CGPoint(x: 0.05 * w, y: -0.035 * h)
-        func atras(_ p: CGPoint) -> CGPoint { CGPoint(x: p.x + grosor.x, y: p.y + grosor.y) }
-        let azul = Claro.azul, gris = Claro.apagado
-        let puerta: (u0: CGFloat, u1: CGFloat, v: CGFloat) = (0.36, 0.56, 0.42)
-        // La pared sin el hueco de la puerta.
-        let pared = UIBezierPath()
-        for (k, q) in [tl, tr, br, punto(puerta.u1, 1), punto(puerta.u1, puerta.v), punto(puerta.u0, puerta.v), punto(puerta.u0, 1), bl].enumerated() {
-            if k == 0 { pared.move(to: q) } else { pared.addLine(to: q) }
-        }
-        pared.close()
-        let lineaFrente = parcial ? gris : azul
-        // El grosor (la cara de atrás y las orillas), más clarito.
-        let fondoGrosor = UIBezierPath()
-        fondoGrosor.move(to: tl); fondoGrosor.addLine(to: atras(tl)); fondoGrosor.addLine(to: atras(tr)); fondoGrosor.addLine(to: atras(br)); fondoGrosor.addLine(to: br)
-        lineaFrente.withAlphaComponent(0.45).setStroke(); fondoGrosor.lineWidth = 1; fondoGrosor.stroke()
-        if !parcial { azul.withAlphaComponent(0.12).setFill(); pared.fill() }
-        // Los studs (solo dentro de la pared, nunca en el hueco de la puerta).
-        g.saveGState(); pared.addClip()
-        let pasos = 7
-        for k in 0...pasos {
-            let u = CGFloat(k) / CGFloat(pasos)
-            for du in [-0.012, 0.012] as [CGFloat] {
-                let l = UIBezierPath(); l.move(to: punto(min(max(u + du, 0), 1), 0)); l.addLine(to: punto(min(max(u + du, 0), 1), 1))
-                l.lineWidth = 1; lineaFrente.withAlphaComponent(parcial ? 0.9 : 0.55).setStroke(); l.stroke()
-            }
-        }
-        g.restoreGState()
-        // El cabezal de la puerta.
-        let cab = UIBezierPath(); cab.move(to: punto(puerta.u0, puerta.v - 0.05)); cab.addLine(to: punto(puerta.u1, puerta.v - 0.05))
-        cab.lineWidth = 1; lineaFrente.withAlphaComponent(0.6).setStroke(); cab.stroke()
-        // La orilla: azul punteada (pared completa) o gris fina (el marco, en el área parcial).
-        pared.lineWidth = parcial ? 1 : 1.8
-        if !parcial { pared.setLineDash([5, 3], count: 2, phase: 0) }
-        lineaFrente.setStroke(); pared.stroke()
-        guard parcial else { return }
-        // El corte: abajo, del inicio hasta pasar la puerta, con sus dos puntos marcados.
-        let (u0, u1, v0, v1): (CGFloat, CGFloat, CGFloat, CGFloat) = (0.03, 0.66, 0.62, 0.94)
-        let corte = UIBezierPath()
-        corte.move(to: punto(u0, v0)); corte.addLine(to: punto(u1, v0)); corte.addLine(to: punto(u1, v1)); corte.addLine(to: punto(u0, v1)); corte.close()
-        azul.withAlphaComponent(0.18).setFill(); corte.fill()
-        corte.lineWidth = 1.8; corte.setLineDash([5, 3], count: 2, phase: 0); azul.setStroke(); corte.stroke()
-        for q in [punto(u0, (v0 + v1) / 2), punto(u1, v0 + 0.06)] {
-            let o = UIBezierPath(ovalIn: CGRect(x: q.x - 4.5, y: q.y - 4.5, width: 9, height: 9))
-            azul.setFill(); o.fill(); UIColor.white.setStroke(); o.lineWidth = 1.5; o.stroke()
+    override func draw(_ r: CGRect) {
+        let s = r.width / 24
+        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * s, y: y * s) }
+        Claro.azul.setStroke()
+        if parte == "wall" {
+            let marco = UIBezierPath(roundedRect: CGRect(x: 3 * s, y: 5 * s, width: 18 * s, height: 14 * s), cornerRadius: 1.5 * s)
+            marco.lineWidth = 1.8; marco.stroke()
+            let corte = UIBezierPath(); corte.move(to: p(3, 15)); corte.addLine(to: p(21, 15))
+            corte.lineWidth = 1.8; corte.setLineDash([2 * s, 2 * s], count: 2, phase: 0); corte.stroke()
+        } else {
+            let arriba = parte == "ceiling"
+            func q(_ x: CGFloat, _ y: CGFloat) -> CGPoint { p(x, arriba ? 24 - y : y) }
+            let losa = UIBezierPath(); losa.move(to: q(7, 7)); losa.addLine(to: q(17, 7)); losa.addLine(to: q(22, 18)); losa.addLine(to: q(2, 18)); losa.close()
+            losa.lineWidth = 1.8; losa.lineJoinStyle = .round; losa.stroke()
+            let juntas = UIBezierPath()
+            for (a, b) in [(q(9.5, 7), q(8, 18)), (q(14.5, 7), q(16, 18)), (q(4.5, 12.5), q(19.5, 12.5))] { juntas.move(to: a); juntas.addLine(to: b) }
+            juntas.lineWidth = 1.2; juntas.stroke()
         }
     }
 }
-extension DibujoParedEntera {
-    // El piso o el techo: la losa en perspectiva (completa en azul punteado; parcial con un pedazo y sus dos puntos).
-    fileprivate func dibujarLosa(_ rect: CGRect) {
-        let w = rect.width, h = rect.height
-        let a = CGPoint(x: 0.06 * w, y: 0.62 * h), b = CGPoint(x: 0.46 * w, y: 0.92 * h)
-        let c = CGPoint(x: 0.80 * w, y: 0.56 * h), d = CGPoint(x: 0.40 * w, y: 0.28 * h)
-        func punto(_ u: CGFloat, _ v: CGFloat) -> CGPoint {       // u de a a b, v de a a d
-            CGPoint(x: a.x + u * (b.x - a.x) + v * (d.x - a.x), y: a.y + u * (b.y - a.y) + v * (d.y - a.y))
-        }
-        let azul = Claro.azul, gris = Claro.apagado
-        let losa = UIBezierPath(); losa.move(to: a); losa.addLine(to: b); losa.addLine(to: c); losa.addLine(to: d); losa.close()
-        // El grosor de la losa, abajo.
-        let canto = UIBezierPath(); canto.move(to: a); canto.addLine(to: CGPoint(x: a.x, y: a.y + 0.07 * h))
-        canto.addLine(to: CGPoint(x: b.x, y: b.y + 0.07 * h)); canto.addLine(to: CGPoint(x: c.x, y: c.y + 0.07 * h)); canto.addLine(to: c)
-        (parcial ? gris : azul).withAlphaComponent(0.45).setStroke(); canto.lineWidth = 1; canto.stroke()
-        if !parcial { azul.withAlphaComponent(0.12).setFill(); losa.fill() }
-        // Las juntas del piso (o las vigas del techo).
-        for k in 1..<6 {
-            let u = CGFloat(k) / 6
-            let l = UIBezierPath(); l.move(to: punto(u, 0)); l.addLine(to: punto(u, 1)); l.lineWidth = 1
-            (parcial ? gris : azul).withAlphaComponent(parcial ? 0.9 : 0.5).setStroke(); l.stroke()
-        }
-        losa.lineWidth = parcial ? 1 : 1.8
-        if !parcial { losa.setLineDash([5, 3], count: 2, phase: 0) }
-        (parcial ? gris : azul).setStroke(); losa.stroke()
-        guard parcial else { return }
-        let (u0, u1, v0, v1): (CGFloat, CGFloat, CGFloat, CGFloat) = (0.12, 0.62, 0.15, 0.62)
-        let corte = UIBezierPath()
-        corte.move(to: punto(u0, v0)); corte.addLine(to: punto(u1, v0)); corte.addLine(to: punto(u1, v1)); corte.addLine(to: punto(u0, v1)); corte.close()
-        azul.withAlphaComponent(0.18).setFill(); corte.fill()
-        corte.lineWidth = 1.8; corte.setLineDash([5, 3], count: 2, phase: 0); azul.setStroke(); corte.stroke()
-        for q in [punto(u0, v0), punto(u1, v1)] {
-            let o = UIBezierPath(ovalIn: CGRect(x: q.x - 4.5, y: q.y - 4.5, width: 9, height: 9))
-            azul.setFill(); o.fill(); UIColor.white.setStroke(); o.lineWidth = 1.5; o.stroke()
-        }
-    }
-}
-fileprivate final class TarjetaParedEntera: UIControl {
+/// (13 pasos) Un botón de la franja: blanco con esquinas (nada de pastillas), su dibujito, el nombre y sus números del plano.
+/// 48 pt de alto: se toca con guantes.
+fileprivate final class BotonFranja: UIControl {
     var accion: (() -> Void)?
-    init(parcial: Bool, titulo: String, sub: String, chip: (icono: String, texto: String), sugerida: Bool, horizontal: Bool = false, habilitada: Bool = true) {
+    init(icono parte: String?, titulo: String, sub: String, alto: CGFloat, lineas: Int = 1) {
         super.init(frame: .zero)
-        isEnabled = habilitada
-        backgroundColor = Claro.loseta
-        layer.cornerRadius = 14; layer.cornerCurve = .continuous
-        layer.borderWidth = sugerida ? 1.5 : 1; layer.borderColor = (sugerida ? Claro.azul : Claro.linea).cgColor
-        let dibujo = DibujoParedEntera(parcial: parcial, horizontal: horizontal)
-        dibujo.heightAnchor.constraint(equalToConstant: 92).isActive = true
-        let t = UILabel(); t.text = titulo; t.font = .systemFont(ofSize: 16, weight: .bold); t.textColor = Claro.tinta
+        backgroundColor = Claro.boton
+        layer.cornerRadius = 10; layer.cornerCurve = .continuous
+        layer.borderWidth = 0.5; layer.borderColor = Claro.linea.cgColor
+        let t = UILabel(); t.text = titulo; t.font = .systemFont(ofSize: 15, weight: .semibold); t.textColor = Claro.tinta
         t.adjustsFontSizeToFitWidth = true; t.minimumScaleFactor = 0.8
-        let s = UILabel(); s.text = sub; s.font = .systemFont(ofSize: 12.5); s.textColor = Claro.gris; s.numberOfLines = 3
-        let icono = UIImageView(image: UIImage(systemName: chip.icono, withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .semibold)))
-        icono.tintColor = Claro.azul; icono.contentMode = .scaleAspectFit
-        icono.setContentHuggingPriority(.required, for: .horizontal)
-        let c = UILabel(); c.text = chip.texto; c.font = .systemFont(ofSize: 12, weight: .semibold); c.textColor = Claro.azul
-        c.adjustsFontSizeToFitWidth = true; c.minimumScaleFactor = 0.75
-        let chipFila = UIStackView(arrangedSubviews: [icono, c]); chipFila.spacing = 5; chipFila.alignment = .center
-        chipFila.isLayoutMarginsRelativeArrangement = true; chipFila.layoutMargins = UIEdgeInsets(top: 6, left: 8, bottom: 6, right: 8)
-        chipFila.backgroundColor = Claro.azulSuave; chipFila.layer.cornerRadius = 8; chipFila.layer.cornerCurve = .continuous
-        let chipCaja = UIStackView(arrangedSubviews: [chipFila, UIView()]); chipCaja.axis = .horizontal
-        let pila = UIStackView(arrangedSubviews: [dibujo, t, s, chipCaja])
-        pila.axis = .vertical; pila.spacing = 4; pila.setCustomSpacing(8, after: dibujo); pila.setCustomSpacing(8, after: s)
-        pila.isUserInteractionEnabled = false; pila.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(pila)
-        // El circulito de escoger, arriba a la derecha (como en su diseño).
-        let circulo = UIView(); circulo.translatesAutoresizingMaskIntoConstraints = false; circulo.isUserInteractionEnabled = false
-        circulo.layer.cornerRadius = 10; circulo.layer.borderWidth = 1.5
-        circulo.layer.borderColor = (sugerida ? Claro.azul : Claro.apagado).cgColor
-        addSubview(circulo)
+        let s = UILabel(); s.text = sub; s.font = .systemFont(ofSize: 12); s.textColor = Claro.gris; s.numberOfLines = lineas
+        s.adjustsFontSizeToFitWidth = lineas == 1; s.minimumScaleFactor = 0.8
+        let textos = UIStackView(arrangedSubviews: [t, s]); textos.axis = .vertical; textos.spacing = 1
+        var vistas: [UIView] = []
+        if let p = parte {
+            let i = IconoFranja(parte: p)
+            i.widthAnchor.constraint(equalToConstant: 22).isActive = true; i.heightAnchor.constraint(equalToConstant: 22).isActive = true
+            vistas.append(i)
+        }
+        vistas.append(textos)
+        let fila = UIStackView(arrangedSubviews: vistas); fila.axis = .horizontal; fila.spacing = 10; fila.alignment = .center
+        fila.isUserInteractionEnabled = false; fila.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(fila)
         NSLayoutConstraint.activate([
-            pila.topAnchor.constraint(equalTo: topAnchor, constant: 12),
-            pila.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            pila.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
-            pila.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -12),
-            circulo.topAnchor.constraint(equalTo: topAnchor, constant: 10), circulo.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
-            circulo.widthAnchor.constraint(equalToConstant: 20), circulo.heightAnchor.constraint(equalToConstant: 20)
+            fila.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            fila.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12),
+            fila.centerYAnchor.constraint(equalTo: centerYAnchor),
+            heightAnchor.constraint(equalToConstant: alto)
         ])
         addTarget(self, action: #selector(tocada), for: .touchUpInside)
         isAccessibilityElement = true; accessibilityLabel = titulo + ", " + sub; accessibilityTraits = .button
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) no se usa") }
     @objc private func tocada() { accion?() }
-    override var isHighlighted: Bool { didSet { alpha = isHighlighted ? 0.55 : 1 } }
+    override var isHighlighted: Bool { didSet { alpha = isHighlighted ? 0.55 : (isEnabled ? 1 : 0.45) } }
     override var isEnabled: Bool { didSet { alpha = isEnabled ? 1 : 0.45 } }
 }
 
@@ -8126,6 +8056,12 @@ fileprivate final class MinimapaCamara: UIView {
     var colorPiso: UIColor?
     var contorno: [SIMD2<Double>] = []                   // el piso del cuarto (para pintarlo)
     var firmaColores = "" { didSet { if firmaColores != oldValue { setNeedsDisplay() } } }
+    // (13 pasos) A dónde apunta: la pared que ofrece la franja (o la que está midiendo) en azul, y el piso en azul clarito. Y las
+    // paredes que faltan de un cuarto ("falta una pared"), rojas punteadas.
+    var apuntada: Int? { didSet { if apuntada != oldValue { setNeedsDisplay() } } }
+    var pisoApuntado = false { didSet { if pisoApuntado != oldValue { setNeedsDisplay() } } }
+    var enRojo: [(SIMD2<Double>, SIMD2<Double>)] = [] {
+        didSet { if enRojo.count != oldValue.count || !zip(enRojo, oldValue).allSatisfy({ $0.0 == $1.0 && $0.1 == $1.1 }) { setNeedsDisplay() } } }
     static let verde = UIColor(red: 0.09, green: 0.64, blue: 0.29, alpha: 1)
     static let amarillo = UIColor(red: 0.96, green: 0.62, blue: 0.04, alpha: 1)
     // EL VIDRIO (16 oct, su pedido con su captura): detrás del dibujo, solo hasta donde llega el mapa y un poquito de
@@ -8273,17 +8209,15 @@ fileprivate final class MinimapaCamara: UIView {
         let esc = g.esc, ox = g.ox, oy = g.oy
         func p(_ v: SIMD2<Double>) -> CGPoint { CGPoint(x: v.x * esc + ox, y: v.y * esc + oy) }
         ctx.setLineCap(.round)
-        // El piso del cuarto pintado: amarillo (algo medido) o verde (completo), clarito.
-        if let c = colorPiso {
-            let poly = contorno.count >= 3 ? contorno : {
-                let q = paredes.flatMap { [$0.seg.a, $0.seg.b] }
-                guard let x0 = q.map({ $0.x }).min(), let x1 = q.map({ $0.x }).max(), let y0 = q.map({ $0.y }).min(), let y1 = q.map({ $0.y }).max() else { return [] }
-                return [SIMD2(x0, y0), SIMD2(x1, y0), SIMD2(x1, y1), SIMD2(x0, y1)]
-            }()
-            if poly.count >= 3 {
-                ctx.setFillColor(c.withAlphaComponent(0.28).cgColor)
-                ctx.move(to: p(poly[0])); for v in poly.dropFirst() { ctx.addLine(to: p(v)) }; ctx.closePath(); ctx.fillPath()
-            }
+        let poly: [SIMD2<Double>] = contorno.count >= 3 ? contorno : {
+            let q = paredes.flatMap { [$0.seg.a, $0.seg.b] }
+            guard let x0 = q.map({ $0.x }).min(), let x1 = q.map({ $0.x }).max(), let y0 = q.map({ $0.y }).min(), let y1 = q.map({ $0.y }).max() else { return [] }
+            return [SIMD2(x0, y0), SIMD2(x1, y0), SIMD2(x1, y1), SIMD2(x0, y1)]
+        }()
+        // El piso pintado: amarillo (algo medido) o verde (completo); (13 pasos) azul clarito si le apunta sin nada medido.
+        if let c = colorPiso ?? (pisoApuntado ? Claro.azul : nil), poly.count >= 3 {
+            ctx.setFillColor(c.withAlphaComponent(colorPiso != nil ? 0.28 : 0.22).cgColor)
+            ctx.move(to: p(poly[0])); for v in poly.dropFirst() { ctx.addLine(to: p(v)) }; ctx.closePath(); ctx.fillPath()
         }
         // El borde blanco debajo de cada línea: sin fondo, el dibujo se lee sobre lo que ve la cámara.
         ctx.setStrokeColor(UIColor.white.withAlphaComponent(0.85).cgColor); ctx.setLineWidth(3)
@@ -8295,9 +8229,14 @@ fileprivate final class MinimapaCamara: UIView {
         ctx.strokePath()
         for (i, w) in paredes.enumerated() {
             // Completa en verde, parcial en amarillo; sin medir, como siempre (negro la de afuera, gris la de adentro).
-            if let c = colorPared[i] { ctx.setStrokeColor(c.cgColor); ctx.setLineWidth(3.5) }
+            if i == apuntada { ctx.setStrokeColor(Claro.azul.cgColor); ctx.setLineWidth(3.5) } else if let c = colorPared[i] { ctx.setStrokeColor(c.cgColor); ctx.setLineWidth(3.5) }
             else { ctx.setStrokeColor((w.exterior ? Claro.tinta : Claro.gris).cgColor); ctx.setLineWidth(w.exterior ? 3 : 1.5) }
             ctx.move(to: p(w.seg.a)); ctx.addLine(to: p(w.seg.b)); ctx.strokePath()
+        }
+        if !enRojo.isEmpty {
+            ctx.setStrokeColor(Claro.rojo.cgColor); ctx.setLineWidth(3.5); ctx.setLineDash(phase: 0, lengths: [5, 4])
+            for (a, b) in enRojo { ctx.move(to: p(a)); ctx.addLine(to: p(b)) }
+            ctx.strokePath(); ctx.setLineDash(phase: 0, lengths: [])
         }
         for s in senas {
             ctx.setFillColor((s.esVentana ? Claro.azul : Claro.gris).cgColor)
@@ -8347,6 +8286,33 @@ fileprivate struct ParteEntera {
     // menos sus puertas (la ventana no corta el baseboard).
     var conBaseboard = false
     var conShoe = false
+}
+/// (13 pasos, idea 6) Lo que enseña la franja chica arriba de la tarjeta de abajo: la parte, la pared del plano (si es pared), el
+/// texto con sus números del plano y si se puede tocar. `preset` = el piso que viene puesto (idea 5): tocarla lo guarda con él.
+fileprivate struct FranjaContenido: Equatable {
+    var parte: String
+    var pared: Int?
+    var titulo: String
+    var sub: String
+    var habilitada: Bool
+    var preset: String?
+    // (revisión 2) De qué cuarto y nivel es: si el mapa cambió el cuarto, lo de antes ni se queda (los 0.8 s) ni se puede tocar.
+    var cuarto = ""
+    var nivel = ""
+    var firma: String { "\(parte)|\(pared ?? -1)|\(titulo)|\(sub)|\(habilitada)|\(preset ?? "")|\(cuarto)|\(nivel)" }
+}
+// (16 oct, idea 1) El CORTE PARCIAL de pared marcado con +: en qué paredes del plano cayeron sus esquinas, las puertas, arcos y
+// ventanas cuyo centro cae entre ellas (ya recortadas a lo marcado), desde qué altura del piso arranca, y por qué no se restó
+// nada (si no se pudo). Se congela al guardar (guardarCorte): lo que se enseña es lo que se guarda.
+fileprivate struct CorteParcial {
+    var paredes: [Int] = []
+    var tramos: [(indice: Int, t0: Double, t1: Double)] = []
+    var aberturas: [ReglasDeMedir.Abertura] = []
+    var sinMedida = 0
+    var arranque: Double?                           // pies del piso al punto más bajo; nil = no veo el piso
+    var porque: String?                             // "no veo el piso" | "falta ubicarse" | "no calza con el plano"
+    var desdePiso: Bool { (arranque ?? .infinity) <= ReglasDeMedir.arranqueDelPiso }
+    var desde: Double { desdePiso ? 0 : (arranque ?? 0) }
 }
 
 fileprivate final class CamaraNueva {
@@ -8477,7 +8443,6 @@ fileprivate final class CamaraNueva {
     var evidFuera: (pies: Double, desde: Date) = (0, .distantPast)
     var faseFaltaVer = false
     var acomodoDeBuscar = false                   // la ubicación la puso BUSCAR sin estar firme: se confirma con evidencia nueva
-    var ventanaParteEn: CFTimeInterval = 0        // la última vez que cambió la PARTE que enseña la ventana (pared, techo, piso)
     // ---- EL LECTOR DE LA PARTE (16 oct, ver LectorDeParte) ----
     var puerta = LectorDeParte.PuertaDeCambio()
     var puertaPared = LectorDeParte.PuertaDePared()
@@ -8502,7 +8467,6 @@ fileprivate final class CamaraNueva {
     var preguntaMedir: PreguntaMedir?
     var porGuardar: ReglasDeMedir.Guardado?       // espera su respuesta (insulación de la pared, underlayment o padding, techo)
     var clavePendiente = ""                       // de qué pared o cuarto es esa respuesta
-    var cambioPendiente: CambioDeLugar?           // "¿Ya terminó?": a dónde se iba
     var insulDePared: [String: Bool] = [:]        // nivel|cuarto|pared -> lo que contestó (mixto, o pared sin saber)
     var underDeCuarto: [String: Bool] = [:]       // nivel|cuarto -> underlayment o padding (mixto; una respuesta vale para los dos)
     var techoDeCuarto: [String: Bool] = [:]       // nivel|cuarto -> insulación del techo (mixto)
@@ -8511,18 +8475,15 @@ fileprivate final class CamaraNueva {
     // La parte COMPLETA escogida (16 oct): pared, piso o techo con las medidas del plano.
     var parteEntera: ParteEntera?
     // La ventana "¿completo o parcial?" (16 oct, su pedido): sale SOLA sin nada a medias y sigue a donde apunta el teléfono.
-    var eleccionAuto = false                      // la ventana abierta es la que sale sola
+    var eleccionAuto = false                      // (13 pasos) ya no se abre sola: siempre false; se queda por bloqueoDeParte/porqueBloqueo
     var enganchada = false                        // escogió "parcial": se mide esa parte con + (la ventana no vuelve a salir)
     var firmaEleccion = ""                        // la parte y la pared que enseña (si cambian, se vuelve a pintar)
     var paredCandidata: (i: Int, desde: CFTimeInterval)?
     var paredSesion = 0                           // sube cada vez que se termina una pared
     var itemsAlEmpezarPared = 0
-    var cierreCallado = false                     // "Continuar": no se vuelve a preguntar en esta pared hasta otra medida
-    var cierreCalladoDesde = Date.distantPast     // (16 oct) y vence a los 20 s: antes congelaba parte, pared y cuarto hasta guardar
     var aManoOtraDesde: CFTimeInterval?           // lo escogido a mano y el teléfono ve OTRA parte / pared: desde cuándo
-    var paredVistaDesde: CFTimeInterval = 0       // desde cuándo ve ESTA pared (lo que abre "¿Ya terminó?" pide 1.2 s)
+    var paredVistaDesde: CFTimeInterval = 0       // desde cuándo ve ESTA pared (para la bitácora: pv_ms)
     var ventanaCambioEn: CFTimeInterval = 0       // la última vez que cambió lo que enseña la ventana (no se rehace bajo el dedo)
-    var cuartoCallado: (nombre: String, desde: Date)?   // "Continuar" a un cuarto: ese mismo no vuelve a preguntar en 20 s
     var zonaAlPrimerPunto: String?                // lo que veía el teléfono al marcar la primera esquina
     var maquetaSinConfirmar = false
     var ultimoPDeLaPared: CFTimeInterval = 0      // la última muestra del plano que dijo "esta pared" (paredVista)
@@ -8533,13 +8494,67 @@ fileprivate final class CamaraNueva {
     var cuartoCandidato: (nombre: String, desde: CFTimeInterval)?
     var cuartoAMano: (nombre: String, mapa: String?)?   // lo escogió él: el mapa no lo cambia mientras diga lo mismo
     var parteAMano = false                        // la escogió él: el teléfono no la cambia hasta la siguiente medida
-    var cuartosTerminados: Set<String> = []
     var cambiandoSolo = false
     var seccionVista: String?
     var terminarDeVerdad = false
     var arreglandoEtapa = false
     var rielAlto: NSLayoutConstraint?
     var maquetaClase: ClaseDePared?
+    // ---- (13 pasos, 16 oct) LA FRANJA CHICA, "FALTA UNA PARED" Y "REVISAR Y MANDAR" (ideas 4 y 6) ----
+    let franja = UIView()                         // la franja de vidrio arriba de la tarjeta de abajo (en lugar de la ventana grande)
+    let franjaPila = UIStackView()
+    var franjaContenido: FranjaContenido?         // lo que enseña (nil = escondida)
+    var franjaVistaEn: CFTimeInterval = 0         // la última vez que se confirmó (un hueco corto del láser no la esconde)
+    var cambioSoloHasta = Date.distantPast        // el riel PARTE dice "cambió sola" unos segundos
+    var cuartoDesde: CFTimeInterval = 0           // cuándo cambió el cuarto ("falta una pared" pide unos segundos ya en el nuevo)
+    var salidaDe: (nombre: String, nivel: String, desde: CFTimeInterval)?   // el cuarto que dejó con paredes por revisar
+    var noSeCorto: [String: Set<Int>] = [:]       // nivel|cuarto -> paredes que él dijo que no se cortaron
+    let faltaCaja = UIView(), faltaTitulo = UILabel(), faltaSub = UILabel()
+    var faltaVisible: (cuarto: String, nivel: String, paredes: [Int])?
+    var faltaHasta = Date.distantPast
+    var paredesEnRojo: (cuarto: String, nivel: String, paredes: [Int])?   // en el mapita, rojas punteadas, mientras sigan sin medida
+    // ---- (idea 1) el baseboard y las puertas también en el corte parcial ----
+    var corte: CorteParcial?                      // lo del corte, CONGELADO al guardar (guardarCorte)
+    var ubicadaEnEsquina: [Bool] = []             // ¿ubicación confirmada al marcar cada esquina del largo? (una por esquina; Deshacer la quita)
+    var incluyeDeCuarto: [String: (base: Bool, shoe: Bool)] = [:]   // nivel|cuarto -> "¿Qué incluye?" (Kitchen, Bath, Laundry no se reusa)
+    var incluyeDelCorte: (base: Bool, shoe: Bool)?                  // lo que vale para ESTA medida
+    var cambiandoIncluye = false                  // tocó la ficha para cambiar la respuesta: contestar no guarda
+    var pegadaALaAnterior: Set<Int> = []          // índices de items guardados con el de antes (su baseboard)
+    var chipDe: (p: SIMD2<Double>, texto: String)?   // la puerta o el arco que el corte resta (se señala en la cámara)
+    let chipPuerta = CasillaDeInstruccion()
+    // ---- (ideas 3 y 5) el alto del corte, la banda azul y el material puesto ----
+    var altoDelNivel: [String: (pies: Double, cuarto: String)] = [:]   // nivel -> el alto del corte medido con + en su primera pared
+    var altoCargado: Set<String> = []             // niveles ya leídos del teléfono en esta sesión
+    var altosDeLaSesion: [String: (pies: Double, cuarto: String, item: Int)] = [:]   // nivel -> el alto medido en ESTA sesión y su renglón
+                                                  // (si se deshace, se olvida); al teléfono va solo al mandar (guardarAltosEnElTelefono)
+    var altoParaRecordar: Double?                 // el alto MEDIDO en esta medida (un +, o dos + desde el piso)
+    var otroAlto = false                          // "Otro alto · un +" (o "Alto · un +"): el + es la línea del corte
+    var altoDeUnPunto: Double?                    // lo que dio ese +, en pies
+    var altoVivo: Double?                         // la mira en "Otro alto" antes del +: solo mueve la banda, nunca se guarda
+    var marcaOtroAlto: SCNNode?
+    var materialPuesto: (parte: String, material: String)?   // lo que tocó en MEDIDA para ESTA medida (nil = Drywall / el piso de antes)
+    var materialPuestoDonde = ""                  // el cuarto donde ESTABA al tocarlo (el mapa pudo ir atrasado)
+    var materialPuestoCuarto = ""                 // (revisión 2) y el que decía la pantalla al tocarlo: vale en cualquiera de los dos
+                                                  // (materialPuestoVigente); asomarse a otro cuarto y regresar no lo borra
+    var materialPuestoNivel = ""                  // (revisión 3) y su nivel: el "Bathroom" de arriba no es el de abajo
+    var sobreCompleta: (que: String, paredes: [Int], otras: [Int], seguras: Bool, adivinada: Bool)?   // la medida que cae sobre lo que ya está completo (la pregunta antes de guardar);
+                                                  // otras = las paredes NO completas que también cubre; seguras = por las esquinas en el plano;
+                                                  // (revisión 3) adivinada = la pared es solo la que tenía enfrente, sin confirmar: se pregunta "¿Es la pared N?"
+    var paredAlPrimerPunto: Int?                  // (revisión 3) la pared que apuntaba, con la ubicación confirmada, al marcar la primera esquina (nil = no se supo)
+    var paredSinSaber = false                     // (revisión 3) "Es otra pared · guardar": esta medida se guarda sin pared, nunca en la que tenía enfrente
+    var incluyeSoloEsta = false                   // "¿El corte incluye…?" contestado sabiendo que la pared ya lleva el suyo: no es la del cuarto
+    var sinPisoPuesto = false                     // "Otro piso": esta vez el piso se escoge de la lista
+    let banda = SCNNode()                         // la banda azul sobre la pared: un cuadro por pedazo y su orilla de arriba punteada
+    var bandaFirma = ""
+    var bandaMaqueta: CAShapeLayer?               // en el simulador la banda se dibuja plana para la captura
+    var bandaCentroMaqueta = CGPoint.zero
+    let bandaChip = UILabel()                     // "2 ft", encima de la banda
+    let otroAltoBoton = UIButton(type: .system)   // "Otro alto · un +"
+    var fichaPila: UIStackView?
+    let fichaDetalle = UILabel(), fichaBase = UILabel()   // los renglones 3 y 4 de la ficha del corte
+    var fichaCorte: ReglasDeMedir.FichaDelCorte?, fichaCorteFirma = ""
+    var motorVibra: CHHapticEngine?
+    var maquetaSinPiso = false
 }
 
 extension ARMeasureViewController {
@@ -8567,10 +8582,12 @@ extension ARMeasureViewController {
         armarBotonLaboratorio()
         armarCentroNuevo()
         armarMuelleNuevo()
+        armarFranja()
         armarTarjetaNueva()
         armarPanelNuevo()
         armarMinimapa()
         armarFaseUbicarse()
+        armarFaltaPared()
         // Con plano de este nivel, lo primero es ubicarse (en el simulador solo en las maquetas 16 y 17).
         nueva.ubicandose = !planoPorCuarto.isEmpty && maqueta == 0
         // El plano que manda la página es del nivel con el que se abrió: en otro nivel no sirve para decir qué pared es.
@@ -8705,12 +8722,17 @@ extension ARMeasureViewController {
         n.ficha.layer.shadowColor = UIColor.black.cgColor; n.ficha.layer.shadowOpacity = 0.14; n.ficha.layer.shadowRadius = 8
         n.ficha.layer.shadowOffset = CGSize(width: 0, height: 4)
         n.ficha.isUserInteractionEnabled = false
-        let pila = UIStackView(arrangedSubviews: [n.fichaChica, n.fichaGrande])
+        // (ideas 1 y 3) Los renglones 3 y 4 de la ficha del corte (lo que se resta y el baseboard): escondidos en todo lo demás.
+        let pila = UIStackView(arrangedSubviews: [n.fichaChica, n.fichaGrande, n.fichaDetalle, n.fichaBase])
+        n.fichaPila = pila
         pila.axis = .vertical; pila.alignment = .center; pila.spacing = 0
         pila.translatesAutoresizingMaskIntoConstraints = false
         n.ficha.addSubview(pila)
         n.fichaChica.font = .systemFont(ofSize: 12, weight: .medium); n.fichaChica.textColor = Claro.gris
         n.fichaGrande.textColor = Claro.tinta
+        for l in [n.fichaDetalle, n.fichaBase] { l.font = .systemFont(ofSize: 12); l.textColor = Claro.tinta; l.numberOfLines = 2; l.isHidden = true }
+        // Tocar la ficha del corte cambia "¿El corte incluye…?" (solo se prende con esos renglones a la vista: pintarCentroNuevo).
+        n.ficha.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(fichaTocada)))
         n.pista.translatesAutoresizingMaskIntoConstraints = false
         n.pista.font = .systemFont(ofSize: 13, weight: .semibold); n.pista.textColor = Claro.tinta
         n.pista.backgroundColor = Claro.boton; n.pista.textAlignment = .center
@@ -8740,6 +8762,7 @@ extension ARMeasureViewController {
             n.pista.heightAnchor.constraint(equalToConstant: 28),
             n.pista.widthAnchor.constraint(greaterThanOrEqualToConstant: 130)
         ])
+        armarChipDePuerta()
     }
 
     private func armarMuelleNuevo() {
@@ -8858,6 +8881,8 @@ extension ARMeasureViewController {
     fileprivate func pintarCamaraNueva() {
         nueva.pintadas += 1
         guard experienciaNueva, nueva.armada else { return }
+        // (13 pasos) En el laboratorio y en la fase de ubicarse no hay franja chica ni "falta una pared".
+        if lab.activo || nueva.ubicandose { quitarFranjaYFalta() }
         if lab.activo { pintarLaboratorio(); return }
         if nueva.ubicandose { pintarFaseUbicarse(); return }
         let n = nueva
@@ -8903,12 +8928,17 @@ extension ARMeasureViewController {
         pintarAviso()
         // Panel o muelle: nunca los dos.
         let panel = panelQueToca()
+        if panel != nil, let f = n.faltaVisible { anotarMedir("falta-pared", ["que": "panel", "de": f.cuarto]); cerrarFalta() }
         n.panel.isHidden = panel == nil
         if let p = panel { pintarPanelNuevo(p) } else { n.firmaPanel = "" }
         pintarTarjetaNueva()
         n.muelle.isHidden = panel != nil || n.tarjetaVisible
         pintarMuelleNuevo()
+        // (13 pasos) La franja chica (en lugar de la ventana grande): va con la tarjeta de abajo, nunca con un panel; el + se ve siempre.
+        if medirPrimero && n.medirActivo { revisarEleccion() }
+        n.franja.isHidden = !(medirPrimero && n.medirActivo) || n.muelle.isHidden || n.franjaContenido == nil
         pintarCentroNuevo()
+        if medirPrimero && n.medirActivo { pintarBanda() }      // (idea 3) la banda azul, su "2 ft" y "Otro alto · un +"
         // Al guardar, se dice en la pantalla qué se guardó (2.5 s, en azul: no es un problema).
         if n.itemsVistos >= 0, items.count > n.itemsVistos, !(medirPrimero && n.medirActivo), let u = items.last {
             var que = Self.nombreDeBoton(valor: u.material, etiqueta: u.material)
@@ -8922,7 +8952,7 @@ extension ARMeasureViewController {
     private func panelQueToca() -> PanelCamara? {
         if let f = nueva.panelForzado { return f }
         if cancelarPendiente { return nil }
-        // Medir primero: lo que se le pregunta al tocar Listo, "¿Ya terminó?" y la hoja del cuarto.
+        // Medir primero: lo que se le pregunta al tocar Listo y la hoja de "Revisar y mandar".
         if medirPrimero, nueva.preguntaMedir != nil { return .medir }
         if esRecorrido {
             if pasoAbierto == .queNivel || (nivelActual.isEmpty && nivelesDisponibles.count > 1) { return .nivel }
@@ -9488,6 +9518,15 @@ extension ARMeasureViewController {
             m.contorno = contornoPorCuarto.first(where: { Self.clave($0.key) == Self.clave(roomName) })?.value ?? []
             m.firmaColores = firma
         }
+        // (13 pasos) A dónde apunta (lo que ofrece la franja, o lo que está midiendo) y lo que falta de un cuarto, en rojo.
+        m.apuntada = section == "wall" ? (n.franjaContenido?.pared ?? (medidaEnCurso ? n.paredActual : nil)) : nil
+        m.pisoApuntado = section == "floor" && (n.franjaContenido?.parte == "floor" || medidaEnCurso)
+        if let r = n.paredesEnRojo, let forma = planoPorCuarto.first(where: { Self.clave($0.key) == Self.clave(r.cuarto) })?.value {
+            let siguen = Set(paredesDe(r.cuarto, nivel: r.nivel).faltan)
+            let rojas = r.paredes.filter { siguen.contains($0) && $0 < forma.paredes.count }.map { (forma.paredes[$0].seg.a, forma.paredes[$0].seg.b) }
+            m.enRojo = rojas
+            if rojas.isEmpty { n.paredesEnRojo = nil }      // ya se midió: se apaga solo
+        } else if !m.enRojo.isEmpty { m.enRojo = [] }
         // El plano grande de la fase: en negro el cuarto donde ESTÁ (cuando ya se ubicó), si no el escogido.
         let aquiG = (n.ubicadoDesde != nil || maqueta > 0) && n.acomodo?.seguro == true ? cuartoDondeEsta() : nil
         let nombreG = aquiG ?? roomName
@@ -9816,7 +9855,8 @@ extension ARMeasureViewController {
     private func pintarCentroNuevo() {
         let n = nueva
         let hayPanel = !n.panel.isHidden || n.tarjetaVisible
-        let midiendo = (stage == .measuringLength || stage == .measuringWidth) && !esPorPieza
+        // (idea 3) En "Otro alto" el largo ya se cerró, pero la mira sigue: el + va en la línea del corte.
+        let midiendo = (stage == .measuringLength || stage == .measuringWidth || (medirPrimero && n.otroAlto && stage == .lengthDone)) && !esPorPieza
         n.mira.isHidden = hayPanel || !midiendo
         func grande(_ numero: String, _ unidad: String, antes: String = "") -> NSAttributedString {
             let s = NSMutableAttributedString()
@@ -9826,7 +9866,7 @@ extension ARMeasureViewController {
             return s
         }
         let f1 = { (x: Double) in Self.pies(x) }
-        var chica: String? = nil, gran: NSAttributedString? = nil, pista: String? = nil
+        var chica: String? = nil, gran: NSAttributedString? = nil, pista: String? = nil, renglon3: String? = nil, renglon4: String? = nil
         let vivo = n.vivo
         if hayPanel {
             // nada encima de la cámara mientras escoge
@@ -9835,19 +9875,26 @@ extension ARMeasureViewController {
         } else {
             switch stage {
             case .measuringLength:
-                if pathPoints.isEmpty { pista = "Primera esquina" }
+                if medirPrimero, n.medirActivo, let f = fichaDelCorte() {
+                    // (ideas 1, 3 y 5) Lo que va a guardar "Listo · 2 ft": material y alto, el área, la cuenta y el baseboard (P04, P07).
+                    chica = f.titulo; gran = grande(f.area, "pies²"); renglon3 = f.detalle; renglon4 = f.base
+                } else if pathPoints.isEmpty { pista = "Primera esquina" }
                 else if pathPoints.count == 1 {
                     if let v = vivo { gran = grande(f1(v), "pies") }
-                    chica = "Largo"; pista = "Siguiente esquina"
+                    chica = medirPrimero && n.medirActivo && section == "wall" ? nombreDeLaPared() + " · el largo" : "Largo"; pista = "Siguiente esquina"
                 } else {
                     let tramo = vivo ?? 0
                     chica = "Total \(f1(pathTotalFeet + tramo)) · tramo \(f1(tramo))"
                     gran = grande(f1(pathTotalFeet + tramo), "pies"); pista = "Siguiente esquina"
                 }
             case .lengthDone:
-                gran = grande(f1(pathTotalFeet), "pies"); chica = "Largo"
-                let cuadrado = selectedMaterial.map { unidad(for: $0.value) == .cuadrado } ?? false
-                pista = cuadrado && currentWidthFeet == nil ? (segundaEsAlto ? "Toque Alto" : "Toque Ancho") : "Toque Guardar"
+                if medirPrimero, n.medirActivo, let f = fichaDelCorte() {
+                    chica = f.titulo; gran = grande(f.area, "pies²"); renglon3 = f.detalle; renglon4 = f.base
+                } else {
+                    gran = grande(f1(pathTotalFeet), "pies"); chica = "Largo"
+                    let cuadrado = selectedMaterial.map { unidad(for: $0.value) == .cuadrado } ?? false
+                    pista = cuadrado && currentWidthFeet == nil ? (segundaEsAlto ? "Toque Alto" : "Toque Ancho") : "Toque Guardar"
+                }
             case .measuringWidth:
                 let que = segundaEsAlto ? "Alto" : "Ancho"
                 let llevado = (currentWidthFeet ?? 0)
@@ -9863,16 +9910,29 @@ extension ARMeasureViewController {
                 let menos = medirPrimero ? restaEnCurso(pathTotalFeet, w) : 0
                 gran = grande(f1(max(0, pathTotalFeet * w - menos)), "pies²", antes: "\(f1(pathTotalFeet)) × \(f1(w))" + (menos > 0 ? " − \(f1(menos)) =" : " ="))
                 pista = "Toque Guardar"
+                // (idea 1) El corte parcial con su alto ya marcado: lo que se resta y el baseboard (lo mismo que se guarda).
+                if medirPrimero, n.medirActivo, let r = renglonesDelCorte(L: pathTotalFeet, S: currentWidthFeet ?? 0) { renglon3 = r.resta; renglon4 = r.base }
             case .pickingMaterial:
                 break
             }
         }
         // Medir primero: la pista dice lo que sigue (el alto o el ancho con +, o Listo).
         if medirPrimero && n.medirActivo && !hayPanel, let pm = pistaMedir() { pista = pm }
+        if renglon3 != nil { pista = nil }      // la ficha de 4 renglones ya dice todo (su diseño, P04)
         n.fichaChica.text = chica
         n.fichaChica.isHidden = chica == nil
         n.fichaGrande.attributedText = gran
         n.ficha.isHidden = gran == nil && chica == nil
+        n.fichaDetalle.text = renglon3; n.fichaDetalle.isHidden = renglon3 == nil
+        n.fichaBase.text = renglon4; n.fichaBase.isHidden = renglon4 == nil
+        n.fichaPila?.alignment = renglon3 != nil ? .leading : .center
+        // (idea 1) Con lo del corte a la vista, la ficha se toca para cambiar "¿El corte incluye…?", y la puerta (o el arco) que se resta
+        // se señala en la cámara.
+        let conCorte = renglon3 != nil && section == "wall"
+        n.ficha.isUserInteractionEnabled = conCorte; n.columna.isUserInteractionEnabled = conCorte
+        let puerta = conCorte ? (n.corte ?? datosDelCorte()).flatMap { c in c.porque == nil ? c.aberturas.first(where: { !$0.esVentana }) : nil } : nil
+        n.chipDe = puerta.map { (p: $0.p, texto: $0.esPaso ? "arco · se resta solo" : "puerta · se resta sola") }
+        ponerChipDePuerta()
         n.pista.text = pista.map { "  " + $0 + "  " }
         n.pista.isHidden = pista == nil || !n.aviso.isHidden && false
     }
@@ -9924,9 +9984,11 @@ extension ARMeasureViewController {
                     if let start = (stage == .measuringWidth ? widthPoints.last : pendingStart) ?? pendingStart {
                         n.vivo = Double(simd_distance(start, hit)) * 3.28084
                     }
+                    // (idea 3) "Otro alto": la banda sigue a la mira hasta el + (solo se ve; nunca se guarda).
+                    if medirPrimero, n.otroAlto, n.altoDeUnPunto == nil, let piso = pisoConocido() { n.altoVivo = Double(hit.y - piso) * 3.28084 }
                 } else {
                     estado = .sinSuperficie
-                    n.vivo = nil
+                    n.vivo = nil; n.altoVivo = nil
                 }
             } else {
                 estado = .buscando
@@ -9946,25 +10008,30 @@ extension ARMeasureViewController {
         }
         // El número cambia con cada cuadro; lo demás solo cuando cambia el estado (pintarCamaraNueva).
         if pendingStart != nil || stage == .measuringWidth { pintarCentroNuevo() }
+        // (idea 3) La banda: en "Otro alto" sigue a la mira; si no, solo su "2 ft" se mueve con la cámara. (idea 1) El letrero de la puerta.
+        if medirPrimero && n.medirActivo { if n.otroAlto && n.altoDeUnPunto == nil { pintarBanda() } else { moverChipDeLaBanda() } }
+        if n.chipDe != nil || !n.chipPuerta.isHidden { ponerChipDePuerta() }
         revisarParteQueApunta()
         ubicarseEnElPlano()
         let ahoraMapa = CACurrentMediaTime()
         if ahoraMapa - n.ultimoMinimapa >= 0.05 || n.reubicandoDesde != nil || Date() < n.ruedaHasta { n.ultimoMinimapa = ahoraMapa; pintarMinimapa() }
         pintarAviso()
+        if medirPrimero { revisarFaltaQueVence() }
     }
 
     /// El aviso en su tarjeta de vidrio: la primera frase es el título y lo demás la explicación (un texto sin frases va
     /// solo de título). `alerta` = algo salió mal (ícono ámbar); si no, es un aviso (azul) o una confirmación (ok).
-    fileprivate func mostrarAvisoNuevo(_ texto: String, segundos: Double = 4.5, ok: Bool = false, alerta: Bool = false) {
+    fileprivate func mostrarAvisoNuevo(_ texto: String, segundos: Double = 4.5, ok: Bool = false, alerta: Bool = false, sub: String? = nil, icono: String? = nil) {
         guard experienciaNueva, nueva.armada else { return }
         let n = nueva, caja = n.avisoCaja
         let alerta = alerta || texto.hasPrefix("⚠︎") || texto.hasPrefix("Ojo")
-        let partes = Self.partesDelAviso(texto.replacingOccurrences(of: "⚠︎ ", with: ""))
+        // (13 pasos) Con `sub`, el título y la explicación ya vienen partidos ("Ahora: Kitchen" / "Por el mapa"): no se parte en ": ".
+        let partes = sub.map { (titulo: texto, sub: $0) } ?? Self.partesDelAviso(texto.replacingOccurrences(of: "⚠︎ ", with: ""))
         n.aviso.text = partes.titulo
         n.avisoSub.text = partes.sub
         n.avisoSub.isHidden = partes.sub.isEmpty
-        let icono = alerta ? "exclamationmark.triangle" : (ok ? "checkmark.circle" : "info.circle")
-        n.avisoIcono.image = UIImage(systemName: icono, withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .regular))
+        let nombreIcono = icono ?? (alerta ? "exclamationmark.triangle" : (ok ? "checkmark.circle" : "info.circle"))
+        n.avisoIcono.image = UIImage(systemName: nombreIcono, withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .regular))
         n.avisoIcono.tintColor = alerta ? Claro.ambar : Claro.azul
         n.avisoHasta = Date().addingTimeInterval(segundos)
         view.bringSubviewToFront(caja)
@@ -10421,8 +10488,11 @@ extension ARMeasureViewController {
         if medidaEnCurso { say("Primero guarde o cancele la medida que lleva.", .aviso); mostrarAvisoNuevo("Primero guarde o cancele la medida que lleva"); return }
         nueva.panelForzado = nil
         if cuarto == roomName { nueva.seccionConfirmada = false; pintarCamaraNueva(); return }
+        let antes = roomName
         pasoAbierto = .queCuarto
         _ = contestar(.queCuarto, cuarto)
+        // (13 pasos) Escogido a mano también revisa "falta una pared" del cuarto que dejó (lo mismo que cuando lo cambia el mapa).
+        if medirPrimero, nueva.medirActivo, Self.clave(roomName) != Self.clave(antes) { salioDelCuarto(antes, a: roomName) }
         updateUI()
     }
     private func elegirParteNueva(_ clave: String) {
@@ -10454,7 +10524,7 @@ extension ARMeasureViewController {
     }
     @objc fileprivate func rielCuartoTocado() { if esRecorrido && !esSoloUnCuarto { abrirPanelNuevo(.cuarto) } }
     @objc fileprivate func rielParteTocado() { if esRecorrido && seccionesDisponibles.count > 1 { abrirPanelNuevo(.parte) } }
-    @objc fileprivate func rielMaterialTocado() { if medirPrimero && nueva.medirActivo { return }; if !materials.isEmpty { abrirPanelNuevo(.material) } }
+    @objc fileprivate func rielMaterialTocado() { if medirPrimero && nueva.medirActivo { abrirMaterialPuesto(); return }; if !materials.isEmpty { abrirPanelNuevo(.material) } }
     @objc fileprivate func gatilloNuevoTocado() {
         if medirPrimero && nueva.medirActivo { gatilloMedir(); pintarCamaraNueva(); return }
         if esPorPieza { tocarAccionVieja("mas") } else if accionesPosibles().marcar { addTapped() }
@@ -10478,7 +10548,7 @@ extension ARMeasureViewController {
 
     // Terminar: el resumen se LEE antes de mandar, y salir sin mandar se confirma dos veces.
     @objc fileprivate func terminarNuevoTocado() {
-        // Medir primero: arriba dice "Terminar cuarto" y abre la hoja del cuarto (ahí está también "Terminar y mandar").
+        // Medir primero: arriba dice "Revisar y mandar" y abre la hoja (ahí está "Terminar y mandar").
         if medirPrimero && nueva.medirActivo && !nueva.terminarDeVerdad { abrirHojaDelCuarto(); return }
         if items.isEmpty && !medidaEnCurso { cancelTapped(); return }
         if items.isEmpty {
@@ -10487,7 +10557,8 @@ extension ARMeasureViewController {
             a.addAction(UIAlertAction(title: "Salir", style: .destructive) { [weak self] _ in self?.cancelTapped() })
             present(a, animated: true); return
         }
-        let a = UIAlertController(title: "Revisar y mandar", message: resumenHablado(), preferredStyle: .alert)
+        let falta = medirPrimero ? loQueFalta() : []
+        let a = UIAlertController(title: "Revisar y mandar", message: (falta.isEmpty ? "" : "Sin medida: " + falta.joined(separator: "; ") + ".\n\n") + resumenHablado(), preferredStyle: .alert)
         a.addAction(UIAlertAction(title: "Mandar \(items.count) " + (items.count == 1 ? "medida" : "medidas"), style: .default) { [weak self] _ in
             guard let self = self else { return }
             self.resumenPendiente = true
@@ -10522,7 +10593,7 @@ extension ARMeasureViewController {
         nueva.fondoMaqueta = fondo
         asistenteHabla = false
         func guardada(_ cuarto: String, _ sec: String, _ mat: String, _ l: Double, _ w: Double?) {
-            items.append((length: l, width: w, material: mat, companion: nil, nivel: nivelActual, cuarto: cuarto, seccion: sec, markers: [], menos: 0, menosQue: "", paredes: [], completa: false))
+            items.append((length: l, width: w, material: mat, companion: nil, nivel: nivelActual, cuarto: cuarto, seccion: sec, markers: [], menos: 0, menosQue: "", paredes: [], completa: false, parte: sec))
         }
         let p = SIMD3<Float>(0, 0, 0)
         switch maqueta {
@@ -10556,7 +10627,7 @@ extension ARMeasureViewController {
             roomName = "Living Room"; nueva.cuartoVisto = roomName
             _ = cambiarSeccion("wall"); nueva.seccionConfirmada = true
             guardada("Living Room", "floor", "Laminate", 9.8, 10)
-        case 24...54:
+        case 24...108:
             // MEDIR PRIMERO (16 oct): se arma en maquetaMedirPrimero(), al final.
             break
         default:
@@ -10764,7 +10835,7 @@ extension ARMeasureViewController {
             let letras = n.clasificador.votos.suffix(15).map { v -> String in
                 switch v.v { case .piso: return "P"; case .pared: return "W"; case .techo: return "T"; case .esquina: return "e"; case .nada: return "."; case .moviendo: return "~" }
             }.joined()
-            anotarMedir("resumen", ["parte": section, "zona": n.zonaVista ?? "", "bloqueado": bloqueoDeParte(), "a_mano": n.parteAMano,
+            var resumen: [String: Any] = ["parte": section, "zona": n.zonaVista ?? "", "bloqueado": bloqueoDeParte(), "a_mano": n.parteAMano,
                                     "votos": letras, "grados": (m.grados * 10).rounded() / 10, "clase": m.golpe?.clase ?? "",
                                     "a_pared_plano": m.golpe?.aParedPlano.map { ($0 * 100).rounded() / 100 } ?? -1,
                                     "ubicado": ubicacionBase(), "firme": ubicacionFirme(),
@@ -10776,18 +10847,27 @@ extension ARMeasureViewController {
                                     "d_plano": n.rayoActual.map { ($0.dist * 0.3048 * 100).rounded() / 100 } ?? -1,
                                     "d_laser": m.golpe.map { ($0.d * 100).rounded() / 100 } ?? -1, "pared_vista": n.paredVista ?? -1,
                                     "cand": n.puerta.cand?.rawValue ?? "", "reubicando": n.reubicandoDesde != nil,
-                                    "ventana": n.preguntaMedir.map { "\($0)" } ?? "", "auto": n.eleccionAuto, "enganchada": n.enganchada,
+                                    "ventana": n.preguntaMedir.map { "\($0)" } ?? "", "enganchada": n.enganchada,
                                     "p_apuntada": paredApuntada() ?? -1, "p_actual": n.paredActual ?? -1,
                                     "lentos": n.lentos, "peor_ms": Int((n.peorDt * 1000).rounded()), "ubicar_ms": (n.ubicarMs * 10).rounded() / 10,
                                     "planos": n.planosVistos.count, "termico": ProcessInfo.processInfo.thermalState.rawValue,
                                     "bloq_por": porqueBloqueo(), "reciente": ubicacionReciente(), "puntos": (n.puerta.puntos * 10).rounded() / 10,
                                     "zona_ms": Int(((ahora - n.zonaVistaDesde) * 1000).rounded()), "pv_ms": Int(((ahora - n.paredVistaDesde) * 1000).rounded()),
                                     "mano_ms": n.aManoOtraDesde.map { Int(((ahora - $0) * 1000).rounded()) } ?? -1,
-                                    "callado": n.cierreCallado && Date().timeIntervalSince(n.cierreCalladoDesde) < 20,
                                     "resp": textoResp(), "p_act": n.pAct.map { $0.rounded() } ?? -1,
                                     "vistos": n.vistosPared, "descartados": n.descartados, "pies": Int(n.piesDeParedVistos),
                                     "pintadas": n.pintadas, "rehechos": n.rehechos, "panel_ms": (n.panelMs * 10).rounded() / 10,
-                                    "cortes_cuadro": n.cortesDeCuadro, "malla": !n.mallaApagada])
+                                    "cortes_cuadro": n.cortesDeCuadro, "malla": !n.mallaApagada]
+            // (13 pasos) Lo que ofrecía la franja, la pared que falta, el corte, el alto, la banda y el material puesto.
+            resumen["franja"] = n.franjaContenido.map { $0.parte + ($0.pared.map { "#\($0)" } ?? "") + ($0.habilitada ? "" : "-apagada") } ?? ""
+            resumen["falta"] = n.faltaVisible?.cuarto ?? ""
+            resumen["salida"] = n.salidaDe?.nombre ?? ""
+            resumen["alto_nivel"] = altoRecordado().map { ($0.pies * 10).rounded() / 10 } ?? 0
+            resumen["banda"] = !n.bandaFirma.isEmpty
+            resumen["otro_alto"] = n.otroAlto
+            resumen["piso_medir"] = pisoConocido().map { (Double($0) * 100).rounded() / 100 } ?? -99
+            resumen["mat_puesto"] = materialPuestoVigente().map { $0.parte + ":" + $0.material } ?? ""
+            anotarMedir("resumen", resumen)
             n.lentos = 0; n.peorDt = 0; n.ubicarMs = 0; n.pintadas = 0; n.rehechos = 0; n.panelMs = 0; n.cortesDeCuadro = 0
             if lab.bitacora.count >= 20 { enviarBitacora() }
         }
@@ -11613,8 +11693,13 @@ extension ARMeasureViewController {
             n.enganchada = false
             n.paredVista = nil; n.paredCandidata = nil         // la pared vista era de otro cuarto
             n.puertaPared.soltar()
+            // (idea 5, revisión 2) Lo tocado en MEDIDA NO se borra al cambiar de cuarto (asomarse 1.5 s al pasillo lo borraba y el corte
+            // de Bedroom 2 salía en Drywall): materialPuestoVigente() solo lo usa en el cuarto donde se tocó. Se va al guardar o cancelar.
+            // (revisión 2) La franja era del cuarto de antes: se quita al momento (un toque tardío guardaba lo completo del cuarto nuevo).
+            n.franjaContenido = nil; n.firmaEleccion = ""; pintarFranja()
+            n.cuartoDesde = CACurrentMediaTime()                // (13 pasos) "falta una pared" pide unos segundos ya en el cuarto nuevo
             empezarPared()
-            if n.preguntaMedir == .cierre || n.preguntaMedir == .cuarto { n.preguntaMedir = nil; n.cambioPendiente = nil }
+            if n.preguntaMedir == .cuarto { n.preguntaMedir = nil }
         }
         if n.seccionVista != section {
             if n.seccionVista != nil && !n.cambiandoSolo && !cambioCuarto { n.parteAMano = true; anotarMedir("a-mano", ["prende": "panel", "parte": section]); empezarPared() }
@@ -11629,14 +11714,15 @@ extension ARMeasureViewController {
         }
         return false
     }
+    // (13 pasos, idea 4) Arriba ya no se termina el cuarto (el mapa cambia de cuarto solo): "Revisar y mandar" con el número de TODAS
+    // las medidas (el mismo de "Mandar N medidas"). Abre la hoja de siempre (abrirHojaDelCuarto).
     fileprivate func pintarBotonTerminarCuarto() {
         let n = nueva
-        let aqui = items.filter { $0.cuarto == roomName && (nivelActual.isEmpty || $0.nivel == nivelActual) }.count
-        n.terminar.setTitle("Terminar cuarto", for: .normal)
-        n.terminarCuenta.text = " \(aqui) "
+        n.terminar.setTitle("Revisar y mandar", for: .normal)
+        n.terminarCuenta.text = " \(items.count) "
         n.terminarCuenta.isHidden = false
-        n.terminar.contentEdgeInsets = UIEdgeInsets(top: 0, left: 12, bottom: 0, right: aqui > 9 ? 44 : 38)
-        n.terminar.accessibilityLabel = "Terminar cuarto, \(aqui) " + (aqui == 1 ? "medida" : "medidas")
+        n.terminar.contentEdgeInsets = UIEdgeInsets(top: 0, left: 12, bottom: 0, right: items.count > 9 ? 44 : 38)
+        n.terminar.accessibilityLabel = "Revisar y mandar, " + "\(items.count) " + (items.count == 1 ? "medida" : "medidas")
     }
     private func medidaDelRiel() -> String {
         let L = Self.pies(pathTotalFeet)
@@ -11703,36 +11789,62 @@ extension ARMeasureViewController {
         n.rielAlto?.constant = 52
         let porMapa = n.cuartoAMano == nil && (maqueta > 0 || ubicacionBase())
         riel(n.rielCuarto, "CUARTO", roomName.isEmpty ? "—" : roomName, porMapa ? "por el mapa" : "escogido", activo: esRecorrido && !esSoloUnCuarto)
-        riel(n.rielParte, "PARTE", section.isEmpty ? "—" : Self.sectionSpokenName(section).capitalized, n.parteAMano ? "escogida" : "por el teléfono",
-             activo: seccionesDisponibles.count > 1)
-        riel(n.rielMaterial, "MEDIDA", medidaDelRiel(), "material al final", activo: false)
+        // (13 pasos) PARTE: la pared del plano con su número ("Pared 2", el mismo de "falta la pared 2"; solo con la ubicación confirmada)
+        // y de dónde salió: escogida, parcial con + (ya marcó), cambió sola (2.5 s) o por el teléfono.
+        var valorParte = section.isEmpty ? "—" : Self.sectionSpokenName(section).capitalized
+        if section == "wall", let i = n.paredActual, maqueta > 0 || ubicacionReciente() { valorParte += " \(i + 1)" }
+        let conMas = !largoDictado && (!pathPoints.isEmpty || !widthPoints.isEmpty)
+        let deDonde = n.parteAMano ? "escogida" : (conMas ? "parcial · con +" : (Date() < n.cambioSoloHasta ? "cambió sola" : "por el teléfono"))
+        riel(n.rielParte, "PARTE", valorParte, deDonde, activo: seccionesDisponibles.count > 1)
+        // (ideas 3 y 5) MEDIDA: lo que se va a guardar y el material PUESTO (se toca para cambiarlo antes de guardar).
+        let medida = rielDeLaMedida()
+        riel(n.rielMaterial, "MEDIDA", medida.valor, medida.sub, activo: medida.tocable)
+        // El material va primero y lo de "como Kitchen" al final: si no cabe, se achica un poco y se corta en medio (nunca el cuarto).
+        if let l = n.rielMaterial.viewWithTag(3) as? UILabel { l.adjustsFontSizeToFitWidth = true; l.minimumScaleFactor = 0.85; l.lineBreakMode = .byTruncatingMiddle }
         // Deshacer, con lo que va a quitar escrito debajo.
         let leyenda: String, puedeDeshacer: Bool
         switch stage {
         case .measuringLength:
-            // Enganchada en "parcial" sin esquinas: Deshacer vuelve a la ventana para escoger otra vez.
+            // Enganchada en "parcial" sin esquinas: Deshacer vuelve a escoger.
             if pathPoints.isEmpty, n.enganchada { leyenda = "volver a escoger"; puedeDeshacer = true }
-            else if pathPoints.isEmpty { leyenda = items.isEmpty ? "nada todavía" : "la guardada"; puedeDeshacer = !items.isEmpty }
+            else if pathPoints.isEmpty {
+                // (idea 1) Lo guardado junto se deshace junto: "las 2 de la pared 1".
+                leyenda = items.isEmpty ? "nada todavía" : (ultimaEsPareja() ? "las 2 de " + (items.last?.paredes.first.map { "la pared \($0 + 1)" } ?? "esta pared") : "la guardada")
+                puedeDeshacer = !items.isEmpty
+            }
             else { leyenda = "la esquina"; puedeDeshacer = true }
-        case .lengthDone: leyenda = "el largo"; puedeDeshacer = true
+        case .lengthDone:
+            // (idea 3) "Otro alto": quita el + del alto, o vuelve a las esquinas.
+            leyenda = n.otroAlto ? (n.altoDeUnPunto != nil ? "el alto" : "volver a las esquinas") : "el largo"; puedeDeshacer = true
         case .measuringWidth: leyenda = pendingStart == nil ? "el " + segundaPalabra : "punto del " + segundaPalabra; puedeDeshacer = true
-        case .widthDone: leyenda = "la esquina"; puedeDeshacer = true
+        case .widthDone: leyenda = altoDeLaBandaPuesto ? "el alto" : "la esquina"; puedeDeshacer = true
         case .pickingMaterial: leyenda = "nada todavía"; puedeDeshacer = false
         }
         n.deshacer.setAttributedTitle(Self.dosRenglones("Deshacer", leyenda, color: puedeDeshacer ? Claro.tinta : Claro.apagado), for: .normal)
         n.deshacer.isEnabled = puedeDeshacer
-        // El +: el largo, y después el alto (pared) o el ancho (piso, techo).
-        let masVivo = !roomName.isEmpty && stage != .lengthDone
+        // El +: el largo, y después el alto (pared) o el ancho (piso, techo). En "Otro alto" el + es la línea del corte; con el alto de
+        // la banda ya puesto no hay nada que marcar.
+        let masVivo = !roomName.isEmpty && (stage != .lengthDone || n.otroAlto) && !altoDeLaBandaPuesto
         n.gatillo.isEnabled = masVivo
         n.gatillo.alpha = masVivo ? 1 : 0.45
-        n.gatillo.accessibilityLabel = "Marcar esquina"
+        n.gatillo.accessibilityLabel = n.otroAlto ? "Marcar la línea del corte" : "Marcar esquina"
+        // (idea 3) Un corte de pared con sus esquinas: "Listo · 2 ft", "Alto · un +", "Alto · dos +" o "Listo · el largo" (pie lineal).
+        if let c = botonDelCorte() {
+            n.accionDerecha = c.accion
+            n.derecho.isEnabled = true
+            n.derecho.backgroundColor = Claro.azul
+            n.derecho.setAttributedTitle(Self.dosRenglones(c.titulo, c.sub, color: .white, fuerte: true), for: .normal)
+            return
+        }
         // Listo: primero cierra el largo (y pregunta si mide el alto o el ancho); con el alto/ancho, el área.
         let listo = puedeListo()
         let sub: String
         switch stage {
-        case .widthDone: sub = "\(Self.pies(max(0, pathTotalFeet * (currentWidthFeet ?? 0) - restaEnCurso(pathTotalFeet, currentWidthFeet ?? 0)))) pies²"
+        // (idea 1) El corte que arranca en el piso con su baseboard ya contestado: Listo guarda los dos renglones juntos.
+        case .widthDone: sub = llevaBaseboardElCorte() == true ? "guarda 2 renglones"
+            : "\(Self.pies(max(0, pathTotalFeet * (currentWidthFeet ?? 0) - restaEnCurso(pathTotalFeet, currentWidthFeet ?? 0)))) pies²"
         case .measuringWidth: sub = "falta el " + segundaPalabra
-        case .measuringLength, .lengthDone: sub = listo ? "el largo" : "falta medir"
+        case .measuringLength, .lengthDone: sub = listo ? "el largo" : (section == "wall" && pathPoints.count == 1 ? "falta la otra esquina" : "falta medir")
         case .pickingMaterial: sub = "falta medir"
         }
         var titulo = "Listo", subDerecho = sub
@@ -11752,8 +11864,11 @@ extension ARMeasureViewController {
         switch stage {
         case .pickingMaterial: return nil
         // Cortas: a la derecha de arriba va el mapita.
-        case .measuringLength: return pathPoints.isEmpty ? "Primera esquina" : (pathPoints.count == 1 ? "Siguiente esquina" : "Otra esquina, o Listo")
-        case .lengthDone: return section == "wall" ? "¿Mide el alto?" : "¿Mide el ancho?"
+        case .measuringLength: return pathPoints.isEmpty ? "Primera esquina" : (pathPoints.count == 1 ? "Siguiente esquina"
+            : (section == "wall" && !ReglasDeMedir.esDePieLineal(materialDeLaPared()) ? "Otra esquina, o el alto" : "Otra esquina, o Listo"))
+        case .lengthDone:
+            if nueva.otroAlto { return nueva.altoDeUnPunto == nil ? "+ en la línea del corte" : "Listo, o + otra vez" }
+            return section == "wall" ? "¿Mide el alto?" : "¿Mide el ancho?"
         case .measuringWidth: return (pendingStart == nil ? "Inicio del " : "Final del ") + segundaPalabra + " con +"
         case .widthDone: return "Otra esquina, o Listo"
         }
@@ -11763,23 +11878,53 @@ extension ARMeasureViewController {
     fileprivate func gatilloMedir() {
         let n = nueva
         guard n.medirActivo, n.preguntaMedir == nil, !n.ajusteAbierto, !roomName.isEmpty else { return }
+        let franjaAlTocar = n.franjaContenido
+        // (13 pasos) Tocar + con "falta una pared" a la vista = sigue aquí: la tarjeta se va (y se anota). Ese + NO marca: la tarjeta
+        // tapaba la mira y la esquina caería a ciegas; el siguiente + ya la marca viendo.
+        if let f = n.faltaVisible {
+            anotarMedir("falta-pared", ["que": "ignorada-mas", "de": f.cuarto, "paredes": f.paredes.map { $0 + 1 }])
+            n.paredesEnRojo = nil; cerrarFalta(); pintarCamaraNueva(); return
+        }
         // Lo completo con sus medidas del plano no tiene esquinas que marcar: el + vuelve a "¿Qué material es?".
         if let pe = n.parteEntera, pe.alto != nil, largoDictado, stage == .widthDone, widthPoints.isEmpty { abrirPregunta(Self.preguntaDelMaterial(pe.seccion)); return }
-        // La primera esquina: si el teléfono apunta CLARO a otra parte (pared, techo o piso), la parte cambia antes de marcar.
-        // (Sin brincarse "¿Ya terminó con esta pared?" ni su "Continuar": de una pared con medidas no se sale aquí; si de verdad
-        // era otra parte, Listo la corrige por los puntos.)
-        let ahora = CACurrentMediaTime()
-        if stage == .pickingMaterial || stage == .measuringLength, pathPoints.isEmpty, !parteFija,
-           !(section == "wall" && (n.cierreCallado || medidasEnEstaPared() > 0)),
-           let z = n.clasificador.ahoraMismo(ahora: ahora), z != section, seccionesDisponibles[z] != nil {
-            anotarMedir("cambio", ["de": section, "a": z, "por": "primera-esquina"])
-            aplicarCambio(.parte(z))
+        // (idea 3) "Otro alto": el + es la línea del corte (un solo punto; el de abajo es el piso que ve la cámara).
+        if n.otroAlto, stage == .lengthDone {
+            anotarMedir("mas", ["parte": section, "paso": "otro-alto", "esquinas": pathPoints.count])
+            marcarOtroAlto(); return
         }
+        // Con el alto de la banda ya puesto (sin puntos del alto) no hay nada que marcar: Deshacer lo quita.
+        if altoDeLaBandaPuesto { return }
+        let ahora = CACurrentMediaTime()
+        // (idea 4) La medida es del cuarto donde está AHORA: si el mapa lo pasó a otro cuarto (se asomó) y ya regresó, la primera esquina
+        // lo regresa sin esperar los 1.5 s. Respeta el cuarto escogido a mano.
+        if stage == .pickingMaterial || stage == .measuringLength, pathPoints.isEmpty, !largoDictado, ubicacionReciente(),
+           let aqui = cuartoDondeEsta(), Self.clave(aqui) != Self.clave(roomName),
+           !(n.cuartoAMano.map { Self.clave($0.mapa ?? "") == Self.clave(aqui) } ?? false) {
+            anotarMedir("cambio", ["de_cuarto": roomName, "a_cuarto": aqui, "por": "primera-esquina"])
+            n.cuartoCandidato = nil
+            aplicarCambio(.cuarto(aqui))
+        }
+        // La primera esquina: si el teléfono apunta CLARO a otra parte, la parte cambia antes de marcar (idea 6: tocar + es lo parcial; si
+        // era otra parte, Listo la corrige por los puntos). De la pared al piso NO: la esquina de un corte va al pie de la pared,
+        // apuntando abajo, y sin alto no hay cómo corregirla después (la banda que sube del piso y el riel PARTE enseñan que es pared).
+        if stage == .pickingMaterial || stage == .measuringLength, pathPoints.isEmpty, !parteFija,
+           let z = n.clasificador.ahoraMismo(ahora: ahora), z != section, seccionesDisponibles[z] != nil {
+            if section == "wall" && z == "floor" { anotarMedir("cambio", ["de": section, "a": z, "por": "primera-esquina", "frenado": true]) }
+            else { anotarMedir("cambio", ["de": section, "a": z, "por": "primera-esquina"]); aplicarCambio(.parte(z)) }
+        }
+        let fr = franjaAlTocar.map { $0.parte + ($0.habilitada ? "" : "-apagada") } ?? ""
         anotarMedir("mas", ["parte": section, "paso": "\(stage)", "esquinas": pathPoints.count, "alto": widthPoints.count,
                             "zona": n.zonaVista ?? "", "ahora": n.clasificador.ahoraMismo(ahora: ahora) ?? "",
-                            "grados": n.clasificador.votos.last.map { ($0.grados * 10).rounded() / 10 } ?? 0])
-        // Lo que veía el teléfono al marcar la PRIMERA esquina (Listo corrige la parte por los puntos con eso, no con lo de ahora).
-        if pathPoints.isEmpty { n.zonaAlPrimerPunto = n.zonaVista }
+                            "grados": n.clasificador.votos.last.map { ($0.grados * 10).rounded() / 10 } ?? 0, "franja": fr])
+        // Lo que veía el teléfono al marcar la PRIMERA esquina; (idea 1) y si la ubicación estaba confirmada en CADA esquina del largo
+        // (solo así se pasan al plano para restar sus puertas). "¿Qué incluye?" de la medida anterior no pasa a esta.
+        // (revisión) Una bandera POR ESQUINA, puesta solo si la esquina de verdad se marcó: Deshacer la quita con su esquina (antes
+        // una esquina sin ubicar dejaba todo el corte "sin ubicar" aunque se volviera a marcar ya ubicado). El alto de otra medida
+        // que se dejó a medias tampoco pasa a esta.
+        let antes = pathPoints.count, ub = ubicacionReciente()
+        if pathPoints.isEmpty { n.zonaAlPrimerPunto = n.zonaVista; n.incluyeDelCorte = nil; n.altoParaRecordar = nil }
+        // (revisión 3) Y la pared a la que apuntaba, solo con la ubicación confirmada: sin eso paredActual puede ser la de antes.
+        if pathPoints.isEmpty { n.paredAlPrimerPunto = ub ? paredApuntada() : nil; n.paredSinSaber = false }
         switch stage {
         case .pickingMaterial:
             stage = .measuringLength
@@ -11791,21 +11936,46 @@ extension ARMeasureViewController {
         case .measuringWidth, .widthDone:
             addTapped()                       // el alto o el ancho también por esquinas
         }
+        if stage == .measuringLength, pathPoints.count > antes { n.ubicadaEnEsquina = Array(n.ubicadaEnEsquina.prefix(antes)) + [ub] }
     }
     // Deshacer, paso por paso, como siempre: la esquina del largo, y en el alto o el ancho un punto a la vez.
     fileprivate func deshacerMedir() {
         guard nueva.preguntaMedir == nil else { return }
-        // Enganchada en "parcial" y sin esquinas: se suelta y vuelve la ventana de escoger (nunca borra una guardada).
+        // (idea 3) "Otro alto": Deshacer quita el + del alto; sin él, vuelve a las esquinas (con su banda).
+        if nueva.otroAlto, stage == .lengthDone {
+            if nueva.altoDeUnPunto != nil { quitarMarcaOtroAlto(); nueva.altoDeUnPunto = nil; anotarMedir("otro-alto", ["que": "deshace-punto"]); return }
+            nueva.otroAlto = false; nueva.altoVivo = nil
+            stage = .measuringLength; pendingStart = pathPoints.last; pendingStartNode = currentMarkers.last
+            anotarMedir("otro-alto", ["que": "cancela"]); return
+        }
+        // El alto de la banda ya puesto (tocó "Corregir" en una pregunta): se quita y vuelve a las esquinas.
+        if altoDeLaBandaPuesto {
+            widthPoints = []; currentWidthFeet = nil; nueva.altoParaRecordar = nil
+            stage = .measuringLength; pendingStart = pathPoints.last; pendingStartNode = currentMarkers.last
+            anotarMedir("alto", ["que": "deshecho"]); return
+        }
+        // Enganchada en "parcial" y sin esquinas: se suelta y vuelve a escoger (nunca borra una guardada).
         if nueva.enganchada, pathPoints.isEmpty, widthPoints.isEmpty, !medidaEnCurso {
             nueva.enganchada = false; nueva.parteAMano = false
             anotarMedir("eleccion", ["escogio": "volver"])
             revisarEleccion(); pintarCamaraNueva(); return
         }
         // La pared entera sin puntos marcados: Deshacer la quita completa (nunca una medida ya guardada).
-        // (16 oct) Deshacer la completa regresa a escoger (la ventana), no a medir parcial como "No era completa".
         if nueva.parteEntera != nil, largoDictado, pathPoints.isEmpty, widthPoints.isEmpty, pendingStart == nil {
             cancelarParteEntera(aParcial: false); revisarEleccion(); pintarCamaraNueva(); return
         }
+        // (idea 1) Lo que se guardó junto (el corte o la pared completa, y su baseboard): UN Deshacer quita los dos renglones.
+        if stage == .measuringLength || stage == .pickingMaterial, pathPoints.isEmpty, !medidaEnCurso,
+           let ult = items.indices.last, ult >= 1, nueva.pegadaALaAnterior.contains(ult) {
+            nueva.pegadaALaAnterior.remove(ult)
+            let quito = items[ult - 1].material + "+" + items[ult].material, de = items[ult - 1].material
+            undoTapped(); undoTapped()
+            anotarMedir("deshacer", ["quito": 2, "materiales": quito])
+            mostrarAvisoNuevo("Quité las 2: \(de) y su baseboard", segundos: 2.5)
+            return
+        }
+        // (idea 3) El alto de una pared con dos +: quitar su último punto vuelve a las esquinas, con el botón del corte a la derecha.
+        if medirPrimero, section == "wall", nueva.parteEntera == nil, stage == .measuringWidth || stage == .widthDone { undoTapped(); return }
         switch stage {
         case .measuringLength, .pickingMaterial:
             undoTapped()
@@ -11839,9 +12009,34 @@ extension ARMeasureViewController {
         revisarParteDeLaMedida("listo")
         let conSegunda = stage == .widthDone && (currentWidthFeet ?? 0) > 0
         switch section {
-        case "wall": abrirPregunta(conSegunda ? .matPared : .que)
-        case "floor": abrirPregunta(conSegunda ? .piso : .lineal1)
-        case "ceiling": abrirPregunta(conSegunda ? .techo : .lineal1)
+        case "wall":
+            if conSegunda {
+                // (idea 3) El alto con dos + que arranca en el piso es el alto del corte del nivel. (ideas 1 y 5) Todo corte con alto va por
+                // guardarCorte: sus puertas, "¿El corte incluye…?" del cuarto y el material puesto.
+                let pisoY = pisoConocido().map { Double($0) }, ys = widthPoints.map { Double($0.y) }
+                let desdePiso = n.parteEntera == nil && widthPoints.count >= 2 && ReglasDeMedir.arrancaEnElPiso(ys, piso: pisoY)
+                if widthPoints.count >= 2 {
+                    // (revisión) El alto del nivel se cuenta DESDE EL PISO (la banda y "Listo · 2 ft" van del piso a ese alto). Los dos +
+                    // solo lo dan si el de abajo está en el piso y van parados (lo marcado ≈ la línea de arriba sobre el piso); si no,
+                    // no se recuerda (esta pared se guarda como se midió; la siguiente lo mide con un +). Otros dos + que no arrancan
+                    // en el piso borran el de una medida que se dejó.
+                    let vert = desdePiso ? ReglasDeMedir.altoSobreElPiso(ys, piso: pisoY) : nil
+                    n.altoParaRecordar = desdePiso ? ReglasDeMedir.altoDelNivelDeDosPuntos(ys, piso: pisoY, marcado: currentWidthFeet ?? 0) : nil
+                    let parejo = n.altoParaRecordar != nil
+                    anotarMedir("alto", ["que": desdePiso && !parejo ? "dos-puntos-no-recordado" : "dos-puntos", "pies": ((currentWidthFeet ?? 0) * 10).rounded() / 10,
+                                         "largo": (pathTotalFeet * 10).rounded() / 10, "desde_piso": desdePiso, "vert": ((vert ?? -1) * 10).rounded() / 10])
+                }
+                guardarCorte()
+            } else { abrirPregunta(.que) }
+        case "floor":
+            if conSegunda, preguntarSiYaCompleta("floor") { return }
+            // (idea 5) El piso puesto (el del cuarto anterior o el que tocó en MEDIDA): sin "¿Qué piso es?".
+            if conSegunda, let pre = pisoPuesto() {
+                anotarMedir("piso-puesto", ["material": pre.material, "de": pre.de, "completo": false]); resolverPiso(pre.material)
+            } else { abrirPregunta(conSegunda ? .piso : .lineal1) }
+        case "ceiling":
+            if conSegunda, preguntarSiYaCompleta("ceiling") { return }
+            abrirPregunta(conSegunda ? .techo : .lineal1)
         default:
             // Cocina, baño o materiales (escogidas a mano): su lista de siempre y se guarda como siempre.
             if selectedMaterial == nil { abrirPanelNuevo(.material) } else { saveContinueTapped() }
@@ -11893,7 +12088,8 @@ extension ARMeasureViewController {
         nueva.preguntaMedir = nil
         nueva.eleccionAuto = false
         nueva.porGuardar = nil
-        nueva.cambioPendiente = nil
+        nueva.corte = nil; nueva.cambiandoIncluye = false; nueva.incluyeSoloEsta = false   // (idea 1) lo congelado solo vale hasta guardar o salir de la pregunta
+        nueva.paredSinSaber = false                   // (revisión 3) "Es otra pared" vale solo para la medida que se guardaba; Corregir vuelve a revisar
         nueva.firmaPanel = ""
         pintarCamaraNueva()
     }
@@ -11909,9 +12105,10 @@ extension ARMeasureViewController {
         }
         revisarEleccion()
         guard !bloqueoDeParte() else { n.cuartoCandidato = nil; return }
-        // 1. EL CUARTO, por el mapa (solo con la ubicación firme, 1.5 s en el mismo, y nunca a uno ya terminado).
+        // (13 pasos, idea 4) Lo que faltó del cuarto de antes: unos segundos ya en este (nunca al asomarse), entre una medida y otra.
+        revisarParedQueFalta(ahora)
+        // 1. EL CUARTO, por el mapa (solo con la ubicación firme y 1.5 s en el mismo). (13 pasos: también a uno donde ya midió.)
         if ubicacionReciente(), let aqui = cuartoDondeEsta(), Self.clave(aqui) != Self.clave(roomName),
-           !n.cuartosTerminados.contains(Self.clave(aqui)),
            !(n.cuartoAMano.map { Self.clave($0.mapa ?? "") == Self.clave(aqui) } ?? false) {
             if let c = n.cuartoCandidato, c.nombre == aqui {
                 if ahora - c.desde >= 1.5 { n.cuartoCandidato = nil; pedirCambio(.cuarto(aqui)); return }
@@ -11951,30 +12148,12 @@ extension ARMeasureViewController {
         n.parteAMano = false; n.enganchada = false; n.aManoOtraDesde = nil
         anotarMedir("a-mano", ["suelta": porque, "parte": section])
     }
-    // Con medidas en esta pared, antes de irse se pregunta "¿Ya terminó con esta pared?". Con "Continuar", no se va.
-    static let esperaParaPreguntar: Double = 1.2      // lo que abre "¿Ya terminó con esta pared?" pide lo nuevo sostenido
-    private func pedirCambio(_ d: CambioDeLugar) {
-        let n = nueva
-        // (16 oct) Una pared ya COMPLETA no pregunta "¿Ya terminó?": ya terminó. Y "Continuar" vale 20 s, no hasta la siguiente medida.
-        if section == "wall", medidasEnEstaPared() > 0, !(n.paredActual.map { estadoDeLaPared($0) == "completa" } ?? false) {
-            // Lo que abre la pregunta pide lo nuevo SOSTENIDO 1.2 s: una mirada al piso o pasar la vista por la pared de al lado no pregunta.
-            let ahora = CACurrentMediaTime()
-            switch d {
-            case .parte: if ahora - n.zonaVistaDesde < Self.esperaParaPreguntar { return }
-            case .pared: if ahora - n.paredVistaDesde < Self.esperaParaPreguntar { return }
-            case .cuarto(let c):
-                // Un cuarto nuevo SIEMPRE pregunta; solo se calla 20 s el MISMO cuarto al que ya le dijo "Continuar".
-                if let cc = n.cuartoCallado, Self.clave(cc.nombre) == Self.clave(c), Date().timeIntervalSince(cc.desde) < 20 { return }
-            }
-            if case .cuarto = d {} else if n.cierreCallado && Date().timeIntervalSince(n.cierreCalladoDesde) < 20 { return }
-            n.cambioPendiente = d
-            abrirPregunta(.cierre)
-            return
-        }
-        aplicarCambio(d)
-    }
+    /// (13 pasos, idea 4) Ya no se pregunta si terminó con la pared: entre una medida y otra la pared, la parte y el cuarto cambian solos
+    /// (la regla madre, bloqueoDeParte, ya frena a media medida). Lo olvidado lo atrapa "falta una pared" al salir.
+    private func pedirCambio(_ d: CambioDeLugar) { aplicarCambio(d) }
     private func aplicarCambio(_ d: CambioDeLugar) {
         let n = nueva
+        let antes = roomName
         n.cambiandoSolo = true
         switch d {
         case .cuarto(let c): cambiarCuarto(c); n.cuartoAMano = nil
@@ -11983,16 +12162,20 @@ extension ARMeasureViewController {
         }
         switch d {
         case .parte(let z): anotarMedir("cambio", ["a": z, "por": "telefono"])
-        case .cuarto(let c): anotarMedir("cambio", ["a_cuarto": c, "por": "mapa"])
+        case .cuarto(let c): anotarMedir("cambio", ["a_cuarto": c, "por": "mapa", "de_cuarto": antes])
         case .pared(let i): anotarMedir("cambio", ["a_pared": i, "por": "telefono"])
         }
-        // Que se vea que cambió solo (antes no decía nada); sin tapar el aviso de lo recién guardado.
-        if Date() > n.avisoHasta {
-            switch d {
-            case .parte(let z): mostrarAvisoNuevo("Ahora: \(Self.sectionSpokenName(z).capitalized) · por el teléfono", segundos: 2.5)
-            case .cuarto(let c): mostrarAvisoNuevo("Ahora: \(c) · por el mapa", segundos: 2.5)
-            case .pared: break
-            }
+        // (13 pasos, idea 4) Cambia solo, sin preguntar. La pared y la parte: un toquecito en la mano y el riel dice "cambió sola" (la
+        // franja ya enseña lo de la nueva). El cuarto: un golpe más fuerte y "Ahora: <cuarto>" en vidrio.
+        switch d {
+        case .cuarto(let c):
+            vibrar(.cuarto)
+            salioDelCuarto(antes, a: c)
+            if Date() > n.avisoHasta { mostrarAvisoNuevo("Ahora: \(c)", segundos: 2.5, sub: "Por el mapa", icono: "mappin.and.ellipse") }
+        case .parte, .pared:
+            vibrar(.cambio)
+            n.cambioSoloHasta = Date().addingTimeInterval(2.5)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) { [weak self] in self?.pintarCamaraNueva() }   // se quita "cambió sola"
         }
         n.cambiandoSolo = false
         empezarPared()
@@ -12000,10 +12183,22 @@ extension ARMeasureViewController {
         n.firmaPanel = ""
         pintarCamaraNueva()
     }
+    /// Cambió de cuarto (por el mapa, la primera esquina o a mano en CUARTO): la tarjeta de "falta una pared" se va y, si dejó un cuarto
+    /// donde midió paredes, unos segundos después se revisa si quedó alguna sin medir (revisarParedQueFalta). Un solo lugar para todos.
+    fileprivate func salioDelCuarto(_ antes: String, a c: String) {
+        let n = nueva
+        if let f = n.faltaVisible { anotarMedir("falta-pared", ["que": "cambio-de-cuarto", "de": f.cuarto, "a": c]); cerrarFalta() }
+        if let r = n.paredesEnRojo, Self.clave(r.cuarto) == Self.clave(antes) { n.paredesEnRojo = nil }   // salió otra vez: se revisa de nuevo
+        if !antes.isEmpty, Self.clave(antes) != Self.clave(c) {
+            let p = paredesDe(antes, nivel: nivelActual)
+            if p.medidas > 0, !p.faltan.isEmpty || !p.seguro { n.salidaDe = (antes, nivelActual, CACurrentMediaTime()) }
+            // Regresó al que le faltaba (revisión 2: en el MISMO nivel; Bathroom o Closet se repiten arriba).
+            else if let s = n.salidaDe, Self.clave(s.nombre) == Self.clave(c), s.nivel == nivelActual { n.salidaDe = nil }
+        }
+    }
     private func empezarPared() {
         let n = nueva
         n.itemsAlEmpezarPared = items.count
-        n.cierreCallado = false; n.cuartoCallado = nil
         n.paredSesion += 1
         n.paredActual = section == "wall" ? n.paredVista : nil
     }
@@ -12024,14 +12219,8 @@ extension ARMeasureViewController {
         guard let forma = formaDelCuarto(), i >= 0, i < forma.paredes.count else { return nil }
         let w = forma.paredes[i]
         guard w.seg.largo >= 2 else { return nil }
-        // Las de este cuarto y las de los cuartos del mismo dibujo: una puerta que solo vio el cuarto de al lado también es
-        // de esta pared (la misma puerta vista desde los dos lados cuenta una).
-        var senas = forma.senas
-        if let m = marcoDe(roomName) ?? nueva.acomodoMarco {
-            senas += cuartosDelMarco(m).filter { Self.clave($0.nombre) != Self.clave(roomName) }.flatMap { $0.senas }
-        }
-        let todas = senas.map { ReglasDeMedir.Abertura(p: $0.p, esVentana: $0.esVentana, ancho: $0.ancho, alto: $0.alto, abajo: $0.abajo) }
-        let r = ReglasDeMedir.aberturasEnLaPared(a: w.seg.a, b: w.seg.b, aberturas: todas)
+        // Las de este cuarto y las de los cuartos del mismo dibujo, con los arcos (aberturasDelPlano).
+        let r = ReglasDeMedir.aberturasEnLaPared(a: w.seg.a, b: w.seg.b, aberturas: aberturasDelPlano(forma))
         return ParteEntera(seccion: "wall", indice: i, largo: w.seg.largo, alto: w.alto >= 3 ? w.alto : nil, aberturas: r.conMedida, sinMedida: r.sinMedida)
     }
     /// El piso o el techo completo del cuarto (el mismo contorno del plano): su largo × ancho y su área de verdad.
@@ -12093,30 +12282,31 @@ extension ARMeasureViewController {
     /// ya enganchada para medir parcial (su pedido del 16 oct: "que ya no pregunte fijar, que aparezca al mirar").
     fileprivate func eleccionToca() -> Bool {
         let n = nueva
-        guard medirPrimero, n.medirActivo, !n.ajusteAbierto, n.panelForzado == nil, !cancelarPendiente, !resumenPendiente, !enPausa,
-              presentedViewController == nil, !roomName.isEmpty, !medidaEnCurso, !n.enganchada else { return false }
+        guard medirPrimero, n.medirActivo, !n.ajusteAbierto, n.panelForzado == nil, !cancelarPendiente, !resumenPendiente, !enPausa, !lab.activo,
+              presentedViewController == nil, !roomName.isEmpty, !medidaEnCurso, !n.enganchada, n.preguntaMedir == nil else { return false }
         guard stage == .pickingMaterial || (stage == .measuringLength && pathPoints.isEmpty) else { return false }
-        guard n.preguntaMedir == nil || (n.preguntaMedir == .parteEntera && n.eleccionAuto) else { return false }
         // Escogió a mano cocina, baño o materiales: esas se miden como siempre.
         if n.parteAMano && !["wall", "floor", "ceiling"].contains(section) { return false }
         return parteParaFijar() != nil
     }
-    fileprivate func firmaDeLaEleccion() -> String { "\(parteParaFijar() ?? "")|\(paredApuntada() ?? -1)|\(items.count)|\(ubicacionReciente())" }
-    /// Cada 0.1 s (y en cada cambio de lo que ve el teléfono): abre, sigue o cierra la ventana sola.
+    /// Cada 0.1 s (y en cada pintada y cada cambio de lo que ve el teléfono): la franja chica sigue a donde apunta (13 pasos: ya no hay
+    /// ventana grande). Cambiar lo que dice o volver a salir: nunca bajo el dedo y a lo mucho una vez cada 0.3 s; esconderla, al momento.
     fileprivate func revisarEleccion() {
         let n = nueva
-        if eleccionToca() {
-            if n.preguntaMedir == nil { abrirEleccion(); return }
-            // No se rehace bajo el dedo ni parpadea: a lo mucho un cambio cada 0.3 s y nunca mientras él la arrastra.
-            let f = firmaDeLaEleccion(), ahora = CACurrentMediaTime()
-            if f != n.firmaEleccion, !n.panelScroll.isTracking, ahora - n.ventanaCambioEn >= 0.3 {
-                if f.split(separator: "|").first != n.firmaEleccion.split(separator: "|").first { n.ventanaParteEn = ahora }
-                n.firmaEleccion = f; n.ventanaCambioEn = ahora; anotarVentana("cambia"); pintarCamaraNueva()
-            }
-        } else if n.preguntaMedir == .parteEntera, n.eleccionAuto {
-            anotarVentana("cierra")
-            cerrarPregunta()
-        }
+        let ahora = CACurrentMediaTime()
+        let aqui = (cuarto: Self.clave(roomName), nivel: nivelActual)
+        var c = contenidoDeLaFranja().map { x -> FranjaContenido in var y = x; y.cuarto = aqui.cuarto; y.nivel = aqui.nivel; return y }
+        if let x = c, x == n.franjaContenido { n.franjaVistaEn = ahora }
+        // Barriendo la pared, un hueco corto del láser no la esconde: 0.8 s con lo de antes (si la tocan, escogerCompleta revisa la pared).
+        // (revisión 2) Solo si lo de antes es de ESTE cuarto y nivel.
+        if c == nil, eleccionToca(), let x = n.franjaContenido, x.cuarto == aqui.cuarto, x.nivel == aqui.nivel, ahora - n.franjaVistaEn < 0.8 { c = x }
+        let f = c?.firma ?? ""
+        guard f != n.firmaEleccion else { return }
+        let tocando = n.franjaPila.arrangedSubviews.contains { ($0 as? UIControl)?.isTracking == true }
+        if !f.isEmpty, tocando || ahora - n.ventanaCambioEn < 0.3 { return }
+        anotarVentana(f.isEmpty ? "cierra" : (n.firmaEleccion.isEmpty ? "abre" : "cambia"))
+        n.firmaEleccion = f; n.franjaContenido = c; n.ventanaCambioEn = ahora; n.franjaVistaEn = ahora
+        pintarFranja()
     }
     // La bitácora de la ventana (16 oct: con la de antes no se podía saber qué vio él). A lo mucho una cada 0.5 s.
     private func anotarVentana(_ que: String) {
@@ -12124,14 +12314,6 @@ extension ARMeasureViewController {
         guard ahora - nueva.ultimaVentanaAnotada >= 0.5 || que != "cambia" else { return }
         nueva.ultimaVentanaAnotada = ahora
         anotarMedir("ventana", ["que": que, "parte": parteParaFijar() ?? "", "pared": paredApuntada() ?? -1])
-    }
-    fileprivate func abrirEleccion() {
-        let n = nueva
-        anotarVentana("abre")
-        n.firmaEleccion = firmaDeLaEleccion(); n.ventanaCambioEn = CACurrentMediaTime(); n.ventanaParteEn = n.ventanaCambioEn
-        abrirPregunta(.parteEntera)
-        n.eleccionAuto = true
-        pintarCamaraNueva()
     }
     /// Al escoger: la parte se ENGANCHA (por dentro, como escogerla a mano) y la pared que ENSEÑÓ la tarjeta queda como la de
     /// medir (otra pared = empieza otra pared, para que "¿Ya terminó con esta pared?" cuente las de esta).
@@ -12154,8 +12336,19 @@ extension ARMeasureViewController {
         // pared que enseñó la tarjeta (nunca las medidas de otra pared).
         if p == "wall", maqueta == 0, !(ubicacionReciente() && paredApuntada() == pared) {
             anotarMedir("completa-rechazada", ["pared": pared ?? -1, "apuntada": paredApuntada() ?? -1, "reciente": ubicacionReciente()])
-            nueva.firmaPanel = ""; nueva.firmaEleccion = ""
+            nueva.firmaPanel = ""          // firmaEleccion se queda: revisarEleccion la compara con lo de ahora y esconde la franja (o cambia)
+            vibrar(.fallo)
             mostrarAvisoNuevo("Apúntele otra vez a la pared que va a medir", segundos: 2.5); revisarEleccion(); return
+        }
+        // (revisión 2) Lo que ya tiene medida en este cuarto nunca se guarda completo otra vez (la franja de un cuarto que el mapa acaba de
+        // dejar, o un toque tarde): se rechaza antes de enganchar la parte, con su aviso de vidrio.
+        if medirPrimero, tapaLoCompleto(pared: pared, parte: p) {
+            let ya = p == "wall" ? (pared.flatMap { estadoDeLaPared($0) } ?? "") : (estadoDeLaParte(p) ?? "")
+            anotarMedir("completa-rechazada", ["parte": p, "pared": pared ?? -1, "ya": ya])
+            nueva.firmaPanel = ""
+            vibrar(.fallo)
+            let que = p == "wall" ? "La pared \((pared ?? 0) + 1)" : (p == "floor" ? "El piso" : "El techo")
+            mostrarAvisoNuevo("\(que) de \(roomName) ya tiene medida", segundos: 2.5); revisarEleccion(); return
         }
         engancharParte(p, pared: pared)
         anotarMedir("eleccion", ["parte": section, "escogio": "completa", "pared": nueva.paredActual ?? -1])
@@ -12180,38 +12373,78 @@ extension ARMeasureViewController {
         yaAvisoFaltaAncho = false
         anotarMedir("completa", ["parte": d.seccion, "pared": d.indice ?? -1, "largo": (d.largo * 10).rounded() / 10,
                                  "alto": d.alto.map { ($0 * 10).rounded() / 10 } ?? 0, "aberturas": d.aberturas.count,
-                                 "sin_medida": d.sinMedida, "area": (d.area * 10).rounded() / 10, "aprox": d.aprox])
+                                 "sin_medida": d.sinMedida, "area": (d.area * 10).rounded() / 10, "aprox": d.aprox,
+                                 "arcos": d.aberturas.filter { $0.esPaso }.count])
         if let alto = d.alto { currentWidthFeet = alto; stage = .widthDone } else { currentWidthFeet = nil; stage = .lengthDone }
-        // La pared completa primero pregunta qué incluye (baseboard, shoe molding): se guardan solos con la pared.
-        if d.seccion == "wall" { abrirPregunta(.incluye); return }
+        // La pared completa pregunta qué incluye (baseboard, shoe molding): se guardan solos con la pared. (su decisión 3) Una vez por
+        // cuarto: la siguiente pared (completa o corte) ya trae la respuesta. En Kitchen, Bath y Laundry, en cada pared.
+        if d.seccion == "wall" {
+            if let r = incluyeDelCuarto() { contestarIncluye(base: r.base, shoe: r.shoe, reusada: true); return }
+            abrirPregunta(.incluye); return
+        }
         seguirConLaParteEntera()
     }
     /// Después de "¿qué incluye?" (o directo en el piso y el techo): el material, o marcar el alto si el plano no lo trae.
     fileprivate func seguirConLaParteEntera() {
         guard let pe = nueva.parteEntera, largoDictado else { soltarLoEscogido("sin-datos"); cerrarPregunta(); return }
-        if pe.alto != nil { abrirPregunta(Self.preguntaDelMaterial(pe.seccion)); return }
+        if pe.alto != nil {
+            // (idea 5) Lo completo con el material PUESTO: la pared en Drywall (o lo de MEDIDA) y el piso como el del cuarto anterior
+            // (escrito en la franja que tocó). El techo, el primer piso, "Otro piso" y cocina / baño / lavandería se preguntan.
+            if pe.seccion == "wall", ReglasDeMedir.materialesPared.contains(materialDeLaPared()) { resolverPared(materialDeLaPared()); return }
+            if pe.seccion == "floor", let pre = pisoPuesto() {
+                anotarMedir("piso-puesto", ["material": pre.material, "de": pre.de, "completo": true, "area": (pe.area * 10).rounded() / 10])
+                resolverPiso(pre.material); return
+            }
+            abrirPregunta(Self.preguntaDelMaterial(pe.seccion)); return
+        }
         nueva.preguntaMedir = nil; nueva.firmaPanel = ""
         empezarAncho()
         mostrarAvisoNuevo("El plano no trae el alto de esta pared: márquelo con + (abajo y arriba)", segundos: 4)
     }
-    fileprivate func contestarIncluye(base: Bool, shoe: Bool) {
-        guard var pe = nueva.parteEntera, largoDictado else { soltarLoEscogido("sin-datos"); cerrarPregunta(); return }
-        pe.conBaseboard = base; pe.conShoe = base && shoe
-        nueva.parteEntera = pe
-        anotarMedir("incluye", ["pared": pe.indice ?? -1, "baseboard": base, "shoe": base && shoe])
-        seguirConLaParteEntera()
+    fileprivate func contestarIncluye(base: Bool, shoe: Bool, reusada: Bool = false) {
+        let n = nueva
+        // (su decisión 3) La respuesta vale para el CUARTO: la completa y el corte (en Kitchen, Bath y Laundry se guarda pero no se reusa).
+        // (revisión) Contestado sobre una pared ya completa (la ubicación sin confirmar): vale solo para este corte, no para el cuarto.
+        if !reusada && !n.incluyeSoloEsta { n.incluyeDeCuarto[claveDelIncluye()] = (base, base && shoe) }
+        if var pe = n.parteEntera, largoDictado {
+            pe.conBaseboard = base; pe.conShoe = base && shoe
+            n.parteEntera = pe
+            anotarMedir("incluye", ["pared": pe.indice ?? -1, "baseboard": base, "shoe": base && shoe, "de": "completa", "reusada": reusada])
+            seguirConLaParteEntera(); return
+        }
+        // Tocó la ficha del corte para cambiarlo: cambia la respuesta (de esta medida y del cuarto); no guarda nada.
+        if n.cambiandoIncluye {
+            n.incluyeDelCorte = (base, base && shoe)
+            anotarMedir("incluye", ["pared": n.corte?.paredes.first ?? -1, "baseboard": base, "shoe": base && shoe, "de": "ficha"])
+            cerrarPregunta(); return
+        }
+        // El corte parcial (idea 1): sus esquinas y su alto ya marcados (lo congeló guardarCorte).
+        guard section == "wall", n.corte != nil, stage == .widthDone else { soltarLoEscogido("sin-datos"); cerrarPregunta(); return }
+        n.incluyeDelCorte = (base, base && shoe)
+        anotarMedir("incluye", ["pared": n.corte?.paredes.first ?? -1, "baseboard": base, "shoe": base && shoe, "de": "corte", "reusada": reusada])
+        n.preguntaMedir = nil; n.firmaPanel = ""
+        seguirConElCorte()
     }
     /// Cómo va cada pared del plano en este cuarto: "completa" (verde), "parcial" (amarillo) o nil (sin medir).
     fileprivate func estadoDeLaPared(_ i: Int) -> String? {
-        let mias = items.filter { $0.cuarto == roomName && (nivelActual.isEmpty || $0.nivel == nivelActual) && $0.seccion == "wall" && $0.paredes.contains(i) }
+        let mias = items.filter { $0.cuarto == roomName && (nivelActual.isEmpty || $0.nivel == nivelActual) && $0.parte == "wall" && $0.paredes.contains(i) }
         if mias.contains(where: { $0.completa }) { return "completa" }
         return mias.isEmpty ? nil : "parcial"
     }
     /// Lo mismo del piso o del techo del cuarto.
     fileprivate func estadoDeLaParte(_ parte: String) -> String? {
-        let mias = items.filter { $0.cuarto == roomName && (nivelActual.isEmpty || $0.nivel == nivelActual) && $0.seccion == parte }
+        let mias = items.filter { $0.cuarto == roomName && (nivelActual.isEmpty || $0.nivel == nivelActual) && $0.parte == parte }
         if mias.contains(where: { $0.completa }) { return "completa" }
         return mias.isEmpty ? nil : "parcial"
+    }
+    /// (revisión 2) Lo que la pared, el piso o el techo COMPLETO nunca guarda otra vez (trim, crown, tackless: pies lineales sueltos):
+    /// no esconde "Pared/Piso/Techo completo" ni lo rechaza. Todo lo demás sí: lo de pies², el drywall de 1 pie, el baseboard (la pared
+    /// completa trae el suyo) y lo escrito a mano. El mapita y "falta una pared" siguen con estadoDeLaPared / estadoDeLaParte.
+    private static let noTapanLoCompleto: Set<String> = ["Trim", "Crown Molding", "Tackless Strip"]
+    fileprivate func tapaLoCompleto(pared i: Int?, parte: String) -> Bool {
+        items.contains { it in it.cuarto == roomName && (nivelActual.isEmpty || it.nivel == nivelActual) && it.parte == parte
+            && (parte != "wall" || it.paredes.contains(i ?? -1))
+            && !(it.width == nil && Self.noTapanLoCompleto.contains(it.material)) }
     }
     fileprivate static func preguntaDelMaterial(_ parte: String) -> PreguntaMedir {
         parte == "floor" ? .piso : (parte == "ceiling" ? .techo : .matPared)
@@ -12224,7 +12457,11 @@ extension ARMeasureViewController {
         let parte = n.parteEntera?.seccion ?? section, pared = n.parteEntera?.indice ?? n.paredActual   // antes de cancelar: se borra
         anotarMedir("completa-cancelada", ["parte": parte, "pared": pared ?? -1])
         n.preguntaMedir = nil; n.eleccionAuto = false; n.porGuardar = nil; n.firmaPanel = ""
+        // (revisión 2) Al pasar a PARCIAL lo que puso para esta medida se queda: el material de MEDIDA (Plaster no vuelve a Drywall) y
+        // "Otro piso" (el parche no se guarda con el piso que acaba de rechazar). Deshacer y reubicar (aParcial: false) lo quitan todo.
+        let mat = n.materialPuesto, matDonde = n.materialPuestoDonde, matCuarto = n.materialPuestoCuarto, sinPiso = n.sinPisoPuesto, matNivel = n.materialPuestoNivel
         cancelarMedidaEnCurso(hablar: false)
+        if aParcial { n.materialPuesto = mat; n.materialPuestoDonde = matDonde; n.materialPuestoCuarto = matCuarto; n.sinPisoPuesto = sinPiso; n.materialPuestoNivel = matNivel }
         stage = .measuringLength
         n.parteAMano = false; n.enganchada = aParcial; n.aManoOtraDesde = nil
         // Si canceló porque era otra pared, el parcial toma la que apunta AHORA (o ninguna, y el paso 3 la adopta).
@@ -12235,13 +12472,23 @@ extension ARMeasureViewController {
     /// La medida con su resta, si ES la parte completa (el mismo largo del plano, de superficie, en esa parte): las puertas y
     /// ventanas de la pared, o lo que sobra de la caja en un cuarto que no es rectángulo.
     fileprivate func conLaParteEntera(_ g: ReglasDeMedir.Guardado) -> ReglasDeMedir.Guardado {
-        guard let pe = nueva.parteEntera, largoDictado, section == pe.seccion, abs(g.largo - pe.largo) < 0.01 else { return g }
+        guard let pe = nueva.parteEntera, largoDictado, section == pe.seccion, abs(g.largo - pe.largo) < 0.01 else {
+            // (idea 1) El corte parcial de pared marcado con +: sus puertas, arcos y ventanas del plano (lo congelado).
+            if section == "wall", nueva.parteEntera == nil, let c = nueva.corte, abs(g.largo - pathTotalFeet) < 0.01 {
+                return ReglasDeMedir.conLaRestaDelCorte(g, aberturas: c.aberturas, desde: c.desde)
+            }
+            return g
+        }
         if pe.seccion == "wall" { return ReglasDeMedir.conLaResta(g, aberturas: pe.aberturas) }
         return ReglasDeMedir.conLaFormaDelCuarto(g, area: pe.area)
     }
     /// Lo que se le resta a la medida en curso (para que cada pantalla diga el número de verdad).
-    fileprivate func restaEnCurso(_ L: Double, _ S: Double) -> Double {
-        guard let pe = nueva.parteEntera, largoDictado, section == pe.seccion, S > 0 else { return 0 }
+    fileprivate func restaEnCurso(_ L: Double, _ S: Double, corte cc: CorteParcial? = nil) -> Double {
+        guard let pe = nueva.parteEntera, largoDictado, section == pe.seccion, S > 0 else {
+            // (idea 1) El corte parcial: lo mismo que se va a guardar.
+            guard section == "wall", nueva.parteEntera == nil, S > 0, let c = cc ?? nueva.corte ?? datosDelCorte() else { return 0 }
+            return ReglasDeMedir.conLaRestaDelCorte(ReglasDeMedir.pared("Drywall", largo: L, alto: S, insulacion: false), aberturas: c.aberturas, desde: c.desde).menos
+        }
         if pe.seccion == "wall" { return ReglasDeMedir.restaDeLaPared(largo: L, alto: S, aberturas: pe.aberturas) }
         let r = L * S - pe.area
         return r > 0.5 ? min(r, L * S) : 0
@@ -12346,13 +12593,21 @@ extension ARMeasureViewController {
         let g = conLaParteEntera(g0)
         // Lo completo de ESTA medida (bancarMedida lo suelta al guardar).
         let pe: ParteEntera? = largoDictado && n.parteEntera?.seccion == parte ? n.parteEntera : nil
+        // (idea 1) El corte parcial de pared: lo que congeló guardarCorte (sus puertas y arcos, desde dónde arranca).
+        let corte: CorteParcial? = pe == nil && parte == "wall" ? n.corte : nil
+        let largoMarcado = g.largo
         let clase = parte == "wall" && maqueta == 0 && pe == nil ? claseDeLaMedida().paredes : ""
         if parte == "wall", let i = Int(clase) { n.paredActual = i }
         // De qué paredes del plano es (para pintar el mapita): la completa, o donde cayó lo medido, o la que tenía enfrente.
         var paredes: [Int] = []
         if parte == "wall" {
             if let i = pe?.indice { paredes = [i] }
-            else { paredes = clase.split(separator: "+").compactMap { Int($0) }; if paredes.isEmpty, let i = n.paredActual { paredes = [i] } }
+            else {
+                // (revisión 3) Las MISMAS que revisó "ya está completa" (las esquinas en el plano primero): el corte sin el piso o el de 1 pie
+                // revisado contra la pared 2 nunca se guarda en la 1 que tenía enfrente. Sin ellas, lo de siempre (Field Reports igual).
+                let d = paredesDeLoQueSeGuarda()
+                paredes = d.paredes.isEmpty ? paredesAlGuardar(clase: clase, corte: corte) : d.paredes
+            }
         }
         let opcion = ARMaterialOption(value: g.material, label: g.material, companionValue: g.companero, companionEn: g.companero,
                                       companionEs: g.companero, porPieza: false, unidad: g.unidad)
@@ -12361,37 +12616,53 @@ extension ARMeasureViewController {
         currentWidthFeet = g.ancho
         restaAlGuardar = g.menos > 0 ? (menos: g.menos, que: g.menosQue) : nil
         marcaAlGuardar = (paredes, pe != nil)
+        let indicePared = items.count
         bancarMedida(opcion)
-        // La pared completa con su baseboard (y shoe molding): del largo de la pared menos sus puertas.
+        // El baseboard (y shoe molding) que sale solo: de la pared completa, su largo menos sus puertas y arcos; (idea 1) del CORTE
+        // PARCIAL que arranca en el piso, lo marcado con + menos las puertas y arcos cuyo centro cae entre sus esquinas.
         var avisoBase = ""
+        var conBase: (largo: Double, shoe: Bool, de: String)? = nil
         if let pe = pe, pe.seccion == "wall", pe.conBaseboard {
-            let largo = ReglasDeMedir.baseboardDeLaPared(largo: pe.largo, aberturas: pe.aberturas)
-            if largo > 0.5 {
-                let gb = ReglasDeMedir.baseboard(largo: largo, shoe: pe.conShoe)
-                let ob = ARMaterialOption(value: gb.material, label: gb.material, companionValue: gb.companero, companionEn: gb.companero,
-                                          companionEs: gb.companero, porPieza: false, unidad: gb.unidad)
-                pathTotalFeet = largo; currentWidthFeet = nil; largoDictado = true
-                selectedMaterial = ob; includeCompanion = gb.companero != nil
-                restaAlGuardar = nil; marcaAlGuardar = (paredes, true)
-                bancarMedida(ob)
-                avisoBase = " + baseboard" + (pe.conShoe ? " y shoe molding" : "") + " \(Self.pies(largo)) ft"
-                anotarMedir("guardar", ["parte": parte, "material": gb.material, "unidad": gb.unidad, "largo": (largo * 10).rounded() / 10, "companero": gb.companero ?? "", "de": "pared-completa"])
-            }
+            conBase = (ReglasDeMedir.baseboardDeLaPared(largo: pe.largo, aberturas: pe.aberturas), pe.conShoe, "pared-completa")
+        } else if let c = corte, c.desdePiso, g.unidad == "SF", g.ancho != nil, let inc = n.incluyeDelCorte, inc.base {
+            conBase = (ReglasDeMedir.baseboardDeLaPared(largo: largoMarcado, aberturas: c.aberturas), inc.shoe, "corte")
+        }
+        if let cb = conBase, cb.largo > 0.5 {
+            let gb = ReglasDeMedir.baseboard(largo: cb.largo, shoe: cb.shoe)
+            let ob = ARMaterialOption(value: gb.material, label: gb.material, companionValue: gb.companero, companionEn: gb.companero,
+                                      companionEs: gb.companero, porPieza: false, unidad: gb.unidad)
+            pathTotalFeet = cb.largo; currentWidthFeet = nil; largoDictado = true
+            selectedMaterial = ob; includeCompanion = gb.companero != nil
+            restaAlGuardar = nil; marcaAlGuardar = (paredes, pe != nil)
+            bancarMedida(ob)
+            // Se guardaron juntos: un solo Deshacer quita los dos renglones.
+            n.pegadaALaAnterior.insert(items.count - 1)
+            avisoBase = " + baseboard" + (cb.shoe ? " y shoe molding" : "") + " \(Self.pies(cb.largo)) ft"
+            anotarMedir("guardar", ["parte": parte, "material": gb.material, "unidad": gb.unidad, "largo": (cb.largo * 10).rounded() / 10,
+                                    "companero": gb.companero ?? "", "de": cb.de, "pegada": true])
         }
         n.itemsVistos = items.count          // el aviso es el de aquí (con lo de la insulación), no el genérico
-        n.preguntaMedir = nil; n.porGuardar = nil; n.cambioPendiente = nil; n.firmaPanel = ""
-        n.cierreCallado = false; n.cuartoCallado = nil
+        n.preguntaMedir = nil; n.porGuardar = nil; n.firmaPanel = ""
         n.parteAMano = false
         n.enganchada = false
         n.zonaAlPrimerPunto = nil
+        n.corte = nil; n.incluyeDelCorte = nil; n.ubicadaEnEsquina = []; n.incluyeSoloEsta = false
+        n.paredAlPrimerPunto = nil; n.paredSinSaber = false      // (revisión 3)
         stage = .measuringLength
-        // Sin letrero de "✓ guardado" arriba (su pregunta del 16 oct: se metía debajo del mapa): lo guardado ya se ve en el
-        // mapa (la pared o el piso se pintan verde o amarillo) y en la hoja del cuarto. Queda en la bitácora.
+        // Sin letrero de "✓ guardado" arriba: lo guardado ya se ve en el mapa (verde o amarillo) y en la hoja. Queda en la bitácora.
         _ = avisoBase
         anotarMedir("guardar", ["parte": parte, "material": g.material, "unidad": g.unidad, "largo": (g.largo * 10).rounded() / 10,
                                 "ancho": g.ancho.map { ($0 * 10).rounded() / 10 } ?? 0, "companero": g.companero ?? "",
-                                "menos": (g.menos * 10).rounded() / 10, "menos_que": g.menosQue])
+                                "menos": (g.menos * 10).rounded() / 10, "menos_que": g.menosQue, "de": pe != nil ? "completa" : (corte != nil ? "corte" : "medida")])
         enviarBitacora()
+        // (idea 3) El alto del corte MEDIDO aquí (un + en la línea, o dos + desde el piso) se vuelve el del nivel, la primera vez.
+        if parte == "wall", pe == nil, g.unidad == "SF", ReglasDeMedir.paredConInsulacion.contains(g.material), let h = n.altoParaRecordar, altoRecordado() == nil {
+            recordarAlto(h, item: indicePared)
+        }
+        n.altoParaRecordar = nil; n.otroAlto = false; n.altoDeUnPunto = nil; n.altoVivo = nil; quitarMarcaOtroAlto()
+        n.materialPuesto = nil; n.materialPuestoDonde = ""; n.materialPuestoCuarto = ""; n.materialPuestoNivel = ""; n.sinPisoPuesto = false; n.fichaCorteFirma = ""
+        quitarBanda()
+        vibrar(.guardado)
         pintarCamaraNueva()
     }
 
@@ -12460,8 +12731,9 @@ extension ARMeasureViewController {
         case .que:
             cabeza(dondeMedir(conMedida: true), numero([(pies(L), true), (" pies de largo, sin alto", false)]), "¿Qué midió?",
                    "Lo que solo tiene largo se cobra por pie lineal.")
-            poner(rejilla([loseta("Baseboard", "\(pies(L)) pies lineales") { s in s.abrirPregunta(.shoe) },
-                           loseta("Drywall de 1 pie", "corte bajo · \(pies(L)) pies lineales") { s in s.resolverPared(ReglasDeMedir.drywallDeUnPie) }], columnas: 2))
+            poner(rejilla([loseta("Baseboard", "\(pies(L)) pies lineales") { s in if !s.preguntarSiYaLlevaBaseboard() { s.abrirPregunta(.shoe) } },
+                           loseta("Drywall de 1 pie", "corte bajo · \(pies(L)) pies lineales") { s in
+                               if !s.preguntarSiYaCompleta("un-pie") { s.resolverPared(ReglasDeMedir.drywallDeUnPie) } }], columnas: 2))
             poner(rejilla([loseta("Otra cosa de la pared", "trim, crown molding…") { s in s.abrirPregunta(.otroLineal) }], columnas: 1), 4)
             poner(corregir)
         case .otroLineal:
@@ -12482,7 +12754,7 @@ extension ARMeasureViewController {
         case .insulPared:
             let g = n.porGuardar
             let titulo = g.map { $0.material == ReglasDeMedir.drywallDeUnPie ? "Drywall de 1 pie · \(pies($0.largo)) pies lineales"
-                                                                           : "\($0.material) · \(pies($0.largo)) × \(pies($0.ancho ?? 0)) = \(pies($0.cantidad)) pies²" } ?? ""
+                : "\($0.material) · \(pies($0.largo)) × \(pies($0.ancho ?? 0))" + ($0.menos > 0 ? " − \(pies($0.menos))" : "") + " = \(pies($0.cantidad)) pies²" } ?? ""
             let porque = n.ajuste.paredes == "mixto" ? "Usted contestó \"mixto\" para \(nivelActual.isEmpty ? "este nivel" : nivelActual): se pregunta una vez en cada pared."
                 : "No sé si esta pared es de afuera o de adentro: se pregunta una vez en esta pared."
             cabeza(dondeMedir(conMedida: true), etiqueta(titulo, 17, .medium, Claro.tinta), "¿Esta pared tiene insulación?", porque)
@@ -12530,113 +12802,109 @@ extension ARMeasureViewController {
                            loseta("Me falta el ancho", "marcarlo con +") { s in s.empezarAncho() }],
                           columnas: 2), 4)
             poner(corregir)
-        case .cierre:
-            let cuantas = medidasEnEstaPared()
-            cabeza(dondeMedir(conMedida: false), etiqueta("\(cuantas) " + (cuantas == 1 ? "medida" : "medidas") + " en esta pared", 17, .medium, Claro.tinta),
-                   "¿Ya terminó con esta pared?", nil)
-            let destino: String
-            switch n.cambioPendiente {
-            case .some(.parte(let z)): destino = z == "floor" ? "pasar al piso" : (z == "ceiling" ? "pasar al techo" : "pasar a la pared")
-            case .some(.pared): destino = "pasar a la otra pared"
-            case .some(.cuarto(let c)): destino = "pasar a \(c)"
-            case .none: destino = ""
-            }
-            // "Continuar" es la salida: seguir en esta pared.
-            poner(rejilla([loseta("Ya terminé", destino) { s in
-                                guard let d = s.nueva.cambioPendiente else { s.cerrarPregunta(); return }
-                                s.nueva.preguntaMedir = nil; s.nueva.cambioPendiente = nil
-                                s.aplicarCambio(d) },
-                           loseta("Continuar", "seguir en esta pared") { s in
-                                s.nueva.cierreCallado = true; s.nueva.cierreCalladoDesde = Date()
-                                if case .some(.cuarto(let c)) = s.nueva.cambioPendiente { s.nueva.cuartoCallado = (c, Date()) }
-                                s.cerrarPregunta() }], columnas: 2))
+        case .cierre, .parteEntera:
+            // (13 pasos) Ya no se abren: la pregunta de cerrar la pared se quitó (cambia solo) y la ventana grande es la franja chica
+            // (pintarFranja). Los casos se quedan para no mover la lista de preguntas.
+            break
         case .incluye:
-            // Su pedido (16 oct): "pared completa: ¿esto incluye baseboard, shoe molding, o seleccione qué incluye?"
+            // Su pedido (16 oct): "pared completa: ¿esto incluye baseboard, shoe molding, o seleccione qué incluye?". (idea 1 y su decisión
+            // 3) La misma pantalla para el CORTE PARCIAL, una vez por cuarto (en Kitchen, Bath y Laundry, en cada pared).
             let pe = n.parteEntera
-            let largoB = pe.map { ReglasDeMedir.baseboardDeLaPared(largo: $0.largo, aberturas: $0.aberturas) } ?? 0
-            let puertas = pe?.aberturas.filter { !$0.esVentana }.count ?? 0
-            poner(etiqueta(dondeMedir(conMedida: true) + " · toda la pared · " + pies(pe?.largo ?? L) + " pies de largo", 13, .medium, Claro.gris, lineas: 1), 4)
-            poner(etiqueta("¿La pared completa incluye…?", 20, .bold, Claro.tinta), 3)
-            var ayuda = "Baseboard: \(pies(largoB)) pies lineales — el largo de la pared" + (puertas > 0 ? " menos \(puertas) " + (puertas == 1 ? "puerta." : "puertas.") : ".")
-            if (pe?.sinMedida ?? 0) > 0 { ayuda += " Una abertura no tiene medida en el plano: revise el baseboard." }
-            poner(etiqueta(ayuda, 14, .regular, Claro.gris, lineas: 3), 12)
+            let corte = pe == nil ? (n.corte ?? datosDelCorte()) : nil
+            let ab = pe?.aberturas ?? corte?.aberturas ?? []
+            let largoB = ReglasDeMedir.baseboardDeLaPared(largo: pe?.largo ?? L, aberturas: ab)
+            let cortan = ab.filter(ReglasDeMedir.cortaElBaseboard)
+            let altoCorte = S > 0 ? S : (n.altoDeUnPunto ?? altoRecordado()?.pies ?? 0)
+            let donde = pe != nil ? " · toda la pared · " + pies(pe?.largo ?? L) + " pies de largo"
+                : (altoCorte > 0 ? " · corte de \(pies(altoCorte)) ft" : "") + " · \(pies(L)) pies de largo"
+            poner(etiqueta(dondeMedir(conMedida: true) + donde, 13, .medium, Claro.gris, lineas: 1), 4)
+            poner(etiqueta(pe != nil ? "¿La pared completa incluye…?" : "¿El corte incluye…?", 20, .bold, Claro.tinta), 3)
+            var ayuda = "Baseboard: \(pies(largoB)) pies lineales — " + (pe != nil ? "el largo de la pared" : "lo marcado")
+                + (cortan.isEmpty ? "." : " menos " + ReglasDeMedir.nombreDeAberturas(cortan, ingles: false) + ".")
+            if (pe?.sinMedida ?? corte?.sinMedida ?? 0) > 0 { ayuda += " Una abertura no tiene medida en el plano: revise el baseboard." }
+            if let p = corte?.porque { ayuda += " Sin restar puertas: " + p + "." }
+            let cuarto = roomName.isEmpty ? "este cuarto" : roomName
+            ayuda += n.incluyeSoloEsta ? " Solo para este corte." : (ReglasDeMedir.cuartoSinAtajos(roomName) ? " En \(cuarto) se pregunta en cada pared." : " Se pregunta una vez en \(cuarto).")
+            poner(etiqueta(ayuda, 14, .regular, Claro.gris, lineas: 4), 12)
             poner(rejilla([loseta("Baseboard + shoe", "\(pies(largoB)) ft cada uno") { s in s.contestarIncluye(base: true, shoe: true) },
                            loseta("Solo baseboard", "\(pies(largoB)) ft") { s in s.contestarIncluye(base: true, shoe: false) },
-                           loseta("Nada más", "solo la pared") { s in s.contestarIncluye(base: false, shoe: false) }], columnas: 3), 8)
-            poner(salida("‹ No era completa · medir con +") { s in s.cancelarParteEntera() })
-        case .parteEntera:
-            // SU DISEÑO (16 oct): "¿Qué extensión se retiró?" con dos tarjetas de dibujo. Sale sola y sigue a donde apunta el
-            // teléfono (pared, techo o piso); al escoger, esa parte se engancha.
-            let parte = parteParaFijar() ?? section, esPared = parte == "wall"
-            let iPared = esPared && ubicacionReciente() ? paredApuntada() : nil
-            // Ya está COMPLETA (verde en el mapita): no se vuelve a ofrecer completa ni parcial; se dice lo que se guardó.
-            if (esPared ? iPared.flatMap { estadoDeLaPared($0) } : estadoDeLaParte(parte)) == "completa" {
-                let nombre = esPared ? "Esta pared" : (parte == "floor" ? "El piso" : "El techo")
-                poner(etiqueta((roomName.isEmpty ? "" : roomName + " · ") + Self.sectionSpokenName(parte), 13, .medium, Claro.gris, lineas: 1), 4)
-                poner(etiqueta("✓ " + nombre + " ya está " + (esPared ? "completa" : "completo"), 20, .bold, Claro.tinta), 6)
-                let hechas = items.filter { $0.cuarto == roomName && (nivelActual.isEmpty || $0.nivel == nivelActual) && $0.seccion == parte && $0.completa
-                    && (!esPared || $0.paredes.contains(iPared ?? -1)) }
-                let lineas = hechas.map { it -> String in
-                    let c = cuentaDe(material: it.material, largo: it.length, ancho: it.width, menos: it.menos)
-                    let q = c.sq > 0 ? "\(pies(c.sq)) pies²" : "\(pies(c.li)) ft"
-                    return "• " + it.material + (it.companion.map { " + " + $0 } ?? "") + " · " + q
-                }
-                poner(etiqueta(lineas.joined(separator: "\n"), 14, .regular, Claro.gris, lineas: 8), 10)
-                if !items.isEmpty {
-                    poner(salida("‹ Deshacer la última guardada") { s in
-                        s.nueva.preguntaMedir = nil; s.nueva.eleccionAuto = false; s.deshacerMedir(); s.pintarCamaraNueva() })
-                }
-                poner(salida("Otra parte · cocina, baño, materiales") { s in
-                    s.nueva.preguntaMedir = nil; s.nueva.eleccionAuto = false; s.rielParteTocado(); s.pintarCamaraNueva() })
+                           loseta("Nada más", pe != nil ? "solo la pared" : "solo el corte") { s in s.contestarIncluye(base: false, shoe: false) }], columnas: 3), 8)
+            poner(pe != nil ? salida("‹ No era completa · medir con +") { s in s.cancelarParteEntera() } : salida("‹ Corregir la medida") { s in s.cerrarPregunta() })
+        case .sobreCompleta:
+            // (revisión del 16 oct) Medir sobre lo que ya está COMPLETO lo cobra dos veces: se pregunta antes de guardar, nunca en silencio.
+            let sc = n.sobreCompleta ?? (que: section, paredes: [], otras: [], seguras: true, adivinada: false)
+            let esPared = section == "wall"
+            // (revisión) "baseboard" (MEDIDA → Baseboard) y "corte-base" (el corte traería otro): lo ya guardado es el baseboard de esas
+            // paredes, completo o no.
+            let deBase = sc.que == "baseboard" || sc.que == "corte-base"
+            let ya = items.filter { it in it.cuarto == roomName && (nivelActual.isEmpty || it.nivel == nivelActual) && it.parte == section
+                && (deBase ? it.material == "Baseboard" : it.completa)
+                && (!esPared || it.paredes.contains(where: { sc.paredes.contains($0) })) }
+            let lista = ya.map { it in it.material + " " + (it.width.map { "\(pies(it.length)) × \(pies($0)) ft" } ?? "\(pies(it.length)) ft")
+                + (it.menos > 0 ? " − \(pies(it.menos)) SF" : "") }
+            let cuales = ReglasDeMedir.textoParedes(sc.paredes)
+            let titulo = deBase ? cuales.prefix(1).uppercased() + cuales.dropFirst() + (sc.paredes.count == 1 ? " ya lleva baseboard" : " ya llevan baseboard")
+                : esPared ? (sc.paredes.count == 1 ? "La pared \(sc.paredes[0] + 1) ya está completa"
+                                    : "Las paredes " + sc.paredes.map { "\($0 + 1)" }.joined(separator: " y ") + " ya están completas")
+                : (section == "floor" ? "El piso ya está completo" : "El techo ya está completo")
+            let medido = sc.que == "un-pie" ? numero([("Drywall de 1 pie · ", false), (pies(L), true), (" pies lineales", false)])
+                : (sc.que == "baseboard" ? numero([("Baseboard · ", false), (pies(L), true), (" pies lineales", false)]) : cuenta())
+            let yaTexto = lista.isEmpty ? "" : "Ya guardado: " + lista.joined(separator: " · ") + ". "
+            if !sc.otras.isEmpty {
+                // (revisión) El corte caminado cubre también paredes que NO están completas: "Guardar igual" cobraría dos veces la completa
+                // o le quitaría el baseboard a las otras. No se ofrece: se miden aparte.
+                let una = sc.otras.count == 1
+                cabeza(dondeMedir(conMedida: true), medido, titulo, yaTexto + "Esta medida también cubre " + ReglasDeMedir.textoParedes(sc.otras) + ": "
+                       + (una ? "mídala" : "mídalas") + " aparte, sin " + cuales + ".")
+                poner(rejilla([loseta("No guardar", una ? "medirla aparte" : "medirlas aparte") { s in s.noGuardarSobreLoCompleto() }], columnas: 1), 4)
+                poner(corregir)
                 break
             }
-            let d = esPared ? iPared.flatMap { datosParedEntera($0) } : datosPisoEntero(parte)
-            let menos = d.flatMap { x in x.alto.map { esPared ? ReglasDeMedir.restaDeLaPared(largo: x.largo, alto: $0, aberturas: x.aberturas) : max(0, x.largo * $0 - x.area) } } ?? 0
-            let menosReal = esPared ? menos : (menos > 0.5 ? menos : 0)
-            let neto = d.flatMap { x in x.alto.map { max(0, x.largo * $0 - menosReal) } }
-            let medidas = d.map { x in x.alto.map { "\(pies(x.largo)) × \(pies($0)) pies" } ?? "\(pies(x.largo)) pies de largo" }
-            var donde = (roomName.isEmpty ? "" : roomName + " · ") + Self.sectionSpokenName(parte)
-            if esPared, let i = iPared, let f = formaDelCuarto(), i < f.paredes.count { donde += f.paredes[i].exterior ? " de afuera" : " de adentro" }
-            poner(etiqueta(donde + (medidas.map { " · " + $0 } ?? ""), 13, .medium, Claro.gris, lineas: 1), 4)
-            poner(etiqueta("¿Qué extensión se retiró?", 20, .bold, Claro.tinta), 3)
-            poner(etiqueta("Seleccione cómo calcular la superficie de " + (esPared ? "esta pared." : (parte == "floor" ? "este piso." : "este techo.")), 14, .regular, Claro.gris), 12)
-            // Lo completo sale del plano: sin el dato no se ofrece, y se dice por qué.
-            let subCompleta: String
-            if let x = d {
-                subCompleta = neto.map { "Medidas del plano original · \(pies($0)) pies²" + (x.aprox ? " aprox." : "") } ?? "El largo del plano; usted marca solo el alto"
-            } else if esPared {
-                subCompleta = formaDelCuarto() == nil ? "Este cuarto no está en el plano"
-                    : (maqueta == 0 && !ubicacionBase() ? "Todavía no me ubico en el plano"
-                       : (!ubicacionReciente() ? "Sin confirmar la ubicación · toque arriba para reubicar" : "Apúntele a la pared 1 segundo para saber cuál es"))
-            } else {
-                subCompleta = "El plano no trae el área de este cuarto"
+            if sc.adivinada, let i = sc.paredes.first {
+                // (revisión 3) La pared es solo la que tenía enfrente, sin la ubicación confirmada: se pregunta, no se afirma. Lo seguro es
+                // decir cuál es; "Es otra pared" guarda sin pared (nunca en la completa).
+                cabeza(dondeMedir(conMedida: true), medido, "¿Es la pared \(i + 1)? " + (deBase ? "Ya lleva baseboard" : "Ya está completa"),
+                       "Sin confirmar la ubicación no sé en qué pared mide. " + yaTexto + "Si es la pared \(i + 1), se cobra dos veces.")
+                poner(rejilla([loseta("Es otra pared", "guardar") { s in s.guardarEnOtraPared() },
+                               loseta("Es la pared \(i + 1)", "no guardar") { s in s.noGuardarSobreLoCompleto() }], columnas: 2), 4)
+                poner(corregir)
+                break
             }
-            let tituloCompleto = esPared ? "Pared completa" : (parte == "floor" ? "Piso completo" : "Techo completo")
-            let completa = TarjetaParedEntera(parcial: false, titulo: tituloCompleto, sub: subCompleta, chip: ("doc.text", "Plano pre-demolición"),
-                                              sugerida: d?.alto != nil, horizontal: !esPared, habilitada: d != nil)
-            // Cada vez que cambia lo que enseña, los toques de los primeros 0.6 s no cuentan (no escoge lo que ya no está).
-            completa.accion = { [weak self] in guard let s = self else { return }
-                guard CACurrentMediaTime() - s.nueva.ventanaCambioEn >= 0.6 else { s.anotarMedir("ventana", ["que": "toque-ignorado"]); return }
-                s.escogerCompleta(parte, pared: iPared) }
-            let parcial = TarjetaParedEntera(parcial: true, titulo: "Área parcial", sub: esPared ? "Marcar puntos y altura" : "Marcar puntos y ancho",
-                                             chip: ("mappin", "Puntos marcados"), sugerida: false, horizontal: !esPared)
-            // "Área parcial" solo espera cuando cambió la PARTE (no cuando la pared a la que apunta va y viene).
-            parcial.accion = { [weak self] in guard let s = self else { return }
-                guard CACurrentMediaTime() - s.nueva.ventanaParteEn >= 0.6 else { s.anotarMedir("ventana", ["que": "toque-ignorado"]); return }
-                s.escogerParcial(parte, pared: iPared) }
-            let dos = UIStackView(arrangedSubviews: [completa, parcial]); dos.axis = .horizontal; dos.spacing = 8; dos.distribution = .fillEqually; dos.alignment = .fill
-            poner(dos, 8)
-            if let x = d {
-                let t = textoParteEntera(x, menos: menosReal)
-                if !t.isEmpty { poner(etiqueta(t, 12.5, .regular, Claro.gris, lineas: 3), 4) }
+            cabeza(dondeMedir(conMedida: true), medido, titulo, yaTexto + (sc.que == "corte-base" ? "Con el baseboard de este corte se cobra dos veces."
+                                                                                  : "Si guarda esto también, se cobra dos veces."))
+            let otra: String
+            switch sc.que {
+            case "corte", "corte-base": otra = !sc.seguras && (n.corte?.desdePiso ?? false) ? "preguntar el baseboard" : "sin baseboard"
+            case "baseboard": otra = "otro baseboard"
+            case "un-pie": otra = "corte de 1 pie"
+            default: otra = sc.que == "floor" ? "escoger el piso" : "escoger el techo"
             }
-            // Lo que antes estaba abajo (la ventana tapa el muelle): deshacer la última guardada y escoger otra parte.
-            if !items.isEmpty {
-                poner(salida("‹ Deshacer la última guardada") { s in
-                    s.nueva.preguntaMedir = nil; s.nueva.eleccionAuto = false; s.deshacerMedir(); s.pintarCamaraNueva() })
+            poner(rejilla([loseta("Guardar igual", otra) { s in s.guardarSobreLoCompleto() },
+                           loseta("No guardar", "deshacer la medida") { s in s.noGuardarSobreLoCompleto() }], columnas: 2), 4)
+            poner(corregir)
+        case .materialPuesto:
+            // (idea 5, 16 oct) El material PUESTO: viene Drywall (pared) o el piso del cuarto anterior; aquí se cambia ANTES de guardar.
+            // Tocar no guarda nada: se guarda con Listo (pared) o con el piso.
+            let esPared = section == "wall"
+            let actual = esPared ? materialDeLaPared() : (pisoPuesto()?.material ?? "")
+            cabeza(dondeMedir(conMedida: false), nil, esPared ? "¿Qué material es?" : "¿Qué piso es?",
+                   esPared ? "Se guarda al tocar Listo. En la siguiente pared vuelve a Drywall." : "Se guarda con el piso. Los cuartos que siguen lo traen puesto.")
+            let lista = esPared ? ReglasDeMedir.materialesPared : ReglasDeMedir.materialesPiso
+            var losetas = lista.map { m -> LosetaCamara in
+                let l = loseta((m == actual ? "✓ " : "") + m, esPared ? "pies²" : nil, sugerida: esPared && m == "Drywall") { s in s.ponerMaterial(m) }
+                l.marcada = m == actual; return l
             }
-            poner(salida("Otra parte · cocina, baño, materiales") { s in
-                s.nueva.preguntaMedir = nil; s.nueva.eleccionAuto = false; s.rielParteTocado(); s.pintarCamaraNueva() })
+            losetas.append(loseta("Otro", "escribirlo en inglés") { s in s.pedirNombreDelMaterial() })
+            poner(rejilla(losetas, columnas: 2), esPared ? 12 : 4)
+            if esPared {
+                poner(etiqueta("Solo el largo · pies lineales", 13, .semibold, Claro.gris, lineas: 1), 6)
+                let lineales = ReglasDeMedir.linealesDePared.map { m -> LosetaCamara in
+                    let l = loseta((m == actual ? "✓ " : "") + ReglasDeMedir.nombreEnLaCamara(m), "sin alto") { s in s.ponerMaterial(m) }
+                    l.marcada = m == actual; return l
+                }
+                poner(rejilla(lineales, columnas: 2), 4)
+            }
+            poner(salida("‹ Regresar sin cambiar") { s in s.cerrarPregunta() })
         case .cuarto:
             armarHojaDelCuarto()
         }
@@ -12679,13 +12947,15 @@ extension ARMeasureViewController {
         }
     }
 
-    // ---------------- TERMINAR CUARTO ----------------
+    // ---------------- REVISAR Y MANDAR (la hoja; 13 pasos: ya no se termina el cuarto) ----------------
     fileprivate func abrirHojaDelCuarto() {
         let n = nueva
         if medidaEnCurso { mostrarAvisoNuevo("Primero guarde o deshaga la medida"); return }
-        if let q = n.preguntaMedir, q != .cuarto, q != .cierre, q != .parteEntera { return }   // a media pregunta del material, no
-        n.cambioPendiente = nil
-        if n.preguntaMedir == .cuarto { cerrarPregunta() } else { abrirPregunta(.cuarto) }
+        if let q = n.preguntaMedir, q != .cuarto { return }   // a media pregunta del material, no
+        if n.preguntaMedir == .cuarto { cerrarPregunta(); return }
+        if let f = n.faltaVisible { anotarMedir("falta-pared", ["que": "revisar", "de": f.cuarto, "paredes": f.paredes.map { $0 + 1 }]); cerrarFalta() }
+        anotarMedir("revisar", ["que": "abre", "medidas": items.count, "falta": loQueFalta().joined(separator: "; ")])
+        abrirPregunta(.cuarto)
     }
     private func armarHojaDelCuarto() {
         let n = nueva, p = n.panelPila
@@ -12730,7 +13000,23 @@ extension ARMeasureViewController {
             p.addArrangedSubview(lista)
             p.setCustomSpacing(12, after: lista)
         }
-        let sig = siguienteCuarto()
+        // (13 pasos) Antes de mandar: las paredes que quedaron sin medida (la tarjeta "falta una pared" se pudo ignorar) y lo que llevan
+        // los otros cuartos de este nivel.
+        let falta = loQueFalta()
+        if !falta.isEmpty {
+            let l = UILabel(); l.text = falta.map { "⚠︎ " + $0 }.joined(separator: "\n"); l.font = .systemFont(ofSize: 13, weight: .semibold)
+            l.textColor = Claro.tinta; l.numberOfLines = 0
+            p.addArrangedSubview(l); p.setCustomSpacing(10, after: l)
+        }
+        var otros: [(String, Int)] = []
+        for it in items where (nivelActual.isEmpty || it.nivel == nivelActual) && Self.clave(it.cuarto) != Self.clave(roomName) {
+            if let i = otros.firstIndex(where: { Self.clave($0.0) == Self.clave(it.cuarto) }) { otros[i].1 += 1 } else { otros.append((it.cuarto, 1)) }
+        }
+        if !otros.isEmpty {
+            let l = UILabel(); l.text = "Otros cuartos: " + otros.map { "\($0.0) (\($0.1))" }.joined(separator: " · ")
+            l.font = .systemFont(ofSize: 13); l.textColor = Claro.gris; l.numberOfLines = 0
+            p.addArrangedSubview(l); p.setCustomSpacing(12, after: l)
+        }
         let preguntas = LosetaCamara(icono: "slider.horizontal.3", titulo: "Preguntas del nivel", sub: "paredes, techo, piso", extra: nil, etiqueta: nil, centrada: true, alto: 50)
         preguntas.accion = { [weak self] in self?.cerrarPregunta(); self?.abrirAjuste(volver: true) }
         let mandar = LosetaCamara(icono: "paperplane", titulo: items.isEmpty ? "Salir" : "Terminar y mandar",
@@ -12738,6 +13024,7 @@ extension ARMeasureViewController {
                                   extra: nil, etiqueta: nil, centrada: true, alto: 50)
         mandar.accion = { [weak self] in
             guard let self = self else { return }
+            self.anotarMedir("revisar", ["que": "mandar", "medidas": self.items.count])
             self.nueva.preguntaMedir = nil; self.nueva.firmaPanel = ""
             self.nueva.terminarDeVerdad = true
             self.terminarNuevoTocado()
@@ -12745,49 +13032,1118 @@ extension ARMeasureViewController {
             self.pintarCamaraNueva()
         }
         p.addArrangedSubview(rejilla([preguntas, mandar], columnas: 2))
-        let terminar = LosetaCamara(icono: "checkmark", titulo: "Terminar cuarto", sub: sig.map { "pasar a \($0)" } ?? "ya no hay otro", extra: nil, etiqueta: nil, centrada: true, alto: 50)
-        terminar.accion = { [weak self] in self?.terminarCuarto() }
+        // Ya no se termina el cuarto aquí: el mapa cambia de cuarto solo. Queda la salida para seguir midiendo.
         let seguir = LosetaCamara(icono: "arrow.uturn.backward", titulo: "Seguir aquí", sub: roomName.isEmpty ? nil : "en \(roomName)", extra: nil, etiqueta: nil, centrada: true, alto: 50)
-        seguir.accion = { [weak self] in self?.cerrarPregunta() }
-        p.addArrangedSubview(rejilla([terminar, seguir], columnas: 2))
-    }
-    // El siguiente cuarto: el más cercano de la planta que todavía no tiene medidas (el mapa lo confirma al entrar).
-    private func siguienteCuarto() -> String? {
-        let n = nueva
-        let hechos = Set(items.filter { nivelActual.isEmpty || $0.nivel == nivelActual }.map { Self.clave($0.cuarto) })
-        let marco = marcoDe(roomName) ?? n.acomodoMarco ?? marcoPorCuarto.values.min()
-        let delPlano = marco.map { cuartosDelMarco($0) } ?? []
-        let nombres = delPlano.isEmpty ? cuartosDisponibles : delPlano.map { $0.nombre }
-        let libres = nombres.filter { Self.clave($0) != Self.clave(roomName) && !n.cuartosTerminados.contains(Self.clave($0)) && !hechos.contains(Self.clave($0)) }
-        if let tel = telefonoEnPlano(), !delPlano.isEmpty {
-            func centro(_ nombre: String) -> SIMD2<Double> {
-                let pts = (delPlano.first { $0.nombre == nombre }?.paredes ?? []).flatMap { [$0.seg.a, $0.seg.b] }
-                return pts.isEmpty ? tel : pts.reduce(SIMD2<Double>(0, 0), +) / Double(pts.count)
-            }
-            return libres.min { simd_length(centro($0) - tel) < simd_length(centro($1) - tel) }
-        }
-        return libres.first
-    }
-    private func terminarCuarto() {
-        let n = nueva
-        let antes = roomName
-        n.cuartosTerminados.insert(Self.clave(antes))
-        n.preguntaMedir = nil; n.firmaPanel = ""
-        if let sig = siguienteCuarto() {
-            aplicarCambio(.cuarto(sig))
-            mostrarAvisoNuevo("✓ \(antes) terminado. Ahora: \(sig) (el mapa sabe dónde está).", segundos: 3.8, ok: true)
-        } else {
-            mostrarAvisoNuevo("✓ \(antes) terminado.", segundos: 3.8, ok: true)
-            pintarCamaraNueva()
-        }
+        seguir.accion = { [weak self] in self?.anotarMedir("revisar", ["que": "seguir"]); self?.cerrarPregunta() }
+        p.addArrangedSubview(rejilla([seguir], columnas: 1))
     }
 
+    // ================= LOS 13 PASOS ("Bedroom 2 en 13 toques", 16 oct) =================
+    // Su decisión: el + ya es lo parcial y la ventana grande pasa a una franja chica con lo completo (idea 6); entre una medida y otra
+    // la pared, la parte y el cuarto cambian solos y arriba queda "Revisar y mandar" (idea 4); el baseboard y las puertas también en el
+    // corte parcial (idea 1); el alto del corte se mide una vez por nivel y se pinta sobre la pared (idea 3); el material viene puesto
+    // (idea 5); y el teléfono vibra distinto en cada paso. Todo número sale de un + de esta casa o del plano, con su nombre escrito.
+
+    // ---------------- (idea 6) LA FRANJA CHICA ----------------
+    /// Lo que ofrece la franja: SOLO lo completo de la parte a la que apunta, con sus números del plano. Lo parcial ya no se escoge: es
+    /// tocar + (la parte sale de los puntos). nil = no se enseña. Una parte con alguna medida (amarilla o verde en el mapita) no se
+    /// ofrece: sería cobrarla dos veces (revisión 2: salvo trim, crown o tackless solos, que lo completo no repite; tapaLoCompleto).
+    /// Pared sin la ubicación confirmada: apagada, con su porqué.
+    fileprivate func contenidoDeLaFranja() -> FranjaContenido? {
+        guard eleccionToca(), let parte = parteParaFijar() else { return nil }
+        let pies = Self.pies, esPared = parte == "wall"
+        if esPared {
+            guard formaDelCuarto() != nil else { return nil }                       // cuarto fuera del plano: solo el +
+            let iPared = esPared && ubicacionReciente() ? paredApuntada() : nil
+            guard let i = iPared else {
+                if maqueta == 0 && !ubicacionBase() { return FranjaContenido(parte: parte, pared: nil, titulo: "Pared completa", sub: "Todavía no me ubico en el plano", habilitada: false, preset: nil) }
+                if !ubicacionReciente() { return FranjaContenido(parte: parte, pared: nil, titulo: "Pared completa", sub: "Sin confirmar la ubicación · toque arriba para reubicar", habilitada: false, preset: nil) }
+                return nil                                                         // ubicado, sin apuntarle a una pared: nada
+            }
+            guard !tapaLoCompleto(pared: i, parte: "wall"), let d = datosParedEntera(i) else { return nil }
+            var sub = d.alto.map { "\(pies(d.largo)) × \(pies($0)) ft · del plano" } ?? "\(pies(d.largo)) ft · del plano · el alto con +"
+            if !d.aberturas.isEmpty { sub += " · sin " + ReglasDeMedir.loRestado(d.aberturas) }
+            if d.sinMedida > 0 { sub += d.sinMedida == 1 ? " · 1 abertura sin medida" : " · \(d.sinMedida) aberturas sin medida" }
+            // (revisión) El baseboard que se guarda solo con la pared (la respuesta del cuarto, sin preguntar) también va escrito.
+            // (revisión 3) Y si el cuarto contestó "Nada más", que se guarda SIN baseboard también (antes no decía nada).
+            if let r = incluyeDelCuarto(), ReglasDeMedir.baseboardDeLaPared(largo: d.largo, aberturas: d.aberturas) > 0.5 {
+                if r.base { sub += r.shoe ? " · + baseboard y shoe" : " · + baseboard" }
+                else { sub += " · sin baseboard" }
+            }
+            // Lo que se guarda sin preguntar va escrito: otro material que Drywall (el de siempre, que MEDIDA ya enseña), sí.
+            let m = materialDeLaPared()
+            if m != "Drywall" { sub += " · " + ReglasDeMedir.nombreEnLaCamara(m) }
+            return FranjaContenido(parte: parte, pared: i, titulo: "Pared completa", sub: sub, habilitada: true, preset: nil)
+        }
+        guard !tapaLoCompleto(pared: nil, parte: parte), let d = datosPisoEntero(parte), d.alto != nil else { return nil }
+        let area = "\(pies(areaDeLoCompleto(d))) pies²" + (d.aprox ? " aprox." : "")
+        // (idea 5) El piso del cuarto de antes (o el que tocó en MEDIDA) ya viene puesto: tocar la franja lo guarda.
+        if parte == "floor", let pre = pisoPuesto() {
+            // De dónde viene va escrito aquí (a lo ancho): en MEDIDA no cabe entero.
+            let de = deDondeElPiso(pre.de)
+            return FranjaContenido(parte: parte, pared: nil, titulo: "Piso completo · \(area)", sub: nombreDelPisoPuesto(pre.material) + (de.isEmpty ? "" : " · " + de)
+                                   + " · del plano · toque para guardar", habilitada: true, preset: pre.material)
+        }
+        let nombre = parte == "floor" ? "Piso completo" : "Techo completo"
+        return FranjaContenido(parte: parte, pared: nil, titulo: "\(nombre) · \(area)", sub: "del plano · toque para escoger " + (parte == "floor" ? "el piso" : "el techo"), habilitada: true, preset: nil)
+    }
+    /// El área que se GUARDA del piso o techo completo (la misma cuenta que conLaFormaDelCuarto): la caja menos lo que sobra.
+    fileprivate func areaDeLoCompleto(_ d: ParteEntera) -> Double {
+        let caja = d.largo * (d.alto ?? 0)
+        guard d.area > 0 else { return caja }
+        let sobra = caja - d.area
+        return caja - (sobra > 0.5 ? min(sobra, caja) : 0)
+    }
+    /// La franja: arriba de la tarjeta de abajo, en vidrio (como el mapa).
+    fileprivate func armarFranja() {
+        let n = nueva, f = n.franja
+        guard f.superview == nil else { return }
+        f.translatesAutoresizingMaskIntoConstraints = false
+        let vidrio = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialLight))
+        vidrio.overrideUserInterfaceStyle = .light
+        vidrio.translatesAutoresizingMaskIntoConstraints = false
+        vidrio.layer.cornerRadius = 12; vidrio.layer.cornerCurve = .continuous; vidrio.clipsToBounds = true
+        vidrio.layer.borderWidth = 0.75; vidrio.layer.borderColor = UIColor.white.withAlphaComponent(0.65).cgColor
+        let velo = UIView(); velo.backgroundColor = UIColor.white.withAlphaComponent(0.14)
+        velo.translatesAutoresizingMaskIntoConstraints = false
+        vidrio.contentView.addSubview(velo)
+        f.addSubview(vidrio)
+        let pila = n.franjaPila
+        pila.axis = .vertical; pila.spacing = 6
+        pila.translatesAutoresizingMaskIntoConstraints = false
+        vidrio.contentView.addSubview(pila)
+        view.addSubview(f)
+        NSLayoutConstraint.activate([
+            f.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 10),
+            f.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -10),
+            f.bottomAnchor.constraint(equalTo: n.muelle.topAnchor, constant: -10),
+            vidrio.leadingAnchor.constraint(equalTo: f.leadingAnchor), vidrio.trailingAnchor.constraint(equalTo: f.trailingAnchor),
+            vidrio.topAnchor.constraint(equalTo: f.topAnchor), vidrio.bottomAnchor.constraint(equalTo: f.bottomAnchor),
+            velo.leadingAnchor.constraint(equalTo: vidrio.contentView.leadingAnchor), velo.trailingAnchor.constraint(equalTo: vidrio.contentView.trailingAnchor),
+            velo.topAnchor.constraint(equalTo: vidrio.contentView.topAnchor), velo.bottomAnchor.constraint(equalTo: vidrio.contentView.bottomAnchor),
+            pila.leadingAnchor.constraint(equalTo: vidrio.contentView.leadingAnchor, constant: 6),
+            pila.trailingAnchor.constraint(equalTo: vidrio.contentView.trailingAnchor, constant: -6),
+            pila.topAnchor.constraint(equalTo: vidrio.contentView.topAnchor, constant: 6),
+            pila.bottomAnchor.constraint(equalTo: vidrio.contentView.bottomAnchor, constant: -6)
+        ])
+        f.isHidden = true
+    }
+    /// Pinta lo de franjaContenido: un botón y, con el piso puesto, "Otro piso" debajo (una columna, pareja).
+    fileprivate func pintarFranja() {
+        let n = nueva, pila = n.franjaPila
+        pila.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        // Los botones se arman aunque un panel tape la tarjeta de abajo: al cerrarse, pintarCamaraNueva vuelve a enseñar la franja con lo
+        // mismo (la firma no cambió) y no debe salir vacía (maqueta 51: Techo escogido en el panel PARTE).
+        guard let c = n.franjaContenido, medirPrimero, n.medirActivo else { n.franja.isHidden = true; return }
+        let grande = BotonFranja(icono: c.parte, titulo: c.titulo, sub: c.sub, alto: 48)
+        grande.isEnabled = c.habilitada
+        grande.accion = { [weak self] in self?.tocarFranja("completa") }
+        pila.addArrangedSubview(grande)
+        if c.preset != nil {
+            let otro = BotonFranja(icono: nil, titulo: "Otro piso", sub: "escoger el material", alto: 44)
+            otro.accion = { [weak self] in self?.tocarFranja("otro-piso") }
+            pila.addArrangedSubview(otro)
+        }
+        n.franja.isHidden = n.muelle.isHidden
+    }
+    /// Tocar la franja = lo completo de lo que enseña, por el MISMO escogerCompleta de siempre (con su B4). "Otro piso": esta vez
+    /// el piso se escoge de la lista. Lo demás (el material puesto, "¿Qué incluye?" del cuarto) lo hace seguirConLaParteEntera.
+    fileprivate func tocarFranja(_ que: String) {
+        let n = nueva
+        guard let c = n.franjaContenido, c.habilitada, eleccionToca() else { return }
+        // (revisión 2) La franja de otro cuarto o nivel (el mapa cambió y el dedo llegó tarde): nunca guarda lo completo del de ahora.
+        guard c.cuarto == Self.clave(roomName), c.nivel == nivelActual else {
+            anotarMedir("ventana", ["que": "toque-otro-cuarto", "de": c.cuarto, "ahora": roomName])
+            n.franjaContenido = nil; n.firmaEleccion = ""; pintarFranja(); return
+        }
+        guard CACurrentMediaTime() - n.ventanaCambioEn >= 0.6 else { anotarMedir("ventana", ["que": "toque-ignorado"]); return }
+        anotarMedir("franja", ["que": que, "parte": c.parte, "pared": c.pared ?? -1, "preset": c.preset ?? "", "sub": c.sub])
+        if que == "otro-piso" { n.sinPisoPuesto = true }
+        escogerCompleta(c.parte, pared: c.pared)
+    }
+    /// En el laboratorio y en la fase de ubicarse no hay franja ni "falta una pared".
+    fileprivate func quitarFranjaYFalta() {
+        let n = nueva
+        if !n.franja.isHidden || n.franjaContenido != nil { n.franja.isHidden = true; n.franjaContenido = nil; n.firmaEleccion = "" }
+        if n.faltaVisible != nil { cerrarFalta() }
+    }
+
+    // ---------------- (idea 4) "FALTA UNA PARED" ----------------
+    static let esperaParaFalta: Double = 6          // segundos fuera del cuarto antes de avisar (nunca al asomarse)
+    static let esperaEnElCuarto: Double = 3         // y ya en el cuarto nuevo por el mapa
+    static let faltaDura: TimeInterval = 15         // la tarjeta se va sola si no la contesta (lo que falta sigue en "Revisar y mandar")
+    /// Las paredes del plano de ese cuarto sin ninguna medida; `seguro` = cada medida de pared sabe de qué pared es.
+    fileprivate func paredesDe(_ cuarto: String, nivel: String) -> (faltan: [Int], seguro: Bool, medidas: Int) {
+        let n = nueva, k = Self.clave(cuarto)
+        guard n.nivelDelPlano == nivel || maqueta > 0, let forma = planoPorCuarto.first(where: { Self.clave($0.key) == k })?.value else { return ([], true, 0) }
+        let mias = items.filter { Self.clave($0.cuarto) == k && (nivel.isEmpty || $0.nivel == nivel) && $0.parte == "wall" }   // (revisión 3) la parte: Greenboard también
+        // (revisión del 16 oct) Lo guardado en otra sesión no llega aquí (ni sabe su pared): un cuarto con paredes ya guardadas en el
+        // servidor, o sin que la página lo diga, no se sabe qué le falta. Nunca "sin medida" de lo que puede estar ya guardado.
+        if maqueta == 0 {
+            guard let ya = cuartosConParedes else { return ([], false, mias.count) }
+            let delNivel = ya.filter { Self.clave($0.key) == Self.clave(nivel) || Self.clave($0.key).isEmpty }.flatMap { $0.value }
+            if delNivel.contains(where: { Self.clave($0) == k }) { return ([], false, mias.count) }
+        }
+        let r = ReglasDeMedir.paredesQueFaltan(largos: forma.paredes.map { $0.seg.largo }, deCadaMedida: mias.map { $0.paredes },
+                                               noSeCorto: n.noSeCorto[Self.clave(nivel + "|" + cuarto)] ?? [])
+        return (r.faltan, r.seguro, mias.count)
+    }
+    /// Lo que falta del nivel DEL PLANO, por cuarto ("Bedroom 2: la pared 4 sin medida"), para la hoja y la alerta de mandar. (revisión)
+    /// Aunque esté en otro nivel: entonces cada renglón lleva el nivel del plano ("2nd Floor · Bedroom 2: …").
+    fileprivate func loQueFalta() -> [String] {
+        let nivelPlano = nueva.nivelDelPlano ?? nivelActual          // sin plano (Field Reports): el de siempre
+        let fuera = nivelPlano != nivelActual && !nivelPlano.isEmpty
+        var vistos = Set<String>(), r: [String] = []
+        let deAqui = fuera ? [] : [roomName]                          // roomName es de nivelActual: no se revisa contra el plano de otro nivel
+        for c in deAqui + items.filter({ nivelPlano.isEmpty || $0.nivel == nivelPlano }).map({ $0.cuarto }) where !c.isEmpty && vistos.insert(Self.clave(c)).inserted {
+            let p = paredesDe(c, nivel: nivelPlano)
+            if p.seguro, !p.faltan.isEmpty { r.append((fuera ? nivelPlano + " · " : "") + "\(c): " + ReglasDeMedir.textoParedes(p.faltan) + " sin medida") }
+        }
+        return r
+    }
+    /// "Bedroom 2: falta 1 pared": al salir de un cuarto donde midió paredes y quedó alguna del plano sin medida. Solo con unos segundos
+    /// fuera de él y ya en el cuarto nuevo por el mapa (un vistazo al pasillo no avisa). Nunca crea una medida.
+    private func revisarParedQueFalta(_ ahora: CFTimeInterval) {
+        let n = nueva
+        guard let s = n.salidaDe else { return }
+        if Self.clave(s.nombre) == Self.clave(roomName), s.nivel == nivelActual { n.salidaDe = nil; return }   // regresó (revisión 2: al de ESE nivel)
+        guard ahora - s.desde >= Self.esperaParaFalta, ahora - n.cuartoDesde >= Self.esperaEnElCuarto, n.faltaVisible == nil,
+              n.reubicandoDesde == nil, ubicacionReciente(), let aqui = cuartoDondeEsta(), Self.clave(aqui) == Self.clave(roomName) else { return }
+        n.salidaDe = nil
+        let p = paredesDe(s.nombre, nivel: s.nivel)
+        guard p.seguro else { anotarMedir("falta-pared", ["que": "sin-saber", "de": s.nombre, "faltan": p.faltan.map { $0 + 1 }]); return }
+        guard !p.faltan.isEmpty else { return }
+        abrirFalta(cuarto: s.nombre, nivel: s.nivel, paredes: p.faltan, segundos: ahora - s.desde)
+    }
+    fileprivate func armarFaltaPared() {
+        let n = nueva, caja = n.faltaCaja
+        guard caja.superview == nil else { return }
+        caja.translatesAutoresizingMaskIntoConstraints = false
+        caja.layer.shadowColor = UIColor.black.cgColor; caja.layer.shadowOpacity = 0.16; caja.layer.shadowRadius = 14
+        caja.layer.shadowOffset = CGSize(width: 0, height: 4)
+        let vidrio = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialLight))
+        vidrio.overrideUserInterfaceStyle = .light
+        vidrio.translatesAutoresizingMaskIntoConstraints = false
+        vidrio.layer.cornerRadius = 10; vidrio.layer.cornerCurve = .continuous; vidrio.clipsToBounds = true
+        vidrio.layer.borderWidth = 0.75; vidrio.layer.borderColor = UIColor.white.withAlphaComponent(0.7).cgColor
+        let velo = UIView(); velo.backgroundColor = UIColor.white.withAlphaComponent(0.3)
+        velo.translatesAutoresizingMaskIntoConstraints = false
+        vidrio.contentView.addSubview(velo)
+        caja.addSubview(vidrio)
+        let icono = UIImageView(image: UIImage(systemName: "exclamationmark.triangle", withConfiguration: UIImage.SymbolConfiguration(pointSize: 18, weight: .regular)))
+        icono.tintColor = Claro.ambar; icono.contentMode = .scaleAspectFit
+        n.faltaTitulo.font = .systemFont(ofSize: 15, weight: .semibold); n.faltaTitulo.textColor = Claro.tinta; n.faltaTitulo.numberOfLines = 0
+        n.faltaSub.font = .systemFont(ofSize: 13); n.faltaSub.textColor = Claro.gris; n.faltaSub.numberOfLines = 0
+        let textos = UIStackView(arrangedSubviews: [n.faltaTitulo, n.faltaSub]); textos.axis = .vertical; textos.spacing = 2
+        let fila = UIStackView(arrangedSubviews: [icono, textos]); fila.axis = .horizontal; fila.spacing = 10; fila.alignment = .top
+        func boton(_ titulo: String, azul: Bool, _ accion: @escaping (ARMeasureViewController) -> Void) -> UIButton {
+            let b = UIButton(type: .system)
+            b.setTitle(titulo, for: .normal); b.titleLabel?.font = .systemFont(ofSize: 15, weight: .semibold)
+            b.setTitleColor(azul ? .white : Claro.tinta, for: .normal)
+            b.backgroundColor = azul ? Claro.azul : Claro.boton
+            b.layer.cornerRadius = 10; b.layer.cornerCurve = .continuous
+            if !azul { b.layer.borderWidth = 0.5; b.layer.borderColor = Claro.linea.cgColor }
+            b.heightAnchor.constraint(equalToConstant: 44).isActive = true
+            b.addAction(UIAction { [weak self] _ in if let s = self { accion(s) } }, for: .touchUpInside)
+            return b
+        }
+        let dos = UIStackView(arrangedSubviews: [boton("No se cortó", azul: false) { $0.contestarFalta(volver: false) },
+                                                 boton("Volver", azul: true) { $0.contestarFalta(volver: true) }])
+        dos.axis = .horizontal; dos.spacing = 8; dos.distribution = .fillEqually
+        let pila = UIStackView(arrangedSubviews: [fila, dos]); pila.axis = .vertical; pila.spacing = 12
+        pila.translatesAutoresizingMaskIntoConstraints = false
+        vidrio.contentView.addSubview(pila)
+        view.addSubview(caja)
+        caja.isHidden = true; caja.alpha = 0
+        NSLayoutConstraint.activate([
+            vidrio.leadingAnchor.constraint(equalTo: caja.leadingAnchor), vidrio.trailingAnchor.constraint(equalTo: caja.trailingAnchor),
+            vidrio.topAnchor.constraint(equalTo: caja.topAnchor), vidrio.bottomAnchor.constraint(equalTo: caja.bottomAnchor),
+            velo.leadingAnchor.constraint(equalTo: vidrio.contentView.leadingAnchor), velo.trailingAnchor.constraint(equalTo: vidrio.contentView.trailingAnchor),
+            velo.topAnchor.constraint(equalTo: vidrio.contentView.topAnchor), velo.bottomAnchor.constraint(equalTo: vidrio.contentView.bottomAnchor),
+            pila.leadingAnchor.constraint(equalTo: vidrio.contentView.leadingAnchor, constant: 14),
+            pila.trailingAnchor.constraint(equalTo: vidrio.contentView.trailingAnchor, constant: -14),
+            pila.topAnchor.constraint(equalTo: vidrio.contentView.topAnchor, constant: 14),
+            pila.bottomAnchor.constraint(equalTo: vidrio.contentView.bottomAnchor, constant: -14),
+            icono.widthAnchor.constraint(equalToConstant: 22), icono.heightAnchor.constraint(equalToConstant: 22),
+            caja.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            caja.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: -40),      // debajo del aviso (-150): nunca se enciman
+            caja.widthAnchor.constraint(equalTo: view.widthAnchor, constant: -56)
+        ])
+    }
+    private func abrirFalta(cuarto: String, nivel: String, paredes: [Int], segundos: Double) {
+        let n = nueva, caja = n.faltaCaja
+        let k = paredes.count, cuales = ReglasDeMedir.textoParedes(paredes)
+        let conMayuscula = cuales.prefix(1).uppercased() + cuales.dropFirst()
+        n.faltaVisible = (cuarto, nivel, paredes); n.faltaHasta = Date().addingTimeInterval(Self.faltaDura)
+        n.paredesEnRojo = (cuarto, nivel, paredes)
+        n.faltaTitulo.text = "\(cuarto): " + (k == 1 ? "falta 1 pared" : "faltan \(k) paredes")
+        n.faltaSub.text = conMayuscula + (k == 1 ? " no tiene medida. En el mapita sale en rojo." : " no tienen medida. En el mapita salen en rojo.")
+        anotarMedir("falta-pared", ["que": "abre", "de": cuarto, "paredes": paredes.map { $0 + 1 }, "segundos": Int(segundos.rounded())])
+        vibrar(.aviso)
+        view.bringSubviewToFront(caja)
+        caja.layer.removeAllAnimations()
+        caja.isHidden = false; view.layoutIfNeeded()
+        caja.layer.shadowPath = UIBezierPath(roundedRect: caja.bounds, cornerRadius: 10).cgPath
+        caja.alpha = 0; caja.transform = CGAffineTransform(scaleX: 0.96, y: 0.96)
+        UIView.animate(withDuration: 0.25, delay: 0, options: [.curveEaseOut, .beginFromCurrentState]) { caja.alpha = 1; caja.transform = .identity }
+    }
+    private func cerrarFalta() {
+        let n = nueva, caja = n.faltaCaja
+        n.faltaVisible = nil
+        UIView.animate(withDuration: 0.3, delay: 0, options: [.curveEaseIn, .beginFromCurrentState], animations: {
+            caja.alpha = 0; caja.transform = CGAffineTransform(scaleX: 0.97, y: 0.97)
+        }, completion: { _ in guard n.faltaVisible == nil else { return }; caja.isHidden = true; caja.transform = .identity })
+    }
+    /// "Volver" NO cambia el cuarto a mano: él regresa y el mapa lo cambia solo (o la primera esquina); la que falta sigue en rojo.
+    /// "No se cortó" no crea nada (nunca un renglón que nadie midió): solo ya no se avisa de esas paredes.
+    private func contestarFalta(volver: Bool) {
+        let n = nueva
+        guard let f = n.faltaVisible else { return }
+        let numeros = f.paredes.map { $0 + 1 }
+        if volver {
+            anotarMedir("falta-pared", ["que": "volver", "de": f.cuarto, "paredes": numeros])
+            cerrarFalta()
+            let cuales = ReglasDeMedir.textoParedes(f.paredes)
+            let conMayuscula = cuales.prefix(1).uppercased() + cuales.dropFirst()
+            let sub = "El mapa lo cambia solo. " + conMayuscula + (f.paredes.count == 1 ? " sale en rojo." : " salen en rojo.")
+            mostrarAvisoNuevo("Regrese a \(f.cuarto)", segundos: 3.5, sub: sub, icono: "mappin.and.ellipse")
+        } else {
+            n.noSeCorto[Self.clave(f.nivel + "|" + f.cuarto), default: []].formUnion(f.paredes)
+            n.paredesEnRojo = nil
+            anotarMedir("falta-pared", ["que": "no-se-corto", "de": f.cuarto, "paredes": numeros])
+            cerrarFalta()
+        }
+        pintarCamaraNueva()
+    }
+    /// La tarjeta se va sola a los 15 s si no la contesta (cada cuadro, desde tickCamaraNueva).
+    fileprivate func revisarFaltaQueVence() {
+        let n = nueva
+        guard let f = n.faltaVisible, Date() > n.faltaHasta else { return }
+        anotarMedir("falta-pared", ["que": "ignorada", "de": f.cuarto, "paredes": f.paredes.map { $0 + 1 }])
+        n.paredesEnRojo = nil
+        cerrarFalta()
+    }
+
+    // ---------------- (idea 1) EL CORTE PARCIAL: SUS PUERTAS, ARCOS Y SU BASEBOARD ----------------
+    /// Las puertas, arcos y ventanas del plano para las paredes de este cuarto: las suyas y las de los cuartos del mismo dibujo (la
+    /// misma vista desde los dos lados cuenta una).
+    private func aberturasDelPlano(_ forma: (paredes: [UbicadorEnPlano.ParedPlano], senas: [UbicadorEnPlano.SenaPlano])) -> [ReglasDeMedir.Abertura] {
+        var senas = forma.senas
+        if let m = marcoDe(roomName) ?? nueva.acomodoMarco {
+            senas += cuartosDelMarco(m).filter { Self.clave($0.nombre) != Self.clave(roomName) }.flatMap { $0.senas }
+        }
+        return senas.map { ReglasDeMedir.Abertura(p: $0.p, esVentana: $0.esVentana, ancho: $0.ancho, alto: $0.alto, abajo: $0.abajo, esPaso: $0.esPaso) }
+    }
+    /// Lo que sale del corte parcial de pared que se está midiendo. Las esquinas se pasan al plano SOLO si la ubicación estaba
+    /// confirmada al marcar cada una, sin reubicarse ni cortes del rastreo, y cada tramo calza con una pared del cuarto (1 ft). Si no,
+    /// no se resta nada y `porque` lo dice. Sin el piso no se sabe si arranca en el piso: ni resta ni baseboard.
+    fileprivate func datosDelCorte() -> CorteParcial? {
+        let n = nueva
+        guard medirPrimero, section == "wall", n.parteEntera == nil, pathPoints.count >= 2 else { return nil }
+        var c = CorteParcial()
+        guard let piso = pisoConocido() else { c.porque = "no veo el piso"; return c }
+        // (idea 3) El alto de la banda (o el + de "Otro alto") se cuenta DESDE EL PISO: ese corte arranca en el piso. Con el alto de
+        // dos +, el + más bajo DEL ALTO dice dónde arranca (las esquinas van al pie de la pared aunque sea un parche alto; la misma
+        // regla que Listo usa para el alto del nivel, arrancaEnElPiso).
+        if widthPoints.isEmpty { c.arranque = 0 }
+        else if let bajo = widthPoints.map({ Double($0.y) }).min() { c.arranque = max(0, (bajo - Double(piso)) * 3.28084) }
+        let ubicadas = esquinasUbicadas() ?? ubicacionReciente()
+        guard ubicadas, ubicacionBase(), !n.rastreoMaloEnMedida, let ac = n.acomodo, let forma = formaDelCuarto() else { c.porque = "falta ubicarse"; return c }
+        guard let tramos = UbicadorEnPlano.paredesMedidas(ac, puntos: puntosMedidosEnPies(), paredes: forma.paredes) else { c.porque = "no calza con el plano"; return c }
+        let todas = aberturasDelPlano(forma)
+        // (revisión 3) Por los tramos JUNTADOS de cada pared: un + a media puerta partía la puerta en dos tramos y solo restaba el pedazo
+        // del que tiene su centro (y cobraba baseboard en el hueco). En la bitácora van los tramos como se marcaron.
+        for tr in ReglasDeMedir.tramosUnidos(tramos) {
+            let w = forma.paredes[tr.indice]
+            let r = ReglasDeMedir.aberturasEnElTramo(a: w.seg.a, b: w.seg.b, t0: tr.t0, t1: tr.t1, aberturas: todas)
+            c.aberturas += r.conMedida; c.sinMedida += r.sinMedida
+        }
+        c.tramos = tramos
+        c.paredes = Array(Set(tramos.map { $0.indice })).sorted()
+        return c
+    }
+    private func claveDelIncluye() -> String { "\(nivelActual)|\(Self.clave(roomName))" }
+    /// (su decisión 3) "¿Qué incluye?" ya contestado en este cuarto. En Kitchen, Bath y Laundry no se reusa.
+    fileprivate func incluyeDelCuarto() -> (base: Bool, shoe: Bool)? {
+        guard !ReglasDeMedir.cuartoSinAtajos(roomName) else { return nil }
+        return nueva.incluyeDeCuarto[claveDelIncluye()]
+    }
+    private func textoIncluye(_ r: (base: Bool, shoe: Bool)?) -> String { r.map { $0.base ? ($0.shoe ? "base+shoe" : "base") : "nada" } ?? "pregunta" }
+    /// ¿El corte que se mide se guarda con su baseboard? true = sí, false = no, nil = se pregunta al guardar.
+    fileprivate func llevaBaseboardElCorte() -> Bool? {
+        let n = nueva
+        guard section == "wall", n.parteEntera == nil, !largoDictado, pathPoints.count >= 2, let c = n.corte ?? datosDelCorte(), c.desdePiso else { return false }
+        guard let i = n.incluyeDelCorte ?? incluyeDelCuarto() else { return nil }
+        return i.base && ReglasDeMedir.baseboardDeLaPared(largo: pathTotalFeet, aberturas: c.aberturas) > 0.5
+    }
+    /// Los renglones 3 y 4 del corte (la ficha): lo que se resta y el baseboard, con el largo y el alto que se van a guardar.
+    fileprivate func renglonesDelCorte(L: Double, S: Double, corte cc: CorteParcial? = nil) -> (resta: String, base: String)? {
+        let n = nueva
+        guard section == "wall", n.parteEntera == nil, S > 0, let c = cc ?? n.corte ?? datosDelCorte() else { return nil }
+        let restan = c.aberturas.filter { ReglasDeMedir.restaDeLaPared(largo: L, alto: S, aberturas: [$0], desde: c.desde) > 0 }
+        return (ReglasDeMedir.textoDeLaResta(largo: L, alto: S, restan: restan, porque: c.porque, sinMedida: c.sinMedida),
+                ReglasDeMedir.textoDelBaseboard(arranque: c.arranque, largo: L, aberturas: c.aberturas, incluye: n.incluyeDelCorte ?? incluyeDelCuarto()))
+    }
+    /// (ideas 1, 3 y 5) TODO corte de pared con su alto pasa por aquí: "Listo · 2 ft", el + de "Otro alto", el alto con dos +, y la
+    /// pared completa del plano sin alto. Se CONGELA lo del corte; si arranca en el piso y el cuarto no ha contestado "¿El corte
+    /// incluye…?", se pregunta (una vez por cuarto; Kitchen, Bath y Laundry en cada pared). Después, el material puesto.
+    fileprivate func guardarCorte() {
+        let n = nueva
+        if n.parteEntera == nil {
+            n.corte = datosDelCorte()
+            anotarCorte()
+            if preguntarSiYaCompleta("corte") { return }        // sobre una pared ya completa: nunca en silencio (ni su baseboard otra vez)
+            if let c = n.corte, c.desdePiso, n.incluyeDelCorte == nil {
+                if let r = incluyeDelCuarto() { n.incluyeDelCorte = r } else { abrirPregunta(.incluye); return }
+            }
+        }
+        seguirConElCorte()
+    }
+    /// El corte (o la pared) ya con su alto: se guarda con el material PUESTO, sin "¿Qué material es?".
+    fileprivate func seguirConElCorte() {
+        if preguntarSiElCorteRepiteBaseboard() { return }       // (revisión) la pared ya lleva baseboard: nunca otro en silencio
+        let m = materialDeLaPared()
+        if ReglasDeMedir.materialesPared.contains(m) { resolverPared(m); return }
+        if ReglasDeMedir.esDePieLineal(m) { abrirPregunta(.matPared); return }      // un corte con alto nunca va en pie lineal
+        guardarMedir(ReglasDeMedir.otro(m, largo: pathTotalFeet, ancho: currentWidthFeet))
+    }
+    /// (revisión del 16 oct) ¿La ubicación estaba confirmada al marcar CADA esquina que queda? nil = no se anotó (sin esquinas, o
+    /// puestas sin el + de medir primero, como las maquetas): vale la de ahora, como antes.
+    fileprivate func esquinasUbicadas() -> Bool? {
+        let f = nueva.ubicadaEnEsquina
+        guard !pathPoints.isEmpty, f.count >= pathPoints.count else { return nil }
+        return f.prefix(pathPoints.count).allSatisfy { $0 }
+    }
+    /// Las paredes del plano que guardarMedir le pone a lo que se guarda (sin pared completa): donde cayó lo medido (la clase de la
+    /// medida), o las del corte, o la que tenía enfrente. guardarMedir y las preguntas de "ya está completa" usan esta misma.
+    private func paredesAlGuardar(clase: String, corte: CorteParcial?) -> [Int] {
+        var r = clase.split(separator: "+").compactMap { Int($0) }
+        if r.isEmpty, let c = corte { r = c.paredes }
+        // (revisión 3) "Es otra pared · guardar": sin pared, nunca la que tenía enfrente (ya completa).
+        if r.isEmpty, !nueva.paredSinSaber, let i = nueva.paredActual { r = [i] }
+        return r
+    }
+    /// (revisión del 16 oct) Las paredes donde se va a GUARDAR lo que se mide: las de las esquinas en el plano (seguras), o si no se
+    /// sabe por ellas, las mismas que guardarMedir le pone (paredesAlGuardar). Lo que se revisa y lo que se guarda nunca se contradicen.
+    /// (revisión 3) adivinada = no salió de lo medido (ni la clase ni el corte): es solo la que tenía enfrente, y no se confirmó al marcar la
+    /// primera esquina (sin la ubicación confirmada paredActual se queda en la pared de antes). El panel lo pregunta, no lo afirma.
+    private func paredesDeLoQueSeGuarda() -> (paredes: [Int], seguras: Bool, adivinada: Bool) {
+        let ps = paredesDeLasEsquinas()
+        if !ps.isEmpty { return (ps, true, false) }
+        guard medirPrimero, section == "wall", nueva.parteEntera == nil else { return ([], false, false) }
+        let clase = maqueta == 0 ? claseDeLaMedida().paredes : ""
+        let r = paredesAlGuardar(clase: clase, corte: nueva.corte)
+        let porLoMedido = !clase.split(separator: "+").compactMap({ Int($0) }).isEmpty || !(nueva.corte?.paredes.isEmpty ?? true)
+        return (r, false, !r.isEmpty && !porLoMedido && !paredActualConfirmada())
+    }
+    /// (revisión 3) ¿La pared que tenía enfrente (paredActual) es de fiar para lo que se guarda? Solo si al marcar la primera esquina, con
+    /// la ubicación confirmada, le apuntaba a esa misma. Sin las esquinas anotadas (las maquetas): la de ahora.
+    private func paredActualConfirmada() -> Bool {
+        let n = nueva
+        guard let pa = n.paredActual else { return false }
+        if esquinasUbicadas() == nil { return ubicacionReciente() && paredApuntada() == pa }
+        return n.paredAlPrimerPunto == pa
+    }
+    /// (revisión del 16 oct) Los renglones de baseboard de este cuarto en esas paredes que se cobrarían dos veces con `nuevo` pies más:
+    /// todos si alguna lleva el de su pared COMPLETA, o si lo guardado más lo nuevo pasa del baseboard del plano de esas paredes (su largo
+    /// menos sus puertas y arcos) por más de medio pie. Dos pedazos distintos de la misma pared no. [] = no se repite. Sin plano no hay
+    /// paredes (Field Reports): nunca sale.
+    private func baseboardRepetido(en ps: [Int], nuevo: Double) -> [Int] {
+        guard medirPrimero, !ps.isEmpty else { return [] }
+        let ya = items.indices.filter { j in
+            let it = items[j]
+            return it.cuarto == roomName && (nivelActual.isEmpty || it.nivel == nivelActual) && it.seccion == "wall" && it.material == "Baseboard"
+                && it.paredes.contains(where: { ps.contains($0) })
+        }
+        guard !ya.isEmpty else { return [] }
+        if ya.contains(where: { items[$0].completa }) { return ya }
+        // Lo que cabe: el baseboard del plano de TODAS las paredes que tocan (las de esta medida y las de lo ya guardado). Sin el plano
+        // de alguna (nil), cualquier baseboard ya guardado ahí se pregunta.
+        var cabe: Double? = nil
+        if let forma = formaDelCuarto() {
+            let todas = Set(ps).union(ya.flatMap { items[$0].paredes })
+            if todas.allSatisfy({ $0 >= 0 && $0 < forma.paredes.count }) {
+                let ab = aberturasDelPlano(forma)
+                cabe = todas.reduce(0.0) { t, i in
+                    let w = forma.paredes[i].seg
+                    return t + ReglasDeMedir.baseboardDeLaPared(largo: w.largo, aberturas: ReglasDeMedir.aberturasEnLaPared(a: w.a, b: w.b, aberturas: ab).conMedida)
+                }
+            }
+        }
+        return ReglasDeMedir.baseboardDeMas(ya: ya.reduce(0.0) { $0 + items[$1].length }, nuevo: nuevo, cabe: cabe) ? ya : []
+    }
+    /// (revisión del 16 oct) MEDIDA → Baseboard en una pared que ya lleva el suyo (el que salió solo con la pared completa o con un corte,
+    /// o uno medido): se cobraría dos veces. Se pregunta antes de "¿Lleva shoe molding?", nunca en silencio. true = se abrió la pregunta.
+    fileprivate func preguntarSiYaLlevaBaseboard() -> Bool {
+        let n = nueva
+        guard medirPrimero, section == "wall", n.parteEntera == nil else { return false }
+        let donde = paredesDeLoQueSeGuarda()
+        let ya = baseboardRepetido(en: donde.paredes, nuevo: pathTotalFeet)
+        guard !ya.isEmpty else { return false }
+        return preguntarBaseboardRepetido("baseboard", donde: donde, ya: ya, nuevo: pathTotalFeet)
+    }
+    /// (revisión del 16 oct) Al revés: el corte desde el piso traería su baseboard (la respuesta del cuarto) a una pared que ya lo lleva
+    /// (medido antes, u otro corte en el mismo tramo). Se pregunta; "Guardar igual" guarda el corte sin baseboard.
+    private func preguntarSiElCorteRepiteBaseboard() -> Bool {
+        let n = nueva
+        guard medirPrimero, section == "wall", n.parteEntera == nil, !n.incluyeSoloEsta, let c = n.corte, c.desdePiso,
+              let inc = n.incluyeDelCorte, inc.base else { return false }
+        let nuevo = ReglasDeMedir.baseboardDeLaPared(largo: pathTotalFeet, aberturas: c.aberturas)
+        guard nuevo > 0.5 else { return false }
+        let donde = paredesDeLoQueSeGuarda()
+        let ya = baseboardRepetido(en: donde.paredes, nuevo: nuevo)
+        guard !ya.isEmpty else { return false }
+        return preguntarBaseboardRepetido("corte-base", donde: donde, ya: ya, nuevo: nuevo)
+    }
+    private func preguntarBaseboardRepetido(_ que: String, donde: (paredes: [Int], seguras: Bool, adivinada: Bool), ya: [Int], nuevo: Double) -> Bool {
+        let n = nueva
+        let llenas = donde.paredes.filter { i in ya.contains { items[$0].paredes.contains(i) } }
+        // (revisión 2) Las paredes que la medida TAMBIÉN cubre y que no llevan baseboard (el corte caminado de la 1 a la 2): "Guardar
+        // igual · sin baseboard" le quitaría el suyo a la 2, y "otro baseboard" cobraría dos veces el de la 1. No se ofrece: aparte.
+        let otras = donde.paredes.filter { !llenas.contains($0) }
+        n.sobreCompleta = (que, llenas, otras, donde.seguras, donde.adivinada)
+        anotarMedir("corte-sobre-completa", ["que": "pregunta", "de": que, "paredes": llenas.map { $0 + 1 }, "otras": otras.map { $0 + 1 }, "seguras": donde.seguras,
+                                             "adivinada": donde.adivinada, "largo": (nuevo * 10).rounded() / 10, "ya_ft": (ya.reduce(0.0) { $0 + items[$1].length } * 10).rounded() / 10])
+        vibrar(.fallo)
+        abrirPregunta(.sobreCompleta)
+        return true
+    }
+    /// Las paredes del plano donde cayeron las esquinas que se miden: las mismas reglas que datosDelCorte (ubicación confirmada en cada
+    /// esquina, sin cortes del rastreo, cada tramo calza con una pared), pero sin pedir el piso. [] = no se sabe.
+    private func paredesDeLasEsquinas() -> [Int] {
+        let n = nueva
+        guard medirPrimero, section == "wall", n.parteEntera == nil, pathPoints.count >= 2 else { return [] }
+        if let c = n.corte, c.porque == nil { return c.paredes }
+        let ubicadas = esquinasUbicadas() ?? ubicacionReciente()
+        guard ubicadas, ubicacionBase(), !n.rastreoMaloEnMedida, let ac = n.acomodo, let forma = formaDelCuarto(),
+              let tramos = UbicadorEnPlano.paredesMedidas(ac, puntos: puntosMedidosEnPies(), paredes: forma.paredes) else { return [] }
+        return Array(Set(tramos.map { $0.indice })).sorted()
+    }
+    /// (revisión del 16 oct) Lo que se mide sobre una pared (o el piso o el techo) que YA ESTÁ COMPLETA se cobraría dos veces, y el corte
+    /// traería otra vez su baseboard con el "¿Qué incluye?" del cuarto. Antes de guardar nada se pregunta. true = se abrió la pregunta.
+    /// `que`: "corte" (con alto), "un-pie" (drywall de 1 pie), "floor" o "ceiling". Sin plano (Field Reports) nada es completo: nunca sale.
+    fileprivate func preguntarSiYaCompleta(_ que: String) -> Bool {
+        let n = nueva
+        guard medirPrimero, n.parteEntera == nil, !largoDictado else { return false }
+        var llenas: [Int] = [], otras: [Int] = [], seguras = true, adivinada = false
+        if que == "floor" || que == "ceiling" {
+            guard section == que, estadoDeLaParte(que) == "completa" else { return false }
+        } else {
+            // (revisión) Las MISMAS paredes donde se va a guardar: sin las esquinas en el plano, las que guardarMedir le pone (la clase de
+            // la medida o la que tenía enfrente). Y las que NO están completas que el corte también cubre (el corte caminado).
+            let donde = paredesDeLoQueSeGuarda()
+            llenas = donde.paredes.filter { estadoDeLaPared($0) == "completa" }
+            guard !llenas.isEmpty else { return false }
+            otras = donde.paredes.filter { !llenas.contains($0) }; seguras = donde.seguras; adivinada = donde.adivinada
+        }
+        n.sobreCompleta = (que, llenas, otras, seguras, adivinada)
+        anotarMedir("corte-sobre-completa", ["que": "pregunta", "de": que, "paredes": llenas.map { $0 + 1 }, "otras": otras.map { $0 + 1 }, "seguras": seguras,
+                                             "adivinada": adivinada, "largo": (pathTotalFeet * 10).rounded() / 10, "alto": ((currentWidthFeet ?? 0) * 10).rounded() / 10])
+        vibrar(.fallo)
+        abrirPregunta(.sobreCompleta)
+        return true
+    }
+    /// "Guardar igual": se guarda como su propia medida. El corte va SIN baseboard (la pared completa ya lo lleva); el piso y el techo
+    /// escogen su material (no el puesto). (revisión) Sin las esquinas en el plano la pared puede ser otra: el corte desde el piso
+    /// pregunta su baseboard (solo para él), nunca se lo quita a ciegas. El baseboard medido sigue a "¿Lleva shoe molding?".
+    fileprivate func guardarSobreLoCompleto() {
+        let n = nueva
+        guard let s = n.sobreCompleta, n.preguntaMedir == .sobreCompleta, s.otras.isEmpty else { cerrarPregunta(); return }
+        n.sobreCompleta = nil
+        n.preguntaMedir = nil; n.firmaPanel = ""
+        anotarMedir("corte-sobre-completa", ["que": "guardar-igual", "de": s.que, "paredes": s.paredes.map { $0 + 1 }, "seguras": s.seguras])
+        switch s.que {
+        case "corte":
+            if !s.seguras, n.corte?.desdePiso == true { n.incluyeDelCorte = nil; n.incluyeSoloEsta = true; abrirPregunta(.incluye) }
+            else { n.incluyeDelCorte = (false, false); seguirConElCorte() }
+        case "corte-base":
+            // (revisión 2) Sin las esquinas en el plano la pared puede ser otra: se pregunta su baseboard (solo para este corte), nunca
+            // se le quita a ciegas. incluyeSoloEsta evita que vuelva a salir esta misma pregunta.
+            if !s.seguras, n.corte?.desdePiso == true { n.incluyeDelCorte = nil; n.incluyeSoloEsta = true; abrirPregunta(.incluye) }
+            else { n.incluyeDelCorte = (false, false); seguirConElCorte() }
+        case "baseboard": abrirPregunta(.shoe)
+        case "un-pie": resolverPared(ReglasDeMedir.drywallDeUnPie)
+        case "floor": abrirPregunta(.piso)
+        default: abrirPregunta(.techo)
+        }
+    }
+    /// (revisión 3) "Es otra pared · guardar": la pared era solo la que tenía enfrente (sin confirmar) y él dice que es otra. Se guarda como
+    /// si no hubiera salido la pregunta, SIN pared (paredSinSaber: nunca en la completa, y "falta una pared" la cuenta como sin saber).
+    fileprivate func guardarEnOtraPared() {
+        let n = nueva
+        guard let s = n.sobreCompleta, n.preguntaMedir == .sobreCompleta, s.adivinada, s.otras.isEmpty else { cerrarPregunta(); return }
+        n.sobreCompleta = nil
+        n.preguntaMedir = nil; n.firmaPanel = ""
+        n.paredSinSaber = true
+        anotarMedir("corte-sobre-completa", ["que": "otra-pared", "de": s.que, "paredes": s.paredes.map { $0 + 1 }, "adivinada": true])
+        switch s.que {
+        case "corte":
+            // Lo que sigue en guardarCorte: "¿El corte incluye…?" del cuarto (o se pregunta) y el material puesto.
+            if let c = n.corte, c.desdePiso, n.incluyeDelCorte == nil {
+                if let r = incluyeDelCuarto() { n.incluyeDelCorte = r } else { abrirPregunta(.incluye); return }
+            }
+            seguirConElCorte()
+        case "corte-base": seguirConElCorte()           // con su baseboard (la respuesta del cuarto): la pared no es la que ya lo lleva
+        case "baseboard": abrirPregunta(.shoe)
+        case "un-pie": resolverPared(ReglasDeMedir.drywallDeUnPie)
+        default: cerrarPregunta()
+        }
+    }
+    /// "No guardar": la medida se tira (como cancelar); lo guardado no se toca.
+    fileprivate func noGuardarSobreLoCompleto() {
+        let n = nueva
+        anotarMedir("corte-sobre-completa", ["que": "no-guardar", "de": n.sobreCompleta?.que ?? "", "paredes": (n.sobreCompleta?.paredes ?? []).map { $0 + 1 },
+                                             "otras": (n.sobreCompleta?.otras ?? []).map { $0 + 1 }, "adivinada": n.sobreCompleta?.adivinada ?? false])
+        n.sobreCompleta = nil
+        n.preguntaMedir = nil; n.porGuardar = nil; n.firmaPanel = ""
+        cancelarMedidaEnCurso(hablar: false)
+        stage = .measuringLength
+        pintarCamaraNueva()
+    }
+    /// ¿Lo último guardado es una pareja (el corte o la pared, y su baseboard)? Un Deshacer quita los dos.
+    fileprivate func ultimaEsPareja() -> Bool { items.indices.last.map { $0 >= 1 && nueva.pegadaALaAnterior.contains($0) } ?? false }
+    /// Tocar la ficha del corte ("Baseboard + shoe · 12 ft"): "¿El corte incluye…?" otra vez, sin guardar.
+    @objc fileprivate func fichaTocada() {
+        let n = nueva
+        guard medirPrimero, n.medirActivo, n.preguntaMedir == nil, section == "wall", n.parteEntera == nil, !largoDictado, pathPoints.count >= 2,
+              stage == .measuringLength || stage == .lengthDone || stage == .widthDone, let c = datosDelCorte(), c.desdePiso else { return }
+        n.corte = c; n.cambiandoIncluye = true
+        anotarMedir("incluye", ["que": "cambiar", "antes": textoIncluye(n.incluyeDelCorte ?? incluyeDelCuarto())])
+        abrirPregunta(.incluye)
+    }
+    /// El corte en la bitácora al guardarlo: dónde cayeron las esquinas en el plano, qué se restó y por qué no.
+    private func anotarCorte() {
+        let n = nueva, c = n.corte
+        func r1(_ x: Double) -> Double { (x * 10).rounded() / 10 }
+        let L = pathTotalFeet, S = currentWidthFeet ?? 0
+        let paredes = c?.paredes.map { String($0) }.joined(separator: "+") ?? ""
+        let tramos = c?.tramos.map { "\($0.indice):\(r1($0.t0))-\(r1($0.t1))" }.joined(separator: ",") ?? ""
+        let aberturas = c?.aberturas.map { "\($0.esPaso ? "a" : ($0.esVentana ? "v" : "p"))@\(r1($0.p.x)),\(r1($0.p.y))|\(r1($0.ancho))" }.joined(separator: ";") ?? ""
+        let base = c.map { $0.desdePiso ? r1(ReglasDeMedir.baseboardDeLaPared(largo: L, aberturas: $0.aberturas)) : 0 } ?? 0
+        let arranque = c?.arranque.map(r1) ?? -1
+        anotarMedir("corte", ["largo": r1(L), "alto": r1(S), "paredes": paredes, "tramos": tramos, "arranque_ft": arranque,
+                              "ubicadas": esquinasUbicadas().map { $0 ? 1 : 0 } ?? -1, "reciente": ubicacionReciente(), "rastreo_malo": n.rastreoMaloEnMedida,
+                              "porque": c?.porque ?? "", "aberturas": aberturas, "sin_medida": c?.sinMedida ?? 0, "menos": r1(restaEnCurso(L, S)),
+                              "base_ft": base, "incluye": textoIncluye(n.incluyeDelCorte ?? incluyeDelCuarto()), "sin_atajos": ReglasDeMedir.cuartoSinAtajos(roomName)])
+    }
+    /// Un punto del plano (pies) en el mundo de ARKit (m), a la altura dada: lo contrario de Acomodo.aplicar.
+    private func alMundo(_ q: SIMD2<Double>, y: Float) -> SIMD3<Float>? {
+        guard let ac = nueva.acomodo else { return nil }
+        let d = q - ac.mov, c = cos(-ac.giro), s = sin(-ac.giro)
+        let p = SIMD2(c * d.x - s * d.y, s * d.x + c * d.y) / 3.28084
+        return SIMD3(Float(p.x), y, Float(p.y))
+    }
+    fileprivate func armarChipDePuerta() {
+        let c = nueva.chipPuerta
+        c.relleno = UIEdgeInsets(top: 4, left: 8, bottom: 4, right: 8)
+        c.font = .systemFont(ofSize: 11, weight: .semibold); c.textColor = Claro.tinta; c.backgroundColor = Claro.boton
+        c.layer.cornerRadius = 6; c.layer.cornerCurve = .continuous; c.clipsToBounds = true
+        c.isUserInteractionEnabled = false; c.isHidden = true
+        view.addSubview(c)
+    }
+    /// "puerta · se resta sola" al pie de la puerta (o el arco) que resta el corte. Cada cuadro solo se proyecta; cuál puerta es lo
+    /// decide pintarCentroNuevo.
+    fileprivate func ponerChipDePuerta() {
+        let n = nueva, c = n.chipPuerta
+        guard let d = n.chipDe else { c.isHidden = true; return }
+        if c.text != d.texto { c.text = d.texto; c.sizeToFit() }
+        if maqueta > 0 { c.center = CGPoint(x: view.bounds.midX + 40, y: view.bounds.height * 0.64); c.isHidden = false; return }
+        guard let piso = pisoConocido(), let w = alMundo(d.p, y: piso + 0.05) else { c.isHidden = true; return }
+        let s = sceneView.projectPoint(SCNVector3(w.x, w.y, w.z))
+        let q = CGPoint(x: CGFloat(s.x), y: CGFloat(s.y) + 14)
+        guard s.z > 0, s.z < 1, view.bounds.insetBy(dx: 16, dy: 90).contains(q) else { c.isHidden = true; return }
+        c.center = q; c.isHidden = false
+    }
+
+    // ---------------- (ideas 3 y 5) EL ALTO DEL CORTE, LA BANDA Y EL MATERIAL PUESTO ----------------
+    // Su decisión 2: el alto se mide con + en la PRIMERA pared del nivel; en las siguientes se pinta una banda azul a ese alto sobre la
+    // pared de verdad y el botón dice "Listo · 2 ft". "Otro alto · un +" = un solo + en la línea del corte (el de abajo es el piso que
+    // ve la cámara). Sin ver el piso: el alto con dos +, como siempre. El material viene PUESTO y se cambia tocando MEDIDA.
+    private static let llaveAlto = "scanova.medirPrimero.alto.v1"
+    private func llaveDelAlto(_ nivel: String? = nil) -> String { Self.llaveAlto + "|" + trabajoId + "|" + (nivel ?? nivelActual) }
+    /// El alto del corte de este nivel y en qué cuarto se midió. Si el renglón que lo dio se deshizo en esta sesión, se olvida.
+    fileprivate func altoRecordado() -> (pies: Double, cuarto: String)? {
+        let n = nueva
+        if let f = n.altosDeLaSesion[nivelActual], items.count <= f.item { olvidarAlto("deshacer") }
+        if let a = n.altoDelNivel[nivelActual] { return a }
+        guard maqueta == 0, !trabajoId.isEmpty, !n.altoCargado.contains(nivelActual) else { return nil }
+        n.altoCargado.insert(nivelActual)
+        guard let d = UserDefaults.standard.dictionary(forKey: llaveDelAlto()), let p = d["pies"] as? Double, p > 0 else { return nil }
+        let a = (pies: p, cuarto: d["cuarto"] as? String ?? "")
+        n.altoDelNivel[nivelActual] = a
+        anotarMedir("alto-cargado", ["pies": (p * 10).rounded() / 10, "de": a.cuarto])
+        return a
+    }
+    fileprivate func recordarAlto(_ h: Double, item: Int) {
+        let n = nueva
+        n.altoDelNivel[nivelActual] = (h, roomName); n.altosDeLaSesion[nivelActual] = (h, roomName, item); n.altoCargado.insert(nivelActual)
+        // (revisión 2) Al teléfono NO va aquí: con "Salir sin mandar" las medidas se tiran y el alto se quedaba puesto en el trabajo para
+        // siempre. Se escribe al mandar (guardarAltosEnElTelefono).
+        anotarMedir("alto-recordado", ["pies": (h * 10).rounded() / 10, "item": item, "que": "en-la-sesion"])
+    }
+    fileprivate func olvidarAlto(_ porque: String) {
+        let n = nueva
+        let antes = n.altoDelNivel[nivelActual]?.pies ?? 0
+        n.altoDelNivel[nivelActual] = nil; n.altosDeLaSesion[nivelActual] = nil
+        // Nada de esta sesión se escribió en el teléfono (eso es al mandar): no hay llave que quitar.
+        anotarMedir("alto-olvidado", ["porque": porque, "pies": (antes * 10).rounded() / 10])
+    }
+    /// (revisión 2) Al MANDAR (o si la cámara se cae y entrega lo guardado): el alto de cada nivel medido en esta sesión queda en el
+    /// teléfono para la próxima vez, solo si su renglón sigue ahí. Cancelar o "Salir sin mandar" no escribe nada.
+    fileprivate func guardarAltosEnElTelefono() {
+        guard maqueta == 0, !trabajoId.isEmpty else { return }
+        for (nivel, a) in nueva.altosDeLaSesion where a.item < items.count && items[a.item].nivel == nivel {
+            UserDefaults.standard.set(["pies": a.pies, "cuarto": a.cuarto], forKey: llaveDelAlto(nivel))
+            anotarMedir("alto-recordado", ["que": "al-mandar", "nivel": nivel, "pies": (a.pies * 10).rounded() / 10])
+        }
+    }
+    /// El piso para MEDIR (no el de adivinar la parte): solo planos que ARKit llamó piso, de 0.5 m² o más, el más alto de los que quedan
+    /// debajo de las esquinas. Nunca el adivinado ni una mesa. nil = no se ve: el alto va con dos +.
+    fileprivate func pisoConocido() -> Float? {
+        let n = nueva
+        if maqueta > 0 { return n.maquetaSinPiso ? nil : 0 }
+        let pisos = n.horizontales.values.filter { $0.clase == "floor" }.map { (y: Double($0.y), area: Double($0.area)) }
+        return ReglasDeMedir.pisoBajoLasEsquinas(pisos, esquinasY: pathPoints.map { Double($0.y) }).map { Float($0) }
+    }
+    /// El material de la pared que se guarda: lo que tocó en MEDIDA para esta medida, o Drywall.
+    fileprivate func materialDeLaPared() -> String {
+        if let p = materialPuestoVigente(), p.parte == "wall" { return p.material }
+        return "Drywall"
+    }
+    /// (revisión 2) Lo tocado en MEDIDA, solo en el cuarto donde se tocó: el que decía la pantalla o donde estaba por el mapa (que pudo ir
+    /// atrasado). Asomado a otro cuarto vale Drywall o el piso de antes; al regresar vuelve. Sin cuarto anotado (maquetas) vale siempre.
+    fileprivate func materialPuestoVigente() -> (parte: String, material: String)? {
+        let n = nueva
+        guard let p = n.materialPuesto else { return nil }
+        if n.materialPuestoDonde.isEmpty && n.materialPuestoCuarto.isEmpty { return p }
+        // (revisión 3) Y en su nivel: el "Bathroom" de arriba no es el de abajo (al regresar a su nivel vuelve, como el cuarto).
+        if !n.materialPuestoNivel.isEmpty && n.materialPuestoNivel != nivelActual { return nil }
+        let k = Self.clave(roomName)
+        return k == Self.clave(n.materialPuestoDonde) || k == Self.clave(n.materialPuestoCuarto) ? p : nil
+    }
+    fileprivate func nombreDeLaPared() -> String { nueva.paredActual.map { "Pared \($0 + 1)" } ?? "Pared" }
+    /// El piso PUESTO: lo que tocó en MEDIDA (de = ""), o el de este cuarto ("como antes"), o el último guardado en este nivel ("como Kitchen"). nil = se pregunta (el
+    /// primer cuarto, "Otro piso", y cocina / baño / lavandería).
+    fileprivate func pisoPuesto() -> (material: String, de: String)? {
+        let n = nueva
+        if n.sinPisoPuesto { return nil }
+        if let p = materialPuestoVigente(), p.parte == "floor" { return (p.material, "") }
+        guard !ReglasDeMedir.cuartoSinAtajos(roomName) else { return nil }
+        return ReglasDeMedir.pisoAnterior(items.map { (cuarto: $0.cuarto, nivel: $0.nivel, seccion: $0.seccion, material: $0.material, ancho: $0.width) }, nivel: nivelActual, cuarto: roomName)
+    }
+    /// De dónde viene el piso puesto, corto: "como Kitchen", "como antes" (de este cuarto) o "" (lo tocó en MEDIDA).
+    fileprivate func deDondeElPiso(_ de: String) -> String {
+        de.isEmpty ? "" : (Self.clave(de) == Self.clave(roomName) ? "como antes" : "como \(de)")
+    }
+    fileprivate func nombreDelPisoPuesto(_ material: String) -> String {
+        ReglasDeMedir.nombreDelPiso(material, debajo: ReglasDeMedir.underlayment(nueva.ajuste.piso, material: material, respuesta: nueva.underDeCuarto["\(nivelActual)|\(roomName)"]))
+    }
+    /// La ficha de arriba mientras se marca un corte de pared con su alto ya MEDIDO (del nivel o del + de "Otro alto"): lo mismo que
+    /// va a guardar Listo. nil = la de siempre.
+    fileprivate func fichaDelCorte() -> ReglasDeMedir.FichaDelCorte? {
+        let n = nueva
+        guard medirPrimero, n.medirActivo, section == "wall", pathPoints.count >= 2, !largoDictado, n.parteEntera == nil else { return nil }
+        let m = materialDeLaPared()
+        guard !ReglasDeMedir.esDePieLineal(m) else { return nil }
+        let alto: Double
+        if n.otroAlto {
+            guard stage == .lengthDone, let h = n.altoDeUnPunto else { return nil }
+            alto = h
+        } else {
+            guard stage == .measuringLength || stage == .lengthDone, let a = altoRecordado(), pisoConocido() != nil else { return nil }
+            alto = a.pies
+        }
+        let L = pathTotalFeet
+        let eu = esquinasUbicadas().map { $0 ? "1" : "0" } ?? "-"
+        // (revisión) La llave lleva lo que SALE del corte (sus puertas y arcos ya pasados al plano, por qué no, desde dónde arranca) y el
+        // cuarto: la ubicación se acomoda sola y una puerta puede entrar al tramo sin que cambie nada más. Lo que se ve es lo que se guarda.
+        let c = n.corte ?? datosDelCorte()
+        func d(_ x: Double) -> Int { Int((x * 10).rounded()) }
+        let deCorte = c.map { c in "\(c.porque ?? "-")|\(c.sinMedida)|\(c.paredes)|\(c.arranque.map(d) ?? -1)|"
+            + c.aberturas.map { "\($0.esPaso ? "a" : ($0.esVentana ? "v" : "p"))\(d($0.ancho)),\(d($0.alto)),\(d($0.abajo)),\(d($0.p.x)),\(d($0.p.y))" }.joined(separator: ";") } ?? "-"
+        let firma = "\(m)|\(Int((L * 10).rounded()))|\(Int((alto * 10).rounded()))|\(n.paredActual ?? -1)|\(items.count)|\(n.ajuste.paredes ?? "")|"
+            + "\(textoIncluye(n.incluyeDelCorte ?? incluyeDelCuarto()))|\(ubicacionReciente())|\(n.rastreoMaloEnMedida)|\(eu)|\(deCorte)|\(Self.clave(roomName))|\(nivelActual)"
+        if firma == n.fichaCorteFirma, let f = n.fichaCorte { return f }
+        guard let r = renglonesDelCorte(L: L, S: alto, corte: c) else { return nil }
+        var insul: Bool? = false
+        if ReglasDeMedir.paredConInsulacion.contains(m) {
+            let cl = claseParaInsulacion()
+            insul = ReglasDeMedir.insulacionDePared(n.ajuste.paredes, afuera: cl.afuera, respuesta: n.insulDePared[claveDePared(cl.paredes)])
+        }
+        let f = ReglasDeMedir.fichaDelCorte(material: m, alto: alto, largo: L, menos: restaEnCurso(L, alto, corte: c), resta: r.resta, insulacion: insul,
+                                            pared: n.paredActual.map { $0 + 1 }, base: r.base)
+        n.fichaCorteFirma = firma; n.fichaCorte = f
+        return f
+    }
+    /// El riel MEDIDA: el número de lo que va a guardar y el material PUESTO, que se toca para cambiarlo (pared y piso).
+    fileprivate func rielDeLaMedida() -> (valor: String, sub: String, tocable: Bool) {
+        let n = nueva
+        switch section {
+        case "wall":
+            let m = ReglasDeMedir.nombreEnLaCamara(materialDeLaPared())
+            if let f = fichaDelCorte() { return (f.area + " pies²", m + " · cambiar", true) }
+            let marcando = pathPoints.count >= 2 || n.otroAlto
+            return (medidaDelRiel(), m + (marcando ? " · cambiar" : " · al guardar"), !largoDictado)
+        case "floor":
+            guard let pre = pisoPuesto() else { return (medidaDelRiel(), "el piso · le pregunto", !largoDictado) }
+            var valor = medidaDelRiel()
+            if let c = n.franjaContenido, c.parte == "floor", let d = datosPisoEntero("floor") { valor = "\(Self.pies(areaDeLoCompleto(d))) pies²" }
+            let de = deDondeElPiso(pre.de)
+            return (valor, nombreDelPisoPuesto(pre.material) + " · " + (de.isEmpty ? "cambiar" : de), !largoDictado)
+        default:
+            return (medidaDelRiel(), "material al final", false)
+        }
+    }
+    /// El alto que enseña la banda: el del nivel, el + de "Otro alto", o la mira mientras escoge ese + (vivo: solo se ve).
+    fileprivate func altoDeLaBanda() -> (pies: Double, vivo: Bool)? {
+        let n = nueva
+        guard medirPrimero, n.medirActivo, section == "wall", n.preguntaMedir == nil, !largoDictado, n.parteEntera == nil,
+              pathPoints.count >= 2, !ReglasDeMedir.esDePieLineal(materialDeLaPared()) else { return nil }
+        if n.otroAlto {
+            guard stage == .lengthDone else { return nil }
+            if let h = n.altoDeUnPunto { return (h, false) }
+            guard let v = n.altoVivo, v >= 0.4, v <= 12 else { return nil }
+            return (v, true)
+        }
+        guard stage == .measuringLength || stage == .lengthDone, let a = altoRecordado() else { return nil }
+        return (a.pies, false)
+    }
+    /// El alto de la banda ya puesto en la medida (dicho, sin puntos del alto).
+    fileprivate var altoDeLaBandaPuesto: Bool {
+        medirPrimero && section == "wall" && stage == .widthDone && widthPoints.isEmpty && currentWidthFeet != nil && nueva.parteEntera == nil && !largoDictado
+    }
+    /// El botón de la derecha en un corte de pared con sus esquinas. nil = lo de siempre.
+    fileprivate func botonDelCorte() -> (titulo: String, sub: String, accion: () -> Void)? {
+        let n = nueva, pies = Self.pies
+        guard medirPrimero, n.medirActivo, section == "wall", !largoDictado, n.parteEntera == nil, pathPoints.count >= 2 else { return nil }
+        if n.otroAlto {
+            guard stage == .lengthDone else { return nil }
+            if let h = n.altoDeUnPunto { return ("Listo · \(pies(h)) ft", textoRenglones(), { [weak self] in self?.listoConElAlto(h, fuente: "un-punto") }) }
+            return ("Alto con 2 +", "un parche alto", { [weak self] in self?.altoConDosPuntos(desde: "otro-alto") })
+        }
+        guard stage == .measuringLength || stage == .lengthDone else { return nil }
+        if ReglasDeMedir.esDePieLineal(materialDeLaPared()) { return ("Listo · el largo", "\(pies(pathTotalFeet)) pies lineales", { [weak self] in self?.listoLineal() }) }
+        guard pisoConocido() != nil else { return ("Alto · dos +", "abajo y arriba", { [weak self] in self?.altoConDosPuntos(desde: "sin-piso") }) }
+        if let a = altoRecordado() { return ("Listo · \(pies(a.pies)) ft", textoRenglones(), { [weak self] in self?.listoConElAlto(a.pies, fuente: "recordado") }) }
+        return ("Alto · un +", "la línea del corte", { [weak self] in self?.empezarOtroAlto() })
+    }
+    private func textoRenglones() -> String {
+        switch llevaBaseboardElCorte() {
+        case .some(true): return "guarda 2 renglones"
+        case .some(false): return "guarda 1 renglón"
+        case .none: return "pregunto el baseboard"
+        }
+    }
+    /// "Otro alto · un +" (o "Alto · un +" en la primera pared del nivel): el largo se cierra y el + que sigue es la línea del corte.
+    fileprivate func empezarOtroAlto() {
+        let n = nueva
+        guard section == "wall", pathPoints.count >= 2, stage == .measuringLength || stage == .lengthDone, !n.otroAlto else { return }
+        guard pisoConocido() != nil else { altoConDosPuntos(desde: "sin-piso"); return }
+        if stage == .measuringLength { finishPathTapped(); revisarParteDeLaMedida("largo") }
+        guard section == "wall" else { abrirPregunta(.segunda); return }      // los puntos dicen que no era pared: lo de siempre
+        n.otroAlto = true; n.altoDeUnPunto = nil; n.altoVivo = nil
+        anotarMedir("otro-alto", ["que": "empieza", "recordado": altoRecordado().map { ($0.pies * 10).rounded() / 10 } ?? 0, "esquinas": pathPoints.count])
+        n.firmaPanel = ""; pintarCamaraNueva()
+    }
+    fileprivate func otroAltoTocado() { anotarMedir("toque", ["boton": "otro-alto"]); empezarOtroAlto() }
+    /// El + de "Otro alto": UN punto en la línea del corte. Vale solo sobre la pared marcada (a 30 cm o menos de la línea de sus
+    /// esquinas) y arriba del piso que vio la cámara; si no, vibra largo y lo dice. Otro + lo cambia.
+    fileprivate func marcarOtroAlto() {
+        let n = nueva
+        let deMaqueta: simd_float3? = maqueta > 0 && !n.puntosDeMaqueta.isEmpty ? n.puntosDeMaqueta.removeFirst() : nil
+        guard let hit = deMaqueta ?? currentRaycastHit(), let piso = pisoConocido() else {
+            vibrar(.fallo); anotarMedir("otro-alto", ["que": "rechazado", "porque": "sin-golpe"])
+            mostrarAvisoNuevo("No veo la pared ahí. Apunte a la línea del corte y toque +", segundos: 2.5); return
+        }
+        let r = ReglasDeMedir.altoDeUnPunto(punto: SIMD3(Double(hit.x), Double(hit.y), Double(hit.z)), piso: Double(piso),
+                                            esquinas: pathPoints.map { SIMD3(Double($0.x), Double($0.y), Double($0.z)) })
+        guard let h = r.pies else {
+            vibrar(.fallo)
+            anotarMedir("otro-alto", ["que": "rechazado", "porque": r.porque, "dist_m": (r.dist * 100).rounded() / 100,
+                                      "h_m": ((Double(hit.y) - Double(piso)) * 100).rounded() / 100])
+            mostrarAvisoNuevo(r.porque == "lejos" ? "Ese punto no está en esta pared. Toque + en la línea del corte."
+                                                  : "Ese punto no es la línea del corte. Toque + donde termina el corte.", segundos: 3)
+            return
+        }
+        n.marcaOtroAlto?.removeFromParentNode()
+        n.marcaOtroAlto = addMarker(at: hit, color: Self.tema.lineaAncho)
+        n.altoDeUnPunto = h; n.altoVivo = nil
+        vibrar(.esquina)
+        anotarMedir("otro-alto", ["que": "punto", "pies": (h * 10).rounded() / 10, "dist_m": (r.dist * 100).rounded() / 100,
+                                  "recordado": altoRecordado().map { ($0.pies * 10).rounded() / 10 } ?? 0])
+        n.firmaPanel = ""
+    }
+    fileprivate func quitarMarcaOtroAlto() { nueva.marcaOtroAlto?.removeFromParentNode(); nueva.marcaOtroAlto = nil }
+    /// El alto con dos + (abajo y arriba), como siempre: sin ver el piso, o un parche que no empieza en el piso.
+    fileprivate func altoConDosPuntos(desde: String) {
+        let n = nueva
+        if stage == .measuringLength { guard pathPoints.count >= 2 else { return }; finishPathTapped(); revisarParteDeLaMedida("largo") }
+        n.otroAlto = false; n.altoDeUnPunto = nil; n.altoVivo = nil; quitarMarcaOtroAlto()
+        anotarMedir("otro-alto", ["que": "dos-puntos", "desde": desde])
+        if desde == "sin-piso" { mostrarAvisoNuevo("Todavía no veo el piso: marque el alto con dos + (abajo y arriba)", segundos: 3) }
+        empezarAncho()
+    }
+    /// "Listo · 2 ft": guarda el corte con el alto de la banda (del nivel, o el + de "Otro alto") y el material puesto, en un toque.
+    fileprivate func listoConElAlto(_ h: Double, fuente: String) {
+        let n = nueva
+        guard n.medirActivo, n.preguntaMedir == nil, !roomName.isEmpty, section == "wall", h > 0, pathPoints.count >= 2 else {
+            vibrar(.fallo); anotarMedir("vibra", ["tipo": "fallo", "porque": "listo-alto"]); return
+        }
+        if stage == .measuringLength { finishPathTapped() }
+        guard stage == .lengthDone, hasLengthMeasurement else { return }
+        revisarParteDeLaMedida("listo")
+        guard section == "wall" else { n.otroAlto = false; quitarMarcaOtroAlto(); abrirPregunta(.segunda); return }
+        let piso = pisoConocido()
+        // El alto va como un alto DICHO (sin puntos del alto): es el número de un + de esta casa, escrito en el botón.
+        widthPoints = []; currentWidthFeet = h; stage = .widthDone
+        n.altoParaRecordar = fuente == "recordado" ? nil : h
+        anotarMedir("alto", ["que": fuente, "pies": (h * 10).rounded() / 10, "largo": (pathTotalFeet * 10).rounded() / 10, "esquinas": pathPoints.count,
+                             "de": altoRecordado()?.cuarto ?? "", "piso_y": piso.map { (Double($0) * 100).rounded() / 100 } ?? -99,
+                             "material": materialDeLaPared()])
+        n.otroAlto = false; n.altoDeUnPunto = nil; n.altoVivo = nil; quitarMarcaOtroAlto()
+        guardarCorte()
+    }
+    /// Lo de pie lineal en la pared (baseboard, drywall de 1 pie, trim, crown): Listo guarda el largo, sin alto ni banda.
+    fileprivate func listoLineal() {
+        let n = nueva
+        guard n.medirActivo, n.preguntaMedir == nil, stage == .measuringLength || stage == .lengthDone, pathPoints.count >= 2 else { return }
+        if stage == .measuringLength { finishPathTapped() }
+        revisarParteDeLaMedida("listo")
+        let m = materialDeLaPared()
+        anotarMedir("listo-lineal", ["material": m, "largo": (pathTotalFeet * 10).rounded() / 10])
+        guard section == "wall" else { abrirPregunta(.lineal1); return }
+        switch m {
+        case "Baseboard": if !preguntarSiYaLlevaBaseboard() { abrirPregunta(.shoe) }
+        case ReglasDeMedir.drywallDeUnPie: if !preguntarSiYaCompleta("un-pie") { resolverPared(m) }
+        default: guardarMedir(ReglasDeMedir.lineal(m, largo: pathTotalFeet))
+        }
+    }
+    fileprivate func abrirMaterialPuesto() {
+        let n = nueva
+        guard ["wall", "floor"].contains(section), !largoDictado, n.preguntaMedir == nil else { return }
+        anotarMedir("toque", ["boton": "medida", "parte": section, "esquinas": pathPoints.count])
+        abrirPregunta(.materialPuesto)
+    }
+    fileprivate func ponerMaterial(_ m: String) {
+        let n = nueva
+        let antes = section == "wall" ? materialDeLaPared() : (pisoPuesto()?.material ?? "")
+        n.materialPuesto = (section, m); n.fichaCorteFirma = ""
+        n.materialPuestoDonde = (ubicacionReciente() ? cuartoDondeEsta() : nil) ?? roomName
+        n.materialPuestoCuarto = roomName
+        n.materialPuestoNivel = nivelActual
+        // (revisión 3) Un piso escogido aquí a mano después de "Otro piso" es la elección nueva: vale para el riel, la palomita y Listo.
+        if section == "floor" { n.sinPisoPuesto = false }
+        anotarMedir("material-puesto", ["parte": section, "antes": antes, "ahora": m, "esquinas": pathPoints.count, "cuarto": roomName, "donde": n.materialPuestoDonde,
+                                        "nivel": nivelActual])
+        cerrarPregunta()
+    }
+    private func pedirNombreDelMaterial() {
+        let ejemplo = section == "floor" ? "Cork, Stone" : "Wainscoting, Beadboard"
+        let a = UIAlertController(title: "¿Qué material es?", message: "Escríbalo EN INGLÉS: este nombre sale tal cual en el reporte del seguro.", preferredStyle: .alert)
+        a.addTextField { t in t.placeholder = ejemplo; t.autocapitalizationType = .words }
+        a.addAction(UIAlertAction(title: "Cancelar", style: .cancel))
+        a.addAction(UIAlertAction(title: "Listo", style: .default) { [weak self] _ in
+            guard let s = self else { return }
+            let nombre = (a.textFields?.first?.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !nombre.isEmpty, s.nueva.preguntaMedir == .materialPuesto else { return }
+            s.ponerMaterial(nombre)
+        })
+        present(a, animated: true)
+    }
+    // ---- LA BANDA ----
+    fileprivate func pintarBanda() {
+        let n = nueva
+        armarBandaSiFalta()
+        let hayPanel = !n.panel.isHidden || n.tarjetaVisible
+        guard !hayPanel, !lab.activo, let a = altoDeLaBanda(), let piso = pisoConocido() else { quitarBanda(); return }
+        let hM = a.pies / 3.28084
+        // (P07) La banda deja el hueco de la puerta (o el arco) que el corte resta: solo con las esquinas ya pasadas al plano.
+        let puertas: [(p: SIMD3<Float>, ancho: Double)] = (datosDelCorte().flatMap { $0.porque == nil ? $0.aberturas.filter { !$0.esVentana } : nil } ?? [])
+            .compactMap { x in alMundo(x.p, y: piso).map { (p: $0, ancho: x.ancho / 3.28084) } }
+        let firma = "\(pathPoints.count)|\(Int((pathTotalFeet * 100).rounded()))|\(Int((hM * 50).rounded()))|\(Int((Double(piso) * 100).rounded()))|\(puertas.count)"
+        if firma != n.bandaFirma {
+            if n.bandaFirma.isEmpty {
+                anotarMedir("banda", ["que": "sale", "pies": (a.pies * 10).rounded() / 10, "vivo": a.vivo, "tramos": pathPoints.count - 1,
+                                      "piso_y": (Double(piso) * 100).rounded() / 100, "huecos": puertas.count,
+                                      "cam_y": sceneView.session.currentFrame.map { (Double($0.camera.transform.columns.3.y) * 100).rounded() / 100 } ?? -99])
+            }
+            n.bandaFirma = firma
+            if maqueta > 0 { pintarBandaDeMaqueta(a.pies, conHueco: !puertas.isEmpty) } else { armarNodosDeBanda(piso: Double(piso), alto: hM, puertas: puertas) }
+        }
+        n.bandaChip.text = "\(Self.pies(a.pies)) ft"
+        n.bandaChip.isHidden = false
+        moverChipDeLaBanda()
+        n.otroAltoBoton.isHidden = n.otroAlto        // "Otro alto · un +" solo con el alto del nivel a la vista
+    }
+    private func armarBandaSiFalta() {
+        let n = nueva
+        guard n.otroAltoBoton.superview == nil, n.armada else { return }
+        let chip = n.bandaChip
+        chip.font = .systemFont(ofSize: 13, weight: .bold); chip.textColor = .white; chip.backgroundColor = Claro.azul
+        chip.textAlignment = .center; chip.layer.cornerRadius = 6; chip.layer.cornerCurve = .continuous; chip.clipsToBounds = true
+        chip.isUserInteractionEnabled = false; chip.isHidden = true
+        view.insertSubview(chip, belowSubview: n.mira)
+        let ob = n.otroAltoBoton
+        ob.translatesAutoresizingMaskIntoConstraints = false
+        ob.setTitle("Otro alto · un +", for: .normal)
+        ob.titleLabel?.font = .systemFont(ofSize: 13, weight: .semibold)
+        ob.setTitleColor(Claro.azul, for: .normal)
+        ob.backgroundColor = Claro.boton
+        ob.layer.cornerRadius = 10; ob.layer.cornerCurve = .continuous
+        ob.layer.borderWidth = 0.5; ob.layer.borderColor = Claro.linea.cgColor
+        ob.layer.shadowColor = UIColor.black.cgColor; ob.layer.shadowOpacity = 0.12; ob.layer.shadowRadius = 6; ob.layer.shadowOffset = CGSize(width: 0, height: 2)
+        ob.contentEdgeInsets = UIEdgeInsets(top: 0, left: 14, bottom: 0, right: 14)
+        ob.accessibilityLabel = "Otro alto: un punto en la línea del corte"
+        ob.addAction(UIAction { [weak self] _ in self?.otroAltoTocado() }, for: .touchUpInside)
+        ob.isHidden = true
+        view.insertSubview(ob, belowSubview: n.muelle)
+        // Fijo arriba de la mira (un botón que se mueve no se atina con guantes, y nunca tapa la mira).
+        NSLayoutConstraint.activate([ob.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+                                     ob.bottomAnchor.constraint(equalTo: n.mira.topAnchor, constant: -10),
+                                     ob.heightAnchor.constraint(equalToConstant: 40)])
+    }
+    private func armarNodosDeBanda(piso: Double, alto: Double, puertas: [(p: SIMD3<Float>, ancho: Double)]) {
+        let n = nueva, raiz = n.banda
+        raiz.childNodes.forEach { $0.removeFromParentNode() }
+        func v3(_ p: SIMD3<Double>) -> SCNVector3 { SCNVector3(Float(p.x), Float(p.y), Float(p.z)) }
+        let esq = pathPoints.map { SIMD3<Double>(Double($0.x), Double($0.y), Double($0.z)) }
+        for i in 1..<esq.count {
+            let a = esq[i - 1], b = esq[i]
+            let d = SIMD2(b.x - a.x, b.z - a.z), largo = (d * d).sum().squareRoot()
+            guard largo > 0.01 else { continue }
+            let u = d / largo
+            let huecos: [(centro: Double, ancho: Double)] = puertas.compactMap { pu in
+                let v = SIMD2(Double(pu.p.x) - a.x, Double(pu.p.z) - a.z)
+                let t = (v * u).sum(), lado = abs(v.x * u.y - v.y * u.x)
+                return lado <= 0.35 && t > 0 && t < largo ? (centro: t, ancho: pu.ancho) : nil
+            }
+            for (t0, t1) in ReglasDeMedir.tramosSinHuecos(largo: largo, huecos: huecos) {
+                let p0 = a + (b - a) * (t0 / largo), p1 = a + (b - a) * (t1 / largo)
+                let q = ReglasDeMedir.cuadroDeBanda(p0, p1, piso: piso, alto: alto)
+                let g = SCNGeometry(sources: [SCNGeometrySource(vertices: q.map(v3))],
+                                    elements: [SCNGeometryElement(indices: [Int32(0), 1, 2, 0, 2, 3], primitiveType: .triangles)])
+                let mat = SCNMaterial()
+                mat.diffuse.contents = Claro.azul; mat.transparency = 0.22; mat.lightingModel = .constant
+                mat.isDoubleSided = true; mat.writesToDepthBuffer = false
+                g.materials = [mat]
+                let cara = SCNNode(geometry: g); cara.renderingOrder = -1      // debajo de las bolitas y las líneas de siempre
+                raiz.addChildNode(cara)
+                let arriba = q[3], dq = q[2] - q[3], L = (dq * dq).sum().squareRoot()
+                guard L > 0.01 else { continue }
+                for (r0, r1) in ReglasDeMedir.rayas(largo: L) { raiz.addChildNode(nodoRaya(arriba + dq * (r0 / L), arriba + dq * (r1 / L))) }
+            }
+        }
+        if raiz.parent == nil { sceneView.scene.rootNode.addChildNode(raiz) }
+        raiz.isHidden = false
+    }
+    private func nodoRaya(_ p: SIMD3<Double>, _ q: SIMD3<Double>) -> SCNNode {
+        let s = SIMD3<Float>(Float(p.x), Float(p.y), Float(p.z)), e = SIMD3<Float>(Float(q.x), Float(q.y), Float(q.z))
+        let c = SCNCylinder(radius: 0.005, height: CGFloat(max(simd_distance(s, e), 0.001)))
+        c.radialSegmentCount = 8
+        c.firstMaterial?.diffuse.contents = Claro.azul; c.firstMaterial?.lightingModel = .constant
+        let nodo = SCNNode(geometry: c)
+        let m = (s + e) / 2
+        nodo.position = SCNVector3(m.x, m.y, m.z)
+        nodo.simdOrientation = simd_quatf(from: SIMD3<Float>(0, 1, 0), to: simd_normalize(e - s))
+        return nodo
+    }
+    /// En el simulador no hay ARKit: la banda se dibuja plana donde la pone su diseño (P04: de 92 a 298 pt, el piso a 517 de 844,
+    /// 2 ft = 67 pt; P07: con el hueco de la puerta de 226 a 270), solo para la captura.
+    private func pintarBandaDeMaqueta(_ pies: Double, conHueco: Bool) {
+        let n = nueva
+        n.bandaMaqueta?.removeFromSuperlayer(); n.bandaMaqueta = nil
+        guard let fondo = n.fondoMaqueta else { return }
+        let b = fondo.bounds, sx = b.width / 390, sy = b.height / 844
+        let piso = 517 * sy, arriba = piso - CGFloat(pies / 2) * 67 * sy
+        let caja = CGRect(x: 92 * sx, y: arriba, width: 206 * sx, height: piso - arriba)
+        let pedazos = conHueco ? [CGRect(x: caja.minX, y: caja.minY, width: 134 * sx, height: caja.height),
+                                  CGRect(x: 270 * sx, y: caja.minY, width: 28 * sx, height: caja.height)] : [caja]
+        let capa = CAShapeLayer()
+        for r in pedazos {
+            let relleno = CAShapeLayer(); relleno.path = UIBezierPath(rect: r).cgPath; relleno.fillColor = Claro.azul.withAlphaComponent(0.22).cgColor
+            let orilla = CAShapeLayer(), linea = UIBezierPath()
+            linea.move(to: CGPoint(x: r.minX, y: r.minY)); linea.addLine(to: CGPoint(x: r.maxX, y: r.minY))
+            orilla.path = linea.cgPath; orilla.strokeColor = Claro.azul.cgColor; orilla.fillColor = nil; orilla.lineWidth = 2.5; orilla.lineDashPattern = [7, 5]
+            capa.addSublayer(relleno); capa.addSublayer(orilla)
+        }
+        fondo.layer.addSublayer(capa)
+        n.bandaMaqueta = capa; n.bandaCentroMaqueta = CGPoint(x: pedazos[0].midX, y: caja.midY)
+    }
+    /// El "2 ft" en medio del tramo más largo, a media banda (se proyecta en cada cuadro).
+    fileprivate func moverChipDeLaBanda() {
+        let n = nueva, chip = n.bandaChip
+        guard !chip.isHidden else { return }
+        var centro = n.bandaCentroMaqueta
+        if maqueta == 0 {
+            guard let piso = pisoConocido(), let a = altoDeLaBanda(), pathPoints.count >= 2 else { chip.alpha = 0; return }
+            var i = 1
+            for k in 1..<pathPoints.count where simd_distance(pathPoints[k - 1], pathPoints[k]) > simd_distance(pathPoints[i - 1], pathPoints[i]) { i = k }
+            let m = (pathPoints[i - 1] + pathPoints[i]) / 2
+            let s = sceneView.projectPoint(SCNVector3(m.x, piso + Float(a.pies / 3.28084) / 2, m.z))
+            guard s.z >= 0, s.z <= 1, view.bounds.insetBy(dx: 24, dy: 90).contains(CGPoint(x: CGFloat(s.x), y: CGFloat(s.y))) else { chip.alpha = 0; return }
+            centro = CGPoint(x: CGFloat(s.x), y: CGFloat(s.y))
+        }
+        chip.alpha = 1
+        chip.bounds = CGRect(x: 0, y: 0, width: chip.intrinsicContentSize.width + 16, height: 24)
+        chip.center = centro
+    }
+    fileprivate func quitarBanda() {
+        let n = nueva
+        if !n.bandaFirma.isEmpty { anotarMedir("banda", ["que": "quita"]) }
+        n.bandaFirma = ""
+        if !n.banda.childNodes.isEmpty { n.banda.childNodes.forEach { $0.removeFromParentNode() } }
+        n.banda.isHidden = true
+        n.bandaMaqueta?.removeFromSuperlayer(); n.bandaMaqueta = nil
+        n.bandaChip.isHidden = true; n.otroAltoBoton.isHidden = true
+    }
+    // ---- LAS VIBRACIONES ----
+    fileprivate enum Vibra { case esquina, guardado, fallo, cambio, cuarto, aviso }
+    /// (16 oct) Vibra distinto en cada paso, para medir mirando la pared: ligero por esquina, dos al guardar, uno LARGO si algo no se
+    /// pudo; un toquecito al cambiar sola de pared o parte, uno medio al cambiar de cuarto y el de aviso con "falta una pared". Solo en
+    /// medir primero y en el teléfono.
+    fileprivate func vibrar(_ v: Vibra) {
+        guard medirPrimero, maqueta == 0 else { return }
+        switch v {
+        case .esquina: UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        case .cambio: UISelectionFeedbackGenerator().selectionChanged()
+        case .cuarto: UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        case .aviso: UINotificationFeedbackGenerator().notificationOccurred(.warning)
+        case .guardado:
+            let g = UIImpactFeedbackGenerator(style: .rigid); g.prepare(); g.impactOccurred()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.14) { g.impactOccurred() }
+        case .fallo: vibrarLargo()
+        }
+    }
+    private func vibrarLargo() {
+        if CHHapticEngine.capabilitiesForHardware().supportsHaptics {
+            do {
+                let n = nueva
+                if n.motorVibra == nil { let e = try CHHapticEngine(); e.isAutoShutdownEnabled = true; n.motorVibra = e }
+                if let e = n.motorVibra {
+                    try e.start()
+                    let ev = CHHapticEvent(eventType: .hapticContinuous,
+                                           parameters: [CHHapticEventParameter(parameterID: .hapticIntensity, value: 1.0),
+                                                        CHHapticEventParameter(parameterID: .hapticSharpness, value: 0.3)],
+                                           relativeTime: 0, duration: 0.5)
+                    try e.makePlayer(with: CHHapticPattern(events: [ev], parameters: [])).start(atTime: CHHapticTimeImmediate)
+                    return
+                }
+            } catch { nueva.motorVibra = nil }
+        }
+        UINotificationFeedbackGenerator().notificationOccurred(.error)
+    }
     // ---------------- LAS MAQUETAS 24-37 (solo simulador) ----------------
     // 24 la página del nivel sin contestar; 25 contestada; 26 midiendo la pared (el largo listo); 27 "¿Qué midió?"; 28 shoe
     // molding; 29 el material de la pared; 30 insulación "mixto"; 31 el piso; 32 el carpet "mixto" (padding); 33 underlayment "mixto"; 34 el
-    // techo; 35 el techo "mixto"; 36 "¿Ya terminó con esta pared?"; 37 la hoja del cuarto (con medidas guardadas de verdad).
+    // techo; 35 el techo "mixto"; 36 la parte cambia sola al piso (13 pasos: ya sin la pregunta de cerrar la pared); 37 la hoja del cuarto
+    // (con medidas guardadas de verdad).
+    // 55-66 el corte con su baseboard, sus puertas y los arcos (idea 1); 67-78 el alto, la banda y el material puesto (3 y 5); 79-90 el cuarto en 13 toques (4 y 6);
+    // 91-92 la revisión: un corte sobre una pared ya completa y un parche alto con las esquinas al pie de la pared.
+    // 93-95 la segunda revisión: el baseboard que la pared ya lleva (medido después, o un corte después) y el corte caminado sobre una
+    // pared completa y otra que no. 96-100 la tercera: el corte caminado de una pared con baseboard a otra sin él, lo puesto que sigue
+    // tras "No era completa", el material que aguanta asomarse a otro cuarto y la franja de un cuarto que el mapa acaba de dejar.
     fileprivate func maquetaMedirPrimero() {
-        guard (24...54).contains(maqueta), medirPrimero else { return }
+        guard (24...108).contains(maqueta), medirPrimero else { return }
         let n = nueva
         func w(_ a: Double, _ b: Double, _ c: Double, _ d: Double, _ e: Bool) -> UbicadorEnPlano.ParedPlano {
             UbicadorEnPlano.ParedPlano(seg: UbicadorEnPlano.Segmento(a: SIMD2(a, b), b: SIMD2(c, d)), exterior: e) }
@@ -12807,6 +14163,10 @@ extension ARMeasureViewController {
                                               UbicadorEnPlano.SenaPlano(p: SIMD2(14, 0), esVentana: false, ancho: 3, abajo: 0, alto: 6.7),
                                               UbicadorEnPlano.SenaPlano(p: SIMD2(20, 8), esVentana: false, ancho: 3, abajo: 0, alto: 6.7)])
         }
+        if (55...66).contains(maqueta) {
+            // (idea 1) LOS ARCOS: un paso sin puerta de 4 ft entre la sala y el pasillo (pared norte, centro x=10), como lo manda la página.
+            planoPorCuarto["Living Room"]?.senas.append(UbicadorEnPlano.SenaPlano(p: SIMD2(10, 12), esVentana: false, ancho: 4, abajo: 0, alto: 7, esPaso: true))
+        }
         marcoPorCuarto = ["Living Room": 0, "Kitchen": 0, "Hallway": 0]
         n.acomodo = UbicadorEnPlano.Acomodo(giro: 0, mov: .zero, puntaje: 20, segundo: 4, seguro: true)
         n.acomodoNivel = nivelActual; n.acomodoMarco = 0; n.acomodoCuarto = "Living Room"
@@ -12814,6 +14174,22 @@ extension ARMeasureViewController {
         roomName = "Living Room"
         n.maquetaClase = .afuera
         n.ajuste = ReglasDeMedir.Ajuste(paredes: "afuera", techo: "si", piso: "si")
+        if maqueta >= 67 {
+            // (13 pasos) "BEDROOM 2 EN 13 TOQUES", su diseño: Bedroom 2 de 14 × 12 ft (168 pies²) con la cocina al lado; paredes de 8.1 ft:
+            // la 1 (arriba, 12 ft, de afuera), la 2 (la de la cocina, 14 ft, con su puerta de 3 ft), la 3 (12 ft) y la 4 (14 ft, de afuera).
+            // Lo que ya pasó en Kitchen: el alto del corte (2 ft) y "¿Qué incluye?" del cuarto (baseboard + shoe).
+            func wb(_ a: Double, _ b: Double, _ c: Double, _ d: Double, _ e: Bool) -> UbicadorEnPlano.ParedPlano {
+                UbicadorEnPlano.ParedPlano(seg: UbicadorEnPlano.Segmento(a: SIMD2(a, b), b: SIMD2(c, d)), exterior: e, alto: 8.1) }
+            let puerta = UbicadorEnPlano.SenaPlano(p: SIMD2(12, 7), esVentana: false, ancho: 3, abajo: 0, alto: 6.7)
+            planoPorCuarto = ["Bedroom 2": ([wb(0, 0, 12, 0, true), wb(12, 0, 12, 14, false), wb(12, 14, 0, 14, false), wb(0, 14, 0, 0, true)], [puerta]),
+                              "Kitchen": ([wb(12, 0, 24, 0, true), wb(24, 0, 24, 14, true), wb(24, 14, 12, 14, false), wb(12, 14, 12, 0, false)], [puerta])]
+            pisoPorCuarto = ["Bedroom 2": (168, 14, 12, false), "Kitchen": (168, 14, 12, false)]
+            marcoPorCuarto = ["Bedroom 2": 0, "Kitchen": 0]
+            n.acomodoCuarto = "Bedroom 2"; roomName = "Bedroom 2"
+            n.ajuste = ReglasDeMedir.Ajuste(paredes: "todas", techo: "si", piso: "si")
+            n.altoDelNivel[nivelActual] = (2, "Kitchen"); n.altoCargado.insert(nivelActual)
+            n.incluyeDeCuarto["\(nivelActual)|bedroom 2"] = (true, true)
+        }
         let paso = maqueta
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
             guard let self = self else { return }
@@ -12839,6 +14215,35 @@ extension ARMeasureViewController {
                 stage = .widthDone
             }
         }
+        // (55-66) Un corte de pared de `a` a `b` (pies del plano = x, z del mundo: el acomodo de la maqueta es cero), con su alto marcado
+        // con dos puntos, arrancando a `desde` pies del piso.
+        func corteEn(_ a: SIMD2<Double>, _ b: SIMD2<Double>, alto: Double, desde: Double = 0) {
+            if section != "wall" { n.cambiandoSolo = true; elegirParteNueva("wall"); n.cambiandoSolo = false; n.seccionVista = section; empezarPared() }
+            let y = 0.02 + Float(desde) * m
+            pathPoints = [SIMD3<Float>(Float(a.x) * m, y, Float(a.y) * m), SIMD3<Float>(Float(b.x) * m, y, Float(b.y) * m)]
+            pathTotalFeet = simd_length(b - a); pendingStart = nil
+            widthPoints = [pathPoints[1], pathPoints[1] + SIMD3<Float>(0, Float(alto) * m, 0)]
+            currentWidthFeet = alto
+            stage = .widthDone
+        }
+        // (67-90) Las 2 esquinas de un corte al pie de la pared (sin cerrar el largo).
+        func esquinas(_ a: SIMD2<Double>, _ b: SIMD2<Double>, pared: Int) {
+            if section != "wall" { n.cambiandoSolo = true; elegirParteNueva("wall"); n.cambiandoSolo = false; n.seccionVista = section; empezarPared() }
+            n.zonaVista = "wall"; n.paredVista = pared; n.paredActual = pared; n.paredCandidata = (pared, CACurrentMediaTime())
+            pathPoints = [SIMD3<Float>(Float(a.x) * m, 0.02, Float(a.y) * m), SIMD3<Float>(Float(b.x) * m, 0.02, Float(b.y) * m)]
+            pathTotalFeet = simd_length(b - a); widthPoints = []; currentWidthFeet = nil
+            pendingStart = pathPoints.last; stage = .measuringLength
+        }
+        // (67-90) Una pared de Bedroom 2 cortada a 2 ft y guardada por el camino de verdad ("Listo · 2 ft").
+        func paredGuardada(_ i: Int) {
+            guard let w = planoPorCuarto["Bedroom 2"]?.paredes[i].seg else { return }
+            esquinas(w.a, w.b, pared: i); listoConElAlto(2, fuente: "recordado")
+        }
+        func pisoGuardado(_ cuarto: String, _ material: String) {
+            items.append((length: 14, width: 12, material: material, companion: ReglasDeMedir.debajoDelPiso(material), nivel: nivelActual, cuarto: cuarto,
+                          seccion: "floor", markers: [], menos: 0, menosQue: "", paredes: [], completa: true, parte: "floor"))
+        }
+        func telefonoEn(_ x: Double, _ y: Double) { for mm in [n.minimapa, n.mapaGrande] { mm.telefono = SIMD2(x, y) } }
         switch paso {
         case 24: n.ajuste = ReglasDeMedir.Ajuste(); abrirAjuste(volver: false)
         case 25: n.ajuste = ReglasDeMedir.Ajuste(paredes: "afuera", techo: "mixto", piso: "mixto"); abrirAjuste(volver: false)
@@ -12851,8 +14256,8 @@ extension ARMeasureViewController {
             case 26: medida("wall", 14, nil); abrirPregunta(.segunda)
             case 27: medida("wall", 14, nil); listoMedir()
             case 28: medida("wall", 14, nil); listoMedir(); abrirPregunta(.shoe)
-            case 29: medida("wall", 14, 4); listoMedir()
-            case 30: medida("wall", 14, 4); listoMedir(); resolverPared("Drywall")
+            case 29: medida("wall", 14, 4); abrirPregunta(.matPared)
+            case 30: n.incluyeDeCuarto["\(nivelActual)|living room"] = (false, false); medida("wall", 14, 4); listoMedir()
             case 31: medida("floor", 12, 10); listoMedir()
             case 32: medida("floor", 12, 10); listoMedir(); resolverPiso("Carpet")
             case 33: medida("floor", 12, 10); listoMedir(); resolverPiso("Laminate")
@@ -12881,14 +14286,15 @@ extension ARMeasureViewController {
                 n.zonaVista = "wall"; n.paredVista = 0; n.paredCandidata = (0, CACurrentMediaTime())
                 revisarEleccion()                                   // sale sola, apuntando a la pared
                 if paso == 40 || paso == 41 { escogerCompleta("wall", pared: 0) }          // 40: "¿La pared completa incluye…?"
-                if paso == 41 { contestarIncluye(base: true, shoe: true); resolverPared("Drywall"); abrirHojaDelCuarto() }
+                if paso == 41 { contestarIncluye(base: true, shoe: true); abrirHojaDelCuarto() }
             case 46:
                 // EL MAPITA CON COLORES (16 oct): la pared 0 completa (verde, con su baseboard y shoe molding), la pared 1 con
                 // un corte parcial (amarillo), un pedazo de piso (amarillo); y de regreso a la pared 0: "✓ ya está completa".
                 n.zonaVista = "wall"; n.paredVista = 0; n.paredCandidata = (0, CACurrentMediaTime())
-                revisarEleccion(); escogerCompleta("wall", pared: 0); contestarIncluye(base: true, shoe: true); resolverPared("Drywall")
+                revisarEleccion(); escogerCompleta("wall", pared: 0); contestarIncluye(base: true, shoe: true)
                 n.paredCandidata = (1, CACurrentMediaTime()); n.paredVista = 1
-                escogerParcial("wall", pared: 1); medida("wall", 6, 4); resolverPared("Drywall")
+                // (revisión 3) Lo guardado va a la pared donde caen sus esquinas en el plano: el corte se marca EN la pared 1 (x = 20).
+                escogerParcial("wall", pared: 1); corteEn(SIMD2(20, 2), SIMD2(20, 8), alto: 4); resolverPared("Drywall")
                 n.zonaVista = "floor"; escogerParcial("floor", pared: nil); medida("floor", 6, 5); resolverPiso("Carpet")
                 n.zonaVista = "wall"; n.paredCandidata = (0, CACurrentMediaTime()); n.paredVista = 0
                 revisarEleccion()
@@ -12918,6 +14324,8 @@ extension ARMeasureViewController {
                 n.clasificador.anotar(.pared, t: t0, grados: 0)
                 for i in 0..<20 { n.clasificador.anotar(.piso, t: t0 + 0.1 + Double(i) * 0.1, grados: -55) }
                 n.zonaVista = "floor"; revisarMedirPrimero(t0 + 0.5); revisarMedirPrimero(t0 + 2.1)
+                // (13 pasos) En el teléfono la franja se revisa cada cuadro; aquí una vez, pasados los 0.3 s de no cambiarla seguido.
+                n.ventanaCambioEn = CACurrentMediaTime() - 1; pintarCamaraNueva()
             case 51:
                 // Techo escogido a mano y el teléfono ve la parte alta de la pared a 25°: el Techo se respeta.
                 pisoPorCuarto["Living Room"] = (240, 20, 12, false)
@@ -12940,11 +14348,300 @@ extension ARMeasureViewController {
                     s.nueva.acomodo = g; s.nueva.firme = true; s.nueva.ultimaConfirmacion = Date()
                 }
             case 54:
-                // "Continuar" calla la pregunta para la parte, pero un cuarto nuevo SIEMPRE pregunta.
-                medida("wall", 14, 4); listoMedir(); resolverPared("Drywall")
-                n.zonaVista = "floor"; n.zonaVistaDesde = CACurrentMediaTime() - 2; pedirCambio(.parte("floor"))
-                n.cierreCallado = true; n.cierreCalladoDesde = Date(); cerrarPregunta()
+                // (13 pasos) Ya no se pregunta: con una pared guardada, el cuarto nuevo por el mapa cambia solo, con su aviso de vidrio.
+                n.incluyeDeCuarto["\(nivelActual)|living room"] = (true, true)
+                medida("wall", 14, 4); listoMedir()
+                n.avisoHasta = .distantPast
                 pedirCambio(.cuarto("Kitchen"))
+            // ---- ÁREA B (idea 1 y los arcos): el Living Room de siempre ----
+            case 55, 56, 57, 58, 59:
+                // El corte de 2 ft de la pared sur, de x=8 a x=20 (12 ft), pasa por la puerta de la calle (3 ft, centro x=14): 12 × 2 − 6 = 18
+                // y baseboard 9. 55 la ficha antes de Listo; 56 "¿El corte incluye…?"; 57 guardado; 58 la hoja; 59 UN Deshacer quita los dos.
+                n.paredVista = 0; n.paredActual = 0; n.paredCandidata = (0, CACurrentMediaTime())
+                corteEn(SIMD2(8, 0), SIMD2(20, 0), alto: 2)
+                if paso >= 56 { listoMedir() }
+                if paso >= 57 { contestarIncluye(base: true, shoe: true) }        // guarda los dos renglones (material puesto: Drywall)
+                if paso == 59 { deshacerMedir() }
+                if paso >= 58 { abrirHojaDelCuarto() } else { pintarCamaraNueva() }
+            case 60:
+                // La segunda pared ya trae la respuesta: la este, de y=2 a y=12 (10 ft), con su puerta (centro y=8): 10 × 2 − 6 = 14, baseboard 7.
+                n.incluyeDeCuarto["\(nivelActual)|living room"] = (true, true)
+                n.paredVista = 0; n.paredActual = 0
+                corteEn(SIMD2(8, 0), SIMD2(20, 0), alto: 2); listoMedir()
+                n.paredVista = 1; n.paredActual = 1; n.paredCandidata = (1, CACurrentMediaTime())
+                corteEn(SIMD2(20, 2), SIMD2(20, 12), alto: 2); pintarCamaraNueva()
+            case 61:
+                // En Kitchen "¿El corte incluye…?" sale en cada pared aunque ya se contestó.
+                n.avisoHasta = Date().addingTimeInterval(10)
+                aplicarCambio(.cuarto("Kitchen"))
+                n.incluyeDeCuarto["\(nivelActual)|kitchen"] = (true, true)
+                n.paredVista = 0; n.paredActual = 0
+                corteEn(SIMD2(22, 0), SIMD2(32, 0), alto: 2); listoMedir()
+            case 62:
+                // Sin la ubicación confirmada: no se resta la puerta y la ficha lo dice; 24 pies².
+                n.maquetaSinConfirmar = true
+                n.paredVista = 0; n.paredActual = 0
+                corteEn(SIMD2(8, 0), SIMD2(20, 0), alto: 2); pintarCamaraNueva()
+            case 63:
+                // Un parche alto (de 4 a 6 ft) sobre la puerta: solo lo que la puerta cae adentro (3 × 2), SIN baseboard ni pregunta; sigue en Pared.
+                n.paredVista = 0; n.paredActual = 0
+                corteEn(SIMD2(8, 0), SIMD2(20, 0), alto: 2, desde: 4); listoMedir(); abrirHojaDelCuarto()
+            case 64, 65, 66:
+                // LOS ARCOS: 64 la franja de la pared norte (sin el arco); 65 la toca: "¿La pared completa incluye…?" (16 ft, menos 1 arco);
+                // 66 el cuarto ya contestó y un corte de 2 ft de x=16 a x=4 pasa por el arco: 12 × 2 − 8 = 16, baseboard 8.
+                n.zonaVista = "wall"; n.paredVista = 2; n.paredCandidata = (2, CACurrentMediaTime())
+                if paso == 66 {
+                    n.incluyeDeCuarto["\(nivelActual)|living room"] = (true, true)
+                    n.paredActual = 2; corteEn(SIMD2(16, 12), SIMD2(4, 12), alto: 2); pintarCamaraNueva()
+                } else {
+                    revisarEleccion(); pintarCamaraNueva()
+                    if paso == 65 { n.ventanaCambioEn = CACurrentMediaTime() - 1; tocarFranja("completa") }
+                }
+            // ---- ÁREA C (ideas 3 y 5): Bedroom 2 ----
+            case 67, 68, 69, 70, 71, 72, 73, 77:
+                // 67 = P04; 68 = P07 (la puerta); 69 = "Otro alto" esperando el +; 70 = ese + a 4 ft; 71 = la PRIMERA pared del nivel;
+                // 72 = P05 (guardada); 73 = tocó MEDIDA; 77 = la cámara todavía no ve el piso.
+                if paso == 71 { n.altoDelNivel[nivelActual] = nil }
+                if paso == 77 { n.maquetaSinPiso = true }
+                if paso == 68 { esquinas(SIMD2(12, 0), SIMD2(12, 14), pared: 1) } else { esquinas(SIMD2(0, 0), SIMD2(12, 0), pared: 0) }
+                n.maquetaVivo = 0
+                switch paso {
+                case 69: empezarOtroAlto(); n.altoVivo = 3.5
+                case 70: empezarOtroAlto(); n.puntosDeMaqueta = [SIMD3<Float>(6 * m, 4 * m, 0)]; marcarOtroAlto()
+                case 72: listoConElAlto(2, fuente: "recordado")
+                case 73: rielMaterialTocado()
+                default: break
+                }
+                pintarCamaraNueva()
+            case 74, 75, 76:
+                // EL PISO PUESTO: 74 = el primer piso del trabajo (pregunta); 75 = en Kitchen con el Carpet de Bedroom 2 (pregunta igual);
+                // 76 = en Bedroom 2 con el de Kitchen: "Otro piso" abre la lista.
+                if paso == 75 { pisoGuardado("Bedroom 2", "Carpet"); n.avisoHasta = Date().addingTimeInterval(10); aplicarCambio(.cuarto("Kitchen")); telefonoEn(18, 7) }
+                if paso == 76 { pisoGuardado("Kitchen", "Carpet") }
+                if section != "floor" { n.cambiandoSolo = true; elegirParteNueva("floor"); n.cambiandoSolo = false; n.seccionVista = section; empezarPared() }
+                n.zonaVista = "floor"
+                revisarEleccion(); pintarCamaraNueva()
+                n.ventanaCambioEn = CACurrentMediaTime() - 1
+                tocarFranja(paso == 76 ? "otro-piso" : "completa")
+            case 78:
+                // La pared completa con el material puesto y "¿Qué incluye?" del cuarto: un toque en la franja guarda Drywall + baseboard.
+                n.zonaVista = "wall"; n.paredVista = 0; n.paredCandidata = (0, CACurrentMediaTime())
+                revisarEleccion(); pintarCamaraNueva()
+                n.ventanaCambioEn = CACurrentMediaTime() - 1; tocarFranja("completa")
+            // ---- ÁREA A (ideas 4 y 6): el cuarto en 13 toques ----
+            case 79:
+                // Main: viene de Kitchen con su piso guardado y el mapa lo pasa solo a Bedroom 2 a los 1.5 s.
+                pisoGuardado("Kitchen", "Carpet")
+                n.avisoHasta = Date().addingTimeInterval(10); aplicarCambio(.cuarto("Kitchen")); n.avisoHasta = .distantPast
+                n.zonaVista = "wall"
+                let t0 = CACurrentMediaTime()
+                revisarMedirPrimero(t0); revisarMedirPrimero(t0 + 1.6)
+            case 80, 81:
+                // P02: apunta a la pared 1 (la franja, sin ventana grande). 81 = P03: + directo en la primera esquina.
+                n.zonaVista = "wall"; n.paredVista = 0; n.paredCandidata = (0, CACurrentMediaTime())
+                revisarMedirPrimero(CACurrentMediaTime()); pintarCamaraNueva()
+                if paso == 81 { n.puntosDeMaqueta = [SIMD3<Float>(0, 0.02, 0)]; n.maquetaVivo = 8.4; gatilloNuevoTocado() }
+            case 82:
+                // P06: la pared 1 guardada (2 renglones) y voltea a la pared 2: cambia sola, sin pregunta.
+                paredGuardada(0)
+                n.paredVista = 1; n.paredCandidata = (1, CACurrentMediaTime())
+                revisarMedirPrimero(CACurrentMediaTime())
+            case 83, 84:
+                // P08/P09: las 4 paredes guardadas, apunta abajo: "Piso completo · 168 pies² / Carpet + pad". 84 = P10: toca la franja.
+                pisoGuardado("Kitchen", "Carpet")
+                for i in 0..<4 { paredGuardada(i) }
+                n.zonaVista = "floor"
+                revisarMedirPrimero(CACurrentMediaTime()); pintarCamaraNueva()
+                if paso == 84 { n.ventanaCambioEn = CACurrentMediaTime() - 1; tocarFranja("completa") }
+            case 85, 86, 87, 88:
+                // P11: las paredes 1-3 medidas y camina a Kitchen: "Bedroom 2: falta 1 pared". 86 Volver; 87 No se cortó + la hoja;
+                // 88 la ignora 15 s + la hoja (con lo que falta).
+                for i in 0..<3 { paredGuardada(i) }
+                telefonoEn(18, 7); n.zonaVista = "wall"
+                n.avisoHasta = Date().addingTimeInterval(10)               // en la vida real "Ahora: Kitchen" ya se fue a los 6 s
+                let t0 = CACurrentMediaTime()
+                revisarMedirPrimero(t0); revisarMedirPrimero(t0 + 1.6)
+                if let s = n.salidaDe { n.salidaDe = (s.nombre, s.nivel, t0 - 10) }
+                n.cuartoDesde = t0 - 10
+                revisarMedirPrimero(t0 + 1.7)
+                if paso == 86 { contestarFalta(volver: true) }
+                if paso == 87 { contestarFalta(volver: false); abrirHojaDelCuarto() }
+                if paso == 88 { n.faltaHasta = .distantPast; revisarFaltaQueVence(); abrirHojaDelCuarto() }
+            case 89:
+                // P12: las 4 paredes medidas, camina a Kitchen: "Ahora: Kitchen" y nunca "falta una pared".
+                for i in 0..<4 { paredGuardada(i) }
+                telefonoEn(18, 7); n.zonaVista = "wall"; n.avisoHasta = .distantPast
+                let t0 = CACurrentMediaTime()
+                revisarMedirPrimero(t0); revisarMedirPrimero(t0 + 1.6)
+                n.cuartoDesde = t0 - 10; revisarMedirPrimero(t0 + 1.7)
+            case 90:
+                // Asomarse: 1 s en la cocina no cambia nada; 1.6 s sí; al regresar, el + de enseguida lo regresa a Bedroom 2.
+                paredGuardada(0)
+                let t0 = CACurrentMediaTime()
+                telefonoEn(18, 7); revisarMedirPrimero(t0)
+                telefonoEn(6, 6); revisarMedirPrimero(t0 + 1.0)
+                telefonoEn(18, 7); revisarMedirPrimero(t0 + 2); revisarMedirPrimero(t0 + 3.6)
+                telefonoEn(6, 6); n.avisoHasta = .distantPast
+                n.puntosDeMaqueta = [SIMD3<Float>(1 * m, 0.02, 0)]; gatilloNuevoTocado()
+            // ---- La revisión del 16 oct ----
+            case 91:
+                // La pared 1 guardada COMPLETA (Drywall + baseboard + shoe, por la franja) y luego un corte de 2 ft sobre ella con "Listo · 2 ft":
+                // ya no guarda 2 renglones más en silencio; sale "La pared 1 ya está completa" con Guardar igual (sin baseboard) / No guardar.
+                n.zonaVista = "wall"; n.paredVista = 0; n.paredCandidata = (0, CACurrentMediaTime())
+                revisarEleccion(); pintarCamaraNueva()
+                n.ventanaCambioEn = CACurrentMediaTime() - 1; tocarFranja("completa")
+                paredGuardada(0)
+            case 92:
+                // Un parche alto con dos + (de 2 a 4 ft) y las esquinas al pie de la pared 2 (la de la puerta): arranca a 2 ft, SIN baseboard
+                // aunque el cuarto ya contestó "base + shoe", y la puerta resta lo que cae entre 2 y 4 ft. La hoja: un solo renglón.
+                esquinas(SIMD2(12, 0), SIMD2(12, 14), pared: 1)
+                pendingStart = nil
+                widthPoints = [pathPoints[1] + SIMD3<Float>(0, 2 * m, 0), pathPoints[1] + SIMD3<Float>(0, 4 * m, 0)]
+                currentWidthFeet = 2; stage = .widthDone
+                listoMedir(); abrirHojaDelCuarto()
+            case 93:
+                // La pared 2 completa por la franja (Drywall − la puerta + baseboard y shoe 11 ft, la respuesta del cuarto) y después MEDIDA →
+                // Baseboard en esa misma pared: ya no se guarda otro en silencio; "La pared 2 ya lleva baseboard" · Guardar igual / No guardar.
+                n.zonaVista = "wall"; n.paredVista = 1; n.paredCandidata = (1, CACurrentMediaTime())
+                revisarEleccion(); pintarCamaraNueva()
+                n.ventanaCambioEn = CACurrentMediaTime() - 1; tocarFranja("completa")
+                n.materialPuesto = ("wall", "Baseboard")
+                esquinas(SIMD2(12, 0), SIMD2(12, 14), pared: 1); listoLineal()
+            case 94:
+                // La pared 1 completa y un corte de 2 ft CAMINADO por la pared 1 y la 2: sin "Guardar igual" (cobraría dos veces la 1 o le
+                // quitaría el baseboard a la 2); solo "No guardar · medirla aparte" y Corregir.
+                n.zonaVista = "wall"; n.paredVista = 0; n.paredCandidata = (0, CACurrentMediaTime())
+                revisarEleccion(); pintarCamaraNueva()
+                n.ventanaCambioEn = CACurrentMediaTime() - 1; tocarFranja("completa")
+                esquinas(SIMD2(0, 0), SIMD2(12, 0), pared: 0)
+                pathPoints.append(SIMD3<Float>(12 * m, 0.02, 14 * m)); pathTotalFeet = 26; pendingStart = pathPoints.last
+                listoConElAlto(2, fuente: "recordado")
+            case 95:
+                // Al revés: el baseboard de la pared 2 medido primero (MEDIDA → Baseboard, con shoe) y después "Listo · 2 ft" en esa pared:
+                // el corte ya no trae otro baseboard en silencio; "La pared 2 ya lleva baseboard" · Guardar igual (sin baseboard).
+                n.materialPuesto = ("wall", "Baseboard")
+                esquinas(SIMD2(12, 0), SIMD2(12, 14), pared: 1); listoLineal()
+                if n.preguntaMedir == .shoe { guardarMedir(ReglasDeMedir.baseboard(largo: pathTotalFeet, shoe: true)) }
+                paredGuardada(1)
+            // ---- La tercera revisión del 16 oct ----
+            case 96:
+                // El baseboard de la pared 1 medido (MEDIDA → Baseboard, 12 ft) y después un corte de 2 ft CAMINADO de la pared 1 a la 2 (que
+                // no lleva baseboard): ya no ofrece "Guardar igual · sin baseboard" (le quitaría a la 2 sus 11 ft); "mídala aparte".
+                n.materialPuesto = ("wall", "Baseboard")
+                esquinas(SIMD2(0, 0), SIMD2(12, 0), pared: 0); listoLineal()
+                if n.preguntaMedir == .shoe { guardarMedir(ReglasDeMedir.baseboard(largo: pathTotalFeet, shoe: true)) }
+                esquinas(SIMD2(0, 0), SIMD2(12, 0), pared: 0)
+                pathPoints.append(SIMD3<Float>(12 * m, 0.02, 14 * m)); pathTotalFeet = 26; pendingStart = pathPoints.last
+                listoConElAlto(2, fuente: "recordado")
+            case 97:
+                // "Otro piso" en la franja (el Carpet de Kitchen venía puesto), "No era completo · medir con +" y Listo en un parche: el parche
+                // NO se guarda con el piso que acaba de rechazar; sale "¿Qué piso es?".
+                pisoGuardado("Kitchen", "Carpet")
+                if section != "floor" { n.cambiandoSolo = true; elegirParteNueva("floor"); n.cambiandoSolo = false; n.seccionVista = section; empezarPared() }
+                n.zonaVista = "floor"
+                revisarEleccion(); pintarCamaraNueva()
+                n.ventanaCambioEn = CACurrentMediaTime() - 1; tocarFranja("otro-piso")
+                if n.preguntaMedir == .piso { cancelarParteEntera() }
+                medida("floor", 6, 5); listoMedir()
+            case 98:
+                // MEDIDA → Plaster, "Pared completa", "‹ No era completa · medir con +" y el corte con "Listo · 2 ft": se guarda en Plaster
+                // (antes salía Drywall). El cuarto todavía sin "¿Qué incluye?" para que salga la pregunta de la completa.
+                n.incluyeDeCuarto["\(nivelActual)|bedroom 2"] = nil
+                if section != "wall" { n.cambiandoSolo = true; elegirParteNueva("wall"); n.cambiandoSolo = false; n.seccionVista = section; empezarPared() }
+                ponerMaterial("Plaster")
+                n.zonaVista = "wall"; n.paredVista = 0; n.paredCandidata = (0, CACurrentMediaTime())
+                revisarEleccion(); pintarCamaraNueva()
+                n.ventanaCambioEn = CACurrentMediaTime() - 1; tocarFranja("completa")
+                if n.preguntaMedir == .incluye { cancelarParteEntera() }
+                esquinas(SIMD2(0, 0), SIMD2(12, 0), pared: 0); listoConElAlto(2, fuente: "recordado")
+                if n.preguntaMedir == .incluye { contestarIncluye(base: true, shoe: true) }
+                abrirHojaDelCuarto()
+            case 99:
+                // MEDIDA → Plaster en Bedroom 2, el mapa lo pasa a Kitchen (asomarse) y lo regresa: el corte se guarda en Plaster, no en Drywall.
+                if section != "wall" { n.cambiandoSolo = true; elegirParteNueva("wall"); n.cambiandoSolo = false; n.seccionVista = section; empezarPared() }
+                ponerMaterial("Plaster")
+                n.avisoHasta = Date().addingTimeInterval(10)
+                aplicarCambio(.cuarto("Kitchen")); telefonoEn(18, 7); pintarCamaraNueva()
+                aplicarCambio(.cuarto("Bedroom 2")); telefonoEn(6, 6); pintarCamaraNueva()
+                paredGuardada(0); abrirHojaDelCuarto()
+            case 100:
+                // La franja "Piso completo" de Bedroom 2 a la vista, el mapa cambia a Kitchen (su piso ya guardado) y el dedo llega tarde: la franja
+                // se fue con el cambio y el toque no guarda otra vez el piso de Kitchen. La hoja de Kitchen: un solo piso.
+                pisoGuardado("Kitchen", "Carpet")
+                if section != "floor" { n.cambiandoSolo = true; elegirParteNueva("floor"); n.cambiandoSolo = false; n.seccionVista = section; empezarPared() }
+                n.zonaVista = "floor"
+                revisarEleccion(); pintarCamaraNueva()
+                n.ventanaCambioEn = CACurrentMediaTime() - 1
+                n.avisoHasta = Date().addingTimeInterval(10); aplicarCambio(.cuarto("Kitchen")); telefonoEn(18, 7)
+                tocarFranja("completa")
+                escogerCompleta("floor", pared: nil)          // y aunque llegara: lo ya medido se rechaza
+                abrirHojaDelCuarto()
+            // ---- La revisión 3 del 16 oct ----
+            case 101, 102:
+                // La pared 1 guardada COMPLETA por la franja; luego la ubicación SIN confirmar (paredActual se queda en la 1) y mide la pared 2
+                // con + y "Listo · 2 ft": la pared es solo una suposición. 101: "¿Es la pared 1? Ya está completa" · Es otra pared / Es la pared 1.
+                // 102: toca "Es otra pared": se guarda sin pared (la 1 se queda con lo suyo, nada en la 2) y la hoja.
+                n.zonaVista = "wall"; n.paredVista = 0; n.paredCandidata = (0, CACurrentMediaTime())
+                revisarEleccion(); pintarCamaraNueva()
+                n.ventanaCambioEn = CACurrentMediaTime() - 1; tocarFranja("completa")
+                n.maquetaSinConfirmar = true
+                esquinas(SIMD2(12, 0), SIMD2(12, 14), pared: 1)
+                n.paredActual = 0; n.paredVista = nil; n.paredCandidata = nil
+                listoConElAlto(2, fuente: "recordado")
+                if paso == 102 { guardarEnOtraPared(); abrirHojaDelCuarto() }
+            case 103:
+                // La pared 1 completa por la franja; las esquinas de la pared 2 SÍ ubicadas pero paredActual se quedó en la 1 (al pie de la pared
+                // no hay votos), la cámara no ve el piso y el alto va con dos +: la pregunta revisó la 2 (no completa) y el renglón se guarda en
+                // la 2 (amarilla en el mapa), nunca en la 1 ya completa.
+                n.zonaVista = "wall"; n.paredVista = 0; n.paredCandidata = (0, CACurrentMediaTime())
+                revisarEleccion(); pintarCamaraNueva()
+                n.ventanaCambioEn = CACurrentMediaTime() - 1; tocarFranja("completa")
+                n.maquetaSinPiso = true
+                esquinas(SIMD2(12, 0), SIMD2(12, 14), pared: 1)
+                n.paredActual = 0; n.paredVista = 0; n.paredCandidata = (0, CACurrentMediaTime())
+                pendingStart = nil
+                widthPoints = [pathPoints[1], pathPoints[1] + SIMD3<Float>(0, 2 * m, 0)]
+                currentWidthFeet = 2; stage = .widthDone
+                listoMedir(); pintarCamaraNueva()
+            case 104:
+                // MEDIDA → Otro "Shower Tile" (va a la sección Bathroom del reporte) en la pared 2 con "Listo · 2 ft", el cuarto sin baseboard: la
+                // pared 2 sí queda medida (amarilla en el mapa) y al apuntarle ya no ofrece "Pared completa" (la cobraría dos veces).
+                n.incluyeDeCuarto["\(nivelActual)|bedroom 2"] = (false, false)
+                if section != "wall" { n.cambiandoSolo = true; elegirParteNueva("wall"); n.cambiandoSolo = false; n.seccionVista = section; empezarPared() }
+                ponerMaterial("Shower Tile")
+                paredGuardada(1)
+                n.zonaVista = "wall"; n.paredVista = 1; n.paredCandidata = (1, CACurrentMediaTime())
+                revisarEleccion(); n.ventanaCambioEn = CACurrentMediaTime() - 1; pintarCamaraNueva()
+            case 105:
+                // El cuarto contestó "Nada más": la franja de la pared 2 (la de la puerta) dice "sin baseboard" (antes callaba y se guardaba sin él).
+                n.incluyeDeCuarto["\(nivelActual)|bedroom 2"] = (false, false)
+                n.zonaVista = "wall"; n.paredVista = 1; n.paredCandidata = (1, CACurrentMediaTime())
+                revisarEleccion(); n.ventanaCambioEn = CACurrentMediaTime() - 1; pintarCamaraNueva()
+            case 106:
+                // MEDIDA → Plaster en Bedroom 2 del 2nd Floor y cambia al 1st Floor, a otro "Bedroom 2": ahí MEDIDA dice Drywall (el Plaster es
+                // del de arriba).
+                if section != "wall" { n.cambiandoSolo = true; elegirParteNueva("wall"); n.cambiandoSolo = false; n.seccionVista = section; empezarPared() }
+                ponerMaterial("Plaster")
+                nivelActual = "1st Floor"
+                abrirMaterialPuesto()
+            case 107:
+                // "Otro piso" en la franja, "‹ No era completo · medir con +", MEDIDA → Laminate y Listo en un parche: se guarda Laminate, sin
+                // "¿Qué piso es?" otra vez. La hoja.
+                pisoGuardado("Kitchen", "Carpet")
+                if section != "floor" { n.cambiandoSolo = true; elegirParteNueva("floor"); n.cambiandoSolo = false; n.seccionVista = section; empezarPared() }
+                n.zonaVista = "floor"
+                revisarEleccion(); pintarCamaraNueva()
+                n.ventanaCambioEn = CACurrentMediaTime() - 1; tocarFranja("otro-piso")
+                if n.preguntaMedir == .piso { cancelarParteEntera() }
+                abrirMaterialPuesto(); ponerMaterial("Laminate")
+                medida("floor", 6, 5); listoMedir()
+                abrirHojaDelCuarto()
+            case 108:
+                // Un corte de 2 ft por la pared 2 con TRES + y el de en medio a media puerta (y = 6; la puerta va de 5.5 a 8.5): la puerta entera se
+                // resta (14 × 2 − 6 = 22) y el baseboard es 11, igual que con dos +. La hoja.
+                esquinas(SIMD2(12, 0), SIMD2(12, 14), pared: 1)
+                pathPoints = [pathPoints[0], SIMD3<Float>(12 * m, 0.02, 6 * m), pathPoints[1]]; pendingStart = pathPoints.last
+                listoConElAlto(2, fuente: "recordado"); abrirHojaDelCuarto()
             case 43, 44, 45:
                 // FIJAR TECHO (43: la pregunta con el techo completo) y PISO en L (44: completo -> "20 × 12 − 40 = 200");
                 // 45: nada abierto, el teléfono ve el techo: el botón dice "Fijar techo".
@@ -12957,9 +14654,7 @@ extension ARMeasureViewController {
                 if paso == 44 { escogerCompleta("floor", pared: nil) }
                 if paso == 45 { escogerParcial("wall", pared: 0); pintarCamaraNueva() }
             case 36:
-                medida("wall", 14, 4); listoMedir(); resolverPared("Drywall")
-                n.zonaVista = "floor"
-                pedirCambio(.parte("floor"))
+                n.incluyeDeCuarto["\(nivelActual)|living room"] = (true, true); medida("wall", 14, 4); listoMedir(); n.zonaVista = "floor"; pedirCambio(.parte("floor"))
             case 37:
                 // Medidas guardadas por las MISMAS reglas que en la cámara de verdad: zoclo con shoe molding, drywall de
                 // 1 pie y de 14 × 4 con insulación (pared de afuera), alfombra con pad y el techo con insulación.
@@ -13003,6 +14698,7 @@ struct ReglasDeMedir {
     struct Abertura: Equatable {
         var p: SIMD2<Double>; var esVentana: Bool; var ancho: Double; var alto: Double
         var abajo: Double = -1                 // a qué altura del piso empieza (-1 = el escaneo no lo trae)
+        var esPaso: Bool = false               // (16 oct) paso sin puerta (arco): se resta y corta el baseboard como una puerta
     }
     /// Las aberturas de la pared a–b (en pies): a 1 pie o menos de su línea y dentro de su largo (medio pie de holgura).
     /// La misma abertura dos veces (a menos de 0.75 ft, del mismo tipo) cuenta una.
@@ -13025,31 +14721,126 @@ struct ReglasDeMedir {
         let con = dentro.filter { $0.ancho > 0 && $0.alto > 0 }
         return (con, dentro.count - con.count)
     }
-    /// Lo que se resta, en pies²: de cada abertura, solo lo que cae DENTRO de lo medido (del piso al alto), recortada al largo,
-    /// y nunca más que la pared. Una ventana arriba de un corte bajo no se resta (la revisión del 16 oct). Sin la altura del
-    /// piso: la puerta empieza en el piso; la ventana solo se resta en una pared entera (6.5 ft o más), nunca en un corte bajo.
-    static func restaDeLaPared(largo: Double, alto: Double, aberturas: [Abertura]) -> Double {
+    /// Lo que se resta, en pies²: de cada abertura, solo lo que cae DENTRO de lo medido (de `desde` a `desde + alto`, pies del piso),
+    /// recortada al largo, y nunca más que la pared. Una ventana arriba de un corte bajo no se resta (la revisión del 16 oct). Sin la
+    /// altura del piso: la puerta (o el arco) empieza en el piso; la ventana solo se resta en una pared entera desde el piso (6.5 ft o
+    /// más). (16 oct, idea 1) `desde`: un parche alto resta solo lo que la abertura cae adentro.
+    static func restaDeLaPared(largo: Double, alto: Double, aberturas: [Abertura], desde: Double = 0) -> Double {
         guard largo > 0, alto > 0 else { return 0 }
+        let arriba = desde + alto
         let r = aberturas.reduce(0.0) { t, x in
             let piso: Double? = x.abajo >= 0 ? x.abajo : (x.esVentana ? nil : 0)
             let h: Double
-            if let b = piso { h = max(0, min(b + x.alto, alto) - max(b, 0)) } else { h = alto >= 6.5 ? min(x.alto, alto) : 0 }
+            if let b = piso { h = max(0, min(b + x.alto, arriba) - max(b, desde)) } else { h = desde <= 0 && alto >= 6.5 ? min(x.alto, alto) : 0 }
             return t + min(x.ancho, largo) * h
         }
         return min(r, largo * alto)
     }
     /// El baseboard de una pared completa: su largo menos el ancho de sus puertas (la ventana no corta el baseboard).
     static func baseboardDeLaPared(largo: Double, aberturas: [Abertura]) -> Double {
-        let puertas = aberturas.filter { !$0.esVentana }.reduce(0.0) { $0 + min($1.ancho, largo) }
+        let puertas = aberturas.filter(cortaElBaseboard).reduce(0.0) { $0 + min($1.ancho, largo) }
         return max(0, largo - puertas)
     }
-    /// "1 puerta y 2 ventanas" (la cámara) o "1 door, 2 windows" (el reporte).
+    /// (revisión del 16 oct) Un arco cuyo plano dice que empieza ALTO (2.5 ft o más: el paso arriba de un mostrador) no llega al piso:
+    /// no corta el baseboard (restaDeLaPared ya deja la pared de abajo). La puerta siempre corta; el arco sin esa altura (-1) o bajo
+    /// (ruido del piso, uno a cuatro escalones), como siempre: cortar de más nunca cobra de más.
+    static let pasoElevado = 2.5
+    /// (revisión del 16 oct) ¿El baseboard ya guardado en unas paredes más el nuevo pasa del que tienen en el plano (su largo menos sus
+    /// puertas y arcos), con medio pie de holgura? Dos pedazos distintos de la misma pared caben. Sin el plano (nil): sí, se pregunta.
+    static func baseboardDeMas(ya: Double, nuevo: Double, cabe: Double?) -> Bool { cabe.map { ya + nuevo > $0 + 0.5 } ?? true }
+    static func cortaElBaseboard(_ x: Abertura) -> Bool { !x.esVentana && !(x.esPaso && x.abajo >= pasoElevado) }
+    /// (16 oct, idea 1) El corte arranca en el piso si su punto más bajo queda a medio pie o menos del piso que ve la cámara.
+    static let arranqueDelPiso = 0.5
+    /// (revisión del 16 oct) El alto con dos + se vuelve el del nivel solo si lo marcado y la línea de arriba sobre el piso no se
+    /// separan más de esto (pies): el + de abajo en el piso y los dos parados.
+    static let altoParejo = 0.15
+    /// (16 oct, idea 1) Las aberturas de un CORTE PARCIAL: el tramo t0...t1 (pies a lo largo de a→b, ya pasado al plano con las
+    /// esquinas marcadas). Solo cuenta la que tiene su CENTRO entre las dos esquinas, con su ancho recortado a lo marcado. Las que no
+    /// tienen medida en el plano se cuentan aparte (no se restan). Nunca se inventa su tamaño.
+    /// (revisión 3) Los tramos de un corte, juntados por pared: los de la misma pared que se enciman, se tocan o los separa 1 ft o menos (el
+    /// pedacito de menos de 1 ft que paredesMedidas no cuenta) quedan en uno solo. Así cada puerta se busca UNA vez en lo caminado de su
+    /// pared, aunque un + caiga a media puerta, o el corte empiece a media pared y le dé la vuelta al cuarto. Un hueco de verdad (más de
+    /// 1 ft sin caminar) no se junta. En el orden de la primera vez que se pisó cada pared.
+    static func tramosUnidos(_ tramos: [(indice: Int, t0: Double, t1: Double)], hueco: Double = 1.0) -> [(indice: Int, t0: Double, t1: Double)] {
+        var orden: [Int] = []
+        var porPared: [Int: [(Double, Double)]] = [:]
+        for tr in tramos {
+            if porPared[tr.indice] == nil { orden.append(tr.indice) }
+            porPared[tr.indice, default: []].append((min(tr.t0, tr.t1), max(tr.t0, tr.t1)))
+        }
+        var out: [(indice: Int, t0: Double, t1: Double)] = []
+        for k in orden {
+            var unidos: [(Double, Double)] = []
+            for r in (porPared[k] ?? []).sorted(by: { $0.0 < $1.0 }) {
+                if let u = unidos.last, r.0 <= u.1 + hueco { unidos[unidos.count - 1].1 = max(u.1, r.1) } else { unidos.append(r) }
+            }
+            out += unidos.map { (indice: k, t0: $0.0, t1: $0.1) }
+        }
+        return out
+    }
+    static func aberturasEnElTramo(a: SIMD2<Double>, b: SIMD2<Double>, t0: Double, t1: Double, aberturas: [Abertura]) -> (conMedida: [Abertura], sinMedida: Int) {
+        func largo(_ v: SIMD2<Double>) -> Double { (v * v).sum().squareRoot() }
+        let d = b - a, L = largo(d)
+        guard L > 1e-6, t1 > t0 else { return ([], 0) }
+        let u = d / L
+        let alCentro = { (x: Abertura) -> Double in ((x.p - a) * u).sum() }
+        let r = aberturasEnLaPared(a: a, b: b, aberturas: aberturas.filter { alCentro($0) > t0 && alCentro($0) < t1 })
+        let con: [Abertura] = r.conMedida.compactMap { x in
+            let t = alCentro(x), ancho = min(t1, t + x.ancho / 2) - max(t0, t - x.ancho / 2)
+            guard ancho > 0.05 else { return nil }
+            var y = x; y.ancho = ancho; return y
+        }
+        return (con, r.sinMedida)
+    }
+    /// (16 oct, idea 1) El corte parcial guardable: largo × alto menos lo que cae de sus aberturas, desde donde arranca. En el reporte
+    /// solo se nombran las que de verdad restaron algo (una ventana arriba de un corte de 2 ft no).
+    static func conLaRestaDelCorte(_ g: Guardado, aberturas: [Abertura], desde: Double) -> Guardado {
+        guard g.unidad == "SF", let alto = g.ancho, !aberturas.isEmpty else { return g }
+        let restan = aberturas.filter { restaDeLaPared(largo: g.largo, alto: alto, aberturas: [$0], desde: desde) > 0 }
+        var x = g
+        x.menos = restan.isEmpty ? 0 : restaDeLaPared(largo: g.largo, alto: alto, aberturas: restan, desde: desde)
+        x.menosQue = x.menos > 0 ? nombreDeAberturas(restan, ingles: true) : ""
+        return x
+    }
+    /// "la puerta", "el arco", "la ventana" (una sola) o "1 puerta y 1 arco" (varias): lo que la ficha dice que se restó.
+    static func loRestado(_ ab: [Abertura]) -> String {
+        guard ab.count == 1, let x = ab.first else { return nombreDeAberturas(ab, ingles: false) }
+        return x.esPaso ? "el arco" : (x.esVentana ? "la ventana" : "la puerta")
+    }
+    /// (idea 1) El 3er renglón de la ficha del corte: largo × alto, lo que se resta (o por qué no se restó nada).
+    static func textoDeLaResta(largo: Double, alto: Double, restan: [Abertura], porque: String?, sinMedida: Int) -> String {
+        var t = "\(pies(largo)) ft × \(pies(alto)) ft" + (restan.isEmpty ? "" : " − " + loRestado(restan))
+        if let p = porque { t += " · sin restar puertas: " + p } else if sinMedida > 0 { t += " · \(sinMedida) sin medida en el plano" }
+        return t
+    }
+    /// (idea 1) El 4o renglón: el baseboard que sale solo (lo marcado menos sus puertas y arcos), o por qué no.
+    static func textoDelBaseboard(arranque: Double?, largo: Double, aberturas: [Abertura], incluye: (base: Bool, shoe: Bool)?) -> String {
+        guard let a = arranque else { return "Sin baseboard: no veo el piso" }
+        guard a <= arranqueDelPiso else { return "Sin baseboard: el corte no llega al piso" }
+        let b = pies(baseboardDeLaPared(largo: largo, aberturas: aberturas))
+        let cortan = aberturas.filter(cortaElBaseboard)
+        let sin = cortan.isEmpty ? "" : " (sin " + loRestado(cortan) + ")"
+        switch incluye {
+        case .some(let i) where i.base: return (i.shoe ? "Baseboard + shoe · " : "Solo baseboard · ") + b + " ft" + sin
+        case .some: return "Sin baseboard (así contestó)"
+        case .none: return "Baseboard " + b + " ft" + sin + " · se pregunta en Listo"
+        }
+    }
+    /// (16 oct) Cocina, baño y lavandería, por el nombre del cuarto: ahí hay gabinetes, tina o lavadora (el plano no los manda) y lo de
+    /// ahí casi siempre cambia. Ahí no hay atajos: "¿Qué incluye?" en cada pared y el piso se pregunta.
+    static func cuartoSinAtajos(_ nombre: String) -> Bool {
+        let c = nombre.lowercased().folding(options: .diacriticInsensitive, locale: Locale(identifier: "es"))
+        return ["kitchen", "cocina", "bath", "bano", "laundry", "lavander", "powder"].contains { c.contains($0) }
+    }
+    /// "1 puerta, 1 arco y 2 ventanas" (la cámara) o "1 door, 1 opening, 2 windows" (el reporte). Un arco es un paso sin puerta.
     static func nombreDeAberturas(_ ab: [Abertura], ingles: Bool) -> String {
-        let p = ab.filter { !$0.esVentana }.count, v = ab.filter { $0.esVentana }.count
+        let p = ab.filter { !$0.esVentana && !$0.esPaso }.count, a = ab.filter { $0.esPaso }.count, v = ab.filter { $0.esVentana }.count
         var t: [String] = []
         if p > 0 { t.append(ingles ? "\(p) door" + (p == 1 ? "" : "s") : "\(p) puerta" + (p == 1 ? "" : "s")) }
+        if a > 0 { t.append(ingles ? "\(a) opening" + (a == 1 ? "" : "s") : "\(a) arco" + (a == 1 ? "" : "s")) }
         if v > 0 { t.append(ingles ? "\(v) window" + (v == 1 ? "" : "s") : "\(v) ventana" + (v == 1 ? "" : "s")) }
-        return t.joined(separator: ingles ? ", " : " y ")
+        if ingles || t.count <= 2 { return t.joined(separator: ingles ? ", " : " y ") }
+        return t.dropLast().joined(separator: ", ") + " y " + t.last!
     }
     /// La pared entera ya guardable: el largo y el alto del plano, menos sus aberturas.
     static func conLaResta(_ g: Guardado, aberturas: [Abertura]) -> Guardado {
@@ -13161,6 +14952,126 @@ struct ReglasDeMedir {
             return "✓ \(g.material)\(mas) · \(area) pies²"
         }
     }
+    // ---- EL ALTO DEL CORTE, LA BANDA Y EL MATERIAL PUESTO (ideas 3 y 5, 16 oct). Metros del mundo de la cámara salvo donde dice pies. ----
+    /// Lo que en la pared solo tiene largo (pie lineal): con uno de estos, Listo guarda el largo y no hay banda.
+    static let linealesDePared = ["Baseboard", ReglasDeMedir.drywallDeUnPie, "Trim", "Crown Molding"]
+    static func esDePieLineal(_ m: String) -> Bool { linealesDePared.contains(m) }
+    static func nombreEnLaCamara(_ m: String) -> String { m == drywallDeUnPie ? "Drywall de 1 pie" : (m == "Crown Molding" ? "Crown molding" : m) }
+    /// El piso para medir: de los pisos vistos (0.5 m² o más), el más alto de los que quedan debajo de las esquinas (a 1.2 m o menos).
+    /// Sin esquinas: el más grande. nil = no hay.
+    static func pisoBajoLasEsquinas(_ pisos: [(y: Double, area: Double)], esquinasY: [Double]) -> Double? {
+        let grandes = pisos.filter { $0.area >= 0.5 }
+        guard let ref = esquinasY.min() else { return grandes.max(by: { $0.area < $1.area })?.y }
+        return grandes.filter { $0.y <= ref + 0.15 && ref - $0.y <= 1.2 }.max(by: { $0.y < $1.y })?.y
+    }
+    /// El alto de UN + en la línea del corte ("Otro alto"): del piso al punto, en pies. Vale solo si el punto cae SOBRE la pared marcada
+    /// (a 0.3 m o menos de la línea de sus esquinas, en el piso) y entre 0.12 m y 3.7 m del piso.
+    static func altoDeUnPunto(punto: SIMD3<Double>, piso: Double, esquinas: [SIMD3<Double>]) -> (pies: Double?, dist: Double, porque: String) {
+        guard esquinas.count >= 2 else { return (nil, -1, "sin-esquinas") }
+        let p = SIMD2(punto.x, punto.z)
+        var d = Double.infinity
+        for i in 1..<esquinas.count {
+            let a = SIMD2(esquinas[i - 1].x, esquinas[i - 1].z), b = SIMD2(esquinas[i].x, esquinas[i].z), ab = b - a
+            let L2 = (ab * ab).sum()
+            let t = L2 < 1e-9 ? 0 : max(0, min(1, ((p - a) * ab).sum() / L2))
+            let dq = p - (a + ab * t)
+            d = min(d, (dq * dq).sum().squareRoot())
+        }
+        let h = punto.y - piso
+        if d > 0.3 { return (nil, d, "lejos") }
+        if h < 0.12 { return (nil, d, "bajo") }
+        if h > 3.7 { return (nil, d, "alto") }
+        return (h * 3.28084, d, "")
+    }
+    /// ¿El alto de dos + arranca en el piso? (para volverse el alto del nivel): el punto más bajo a medio pie o menos del piso, la
+    /// MISMA regla que el corte (arranqueDelPiso), para que Listo y el baseboard nunca digan distinto.
+    static func arrancaEnElPiso(_ ys: [Double], piso: Double?) -> Bool {
+        guard let p = piso, let abajo = ys.min() else { return false }
+        return abajo - p <= arranqueDelPiso / 3.28084
+    }
+    /// (revisión del 16 oct) Dos + que arrancan en el piso: la línea de arriba sobre ESE piso, en pies (lo mismo que dice un +). nil = no
+    /// arrancan en el piso o no se ve.
+    static func altoSobreElPiso(_ ys: [Double], piso: Double?) -> Double? {
+        guard let p = piso, let arriba = ys.max(), arrancaEnElPiso(ys, piso: p) else { return nil }
+        return (arriba - p) * 3.28084
+    }
+    /// El alto del nivel que dan dos + (lo marcado entre ellos, en pies): solo si arrancan en el piso y lo marcado dice lo mismo que la
+    /// línea de arriba sobre el piso (±altoParejo: el + de abajo en el piso y los dos parados). nil = no se recuerda.
+    static func altoDelNivelDeDosPuntos(_ ys: [Double], piso: Double?, marcado: Double) -> Double? {
+        guard let v = altoSobreElPiso(ys, piso: piso), abs(marcado - v) <= altoParejo else { return nil }
+        return marcado
+    }
+    /// El cuadro de la banda de un tramo: del piso al alto, en la línea de las esquinas (abajo a, abajo b, arriba b, arriba a).
+    static func cuadroDeBanda(_ a: SIMD3<Double>, _ b: SIMD3<Double>, piso: Double, alto: Double) -> [SIMD3<Double>] {
+        [SIMD3(a.x, piso, a.z), SIMD3(b.x, piso, b.z), SIMD3(b.x, piso + alto, b.z), SIMD3(a.x, piso + alto, a.z)]
+    }
+    /// (P07) Los pedazos de un tramo de largo L sin sus huecos (centro, ancho), en orden; nada de menos de 2 cm.
+    static func tramosSinHuecos(largo: Double, huecos: [(centro: Double, ancho: Double)]) -> [(Double, Double)] {
+        let cortes = huecos.map { (max(0, $0.centro - $0.ancho / 2), min(largo, $0.centro + $0.ancho / 2)) }.filter { $0.1 > $0.0 }.sorted { $0.0 < $1.0 }
+        var r: [(Double, Double)] = [], t = 0.0
+        for (h0, h1) in cortes { if h0 - t > 0.02 { r.append((t, h0)) }; t = max(t, h1) }
+        if largo - t > 0.02 { r.append((t, largo)) }
+        return r
+    }
+    /// Las rayas de la orilla de arriba (punteada, como su diseño): [inicio, fin] a lo largo del tramo.
+    static func rayas(largo: Double, raya: Double = 0.10, hueco: Double = 0.07) -> [(Double, Double)] {
+        guard largo > 0, raya > 0 else { return [] }
+        var r: [(Double, Double)] = [], t = 0.0
+        while t < largo { r.append((t, min(t + raya, largo))); t += raya + hueco }
+        return r
+    }
+    /// La ficha del corte (P04/P07): "Drywall 2 ft · Pared 1" / "24" / "12 ft × 2 ft · + insulación" / "Baseboard + shoe · 12 ft".
+    /// `resta` y `base` son los renglones del corte (textoDeLaResta, textoDelBaseboard); aquí se pone la insulación y el área.
+    struct FichaDelCorte: Equatable { var titulo: String; var area: String; var detalle: String; var base: String? }
+    static func fichaDelCorte(material: String, alto: Double, largo: Double, menos: Double, resta: String, insulacion: Bool?, pared: Int?, base: String?) -> FichaDelCorte {
+        let titulo = "\(nombreEnLaCamara(material)) \(pies(alto)) ft · " + (pared.map { "Pared \($0)" } ?? "Pared")
+        var detalle = resta
+        if paredConInsulacion.contains(material) {
+            detalle += insulacion == true ? " · + insulación" : (insulacion == false ? " · sin insulación" : " · insulación: le pregunto")
+        }
+        return FichaDelCorte(titulo: titulo, area: pies(max(0, largo * alto - menos)), detalle: detalle, base: base)
+    }
+    /// El piso que viene puesto: el de ESTE cuarto si ya tiene uno guardado; si no, el último piso de la lista guardado en este nivel
+    /// (de cualquier cuarto). Los nombres se comparan como `clave` (sin espacios de más, mayúsculas ni acentos).
+    /// (revisión 2) El de este cuarto se busca SIN la lista: su último renglón de piso en pies² (`ancho` puesto; el tackless y lo lineal
+    /// no) que no sea el pad o el underlayment. Si es de la lista, ése; si se escribió a mano (Cork, Subfloor…), nil = se pregunta. Nunca
+    /// el piso de otro cuarto cuando éste ya tiene el suyo. Solo sin piso aquí se usa el último de la lista en el nivel.
+    static func pisoAnterior(_ filas: [(cuarto: String, nivel: String, seccion: String, material: String, ancho: Double?)], nivel: String, cuarto: String = "") -> (material: String, de: String)? {
+        let k = { (s: String) in s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().folding(options: .diacriticInsensitive, locale: Locale(identifier: "es")) }
+        let delNivel = filas.filter { $0.seccion == "floor" && (nivel.isEmpty || $0.nivel == nivel) }
+        let debajo = Set(materialesPiso.compactMap { debajoDelPiso($0) })
+        if !cuarto.isEmpty, let aqui = delNivel.last(where: { k($0.cuarto) == k(cuarto) && $0.ancho != nil && !debajo.contains($0.material) }) {
+            return materialesPiso.contains(aqui.material) ? (aqui.material, aqui.cuarto) : nil
+        }
+        guard let f = delNivel.last(where: { materialesPiso.contains($0.material) }) else { return nil }
+        return (f.material, f.cuarto)
+    }
+    /// "Carpet + pad", "Laminate + underlayment", "Tile", o "Carpet · le pregunto el pad" (mixto sin contestar en este cuarto).
+    static func nombreDelPiso(_ material: String, debajo: Bool?) -> String {
+        guard let cosa = debajoDelPiso(material) else { return material }
+        let corta = cosa == "Carpet Pad" ? "pad" : "underlayment"
+        switch debajo {
+        case .some(true): return material + " + " + corta
+        case .some(false): return material
+        case .none: return material + " · le pregunto el " + corta
+        }
+    }
+    // ---- "FALTA UNA PARED" (13 pasos, idea 4) ----
+    /// Las paredes del plano de un cuarto que no tienen ninguna medida. `largos`: el largo de cada pared del plano (en su orden);
+    /// `deCadaMedida`: de qué paredes es cada medida de pared guardada en ese cuarto ([] = no se supo). `seguro` = todas saben de qué
+    /// pared son. Sin medidas de pared no falta nada (no se trabajó ahí). Un pedacito de menos de 2 ft no cuenta.
+    static func paredesQueFaltan(largos: [Double], deCadaMedida: [[Int]], noSeCorto: Set<Int>) -> (faltan: [Int], seguro: Bool) {
+        guard !deCadaMedida.isEmpty else { return ([], true) }
+        let con = Set(deCadaMedida.flatMap { $0 })
+        let faltan = largos.indices.filter { largos[$0] >= 2 && !con.contains($0) && !noSeCorto.contains($0) }
+        return (faltan, !deCadaMedida.contains { $0.isEmpty })
+    }
+    /// "la pared 4", "las paredes 2 y 4", "las paredes 1, 2 y 4" (índices del plano, contados desde 1).
+    static func textoParedes(_ p: [Int]) -> String {
+        let nums = p.sorted().map { "\($0 + 1)" }
+        guard let ultimo = nums.last else { return "" }
+        return nums.count == 1 ? "la pared " + ultimo : "las paredes " + nums.dropLast().joined(separator: ", ") + " y " + ultimo
+    }
 }
 
 // MARK: - ============ UBICARSE DENTRO DEL PLANO (15 oct 2026) ============
@@ -13188,6 +15099,7 @@ struct UbicadorEnPlano {
         var ancho: Double = 0                            // 0 = no se sabe
         var abajo: Double = -1                           // a qué altura del piso empieza (-1 = no se sabe: escaneo viejo)
         var alto: Double = 0                             // 0 = no se sabe
+        var esPaso: Bool = false                         // (16 oct) paso sin puerta (arco): se resta como puerta, no es seña de puerta para ubicarse
     }
     enum Clase { case pared, ventana, puerta }
     struct Visto { var seg: Segmento; var clase: Clase }                  // lo que el LiDAR ve, ya en pies (x, z)
@@ -13256,8 +15168,9 @@ struct UbicadorEnPlano {
                 }
                 total += cubierto > 0.5 ? cubierto - 0.5 * (L - cubierto) : -0.5 * L
             } else {
+                // (16 oct) Un arco no es seña de puerta: ARKit no ve una puerta donde no hay hoja.
                 let quiere = v.clase == .ventana
-                let cerca = senas.filter { $0.esVentana == quiere }.map { simd_length($0.p - s.medio) }.min() ?? .infinity
+                let cerca = senas.filter { $0.esVentana == quiere && !$0.esPaso }.map { simd_length($0.p - s.medio) }.min() ?? .infinity
                 total += cerca < 2.5 ? 4 : -2
             }
         }
@@ -13720,6 +15633,9 @@ extension ARMeasureViewController {
         }
         L.activo = true
         nueva.reubicandoDesde = nil; nueva.minimapa.ubicando = false
+        quitarBanda(); nueva.chipDe = nil; nueva.chipPuerta.isHidden = true
+        if let f = nueva.faltaVisible { anotarMedir("falta-pared", ["que": "laboratorio", "de": f.cuarto, "paredes": f.paredes.map { $0 + 1 }]) }
+        quitarFranjaYFalta()
         // El asistente se calla y deja de escuchar mientras dura la prueba (nada de órdenes por voz aquí).
         L.micAntes = micApagadoPorElUsuario
         micApagadoPorElUsuario = true
@@ -13756,7 +15672,7 @@ extension ARMeasureViewController {
         func r(_ x: Double) -> Double { (x * 100).rounded() / 100 }
         return cuartosDelMarco(m).map { c in
             ["cuarto": c.nombre, "paredes": c.paredes.map { [r($0.seg.a.x), r($0.seg.a.y), r($0.seg.b.x), r($0.seg.b.y), r($0.alto), $0.exterior ? 1 : 0] },
-             "senas": c.senas.map { [r($0.p.x), r($0.p.y), $0.esVentana ? 1 : 0, r($0.ancho), r($0.abajo), r($0.alto)] }]
+             "senas": c.senas.map { [r($0.p.x), r($0.p.y), $0.esVentana ? 1 : 0, r($0.ancho), r($0.abajo), r($0.alto), $0.esPaso ? 1 : 0] }]
         }
     }
 

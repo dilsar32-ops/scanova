@@ -161,8 +161,11 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
                     }
                     let senas: [UbicadorEnPlano.SenaPlano] = ((f["senas"] as? [[Any]]) ?? []).compactMap { x in
                         guard x.count >= 3, let px = num(x[0]), let py = num(x[1]) else { return nil }
-                        return UbicadorEnPlano.SenaPlano(p: SIMD2(px, py), esVentana: (num(x[2]) ?? 0) > 0.5, ancho: x.count >= 4 ? (num(x[3]) ?? 0) : 0,
-                                                         abajo: x.count >= 5 ? (num(x[4]) ?? -1) : -1, alto: x.count >= 6 ? (num(x[5]) ?? 0) : 0)
+                        let ventana = (num(x[2]) ?? 0) > 0.5
+                        return UbicadorEnPlano.SenaPlano(p: SIMD2(px, py), esVentana: ventana, ancho: x.count >= 4 ? (num(x[3]) ?? 0) : 0,
+                                                         abajo: x.count >= 5 ? (num(x[4]) ?? -1) : -1, alto: x.count >= 6 ? (num(x[5]) ?? 0) : 0,
+                                                         // (16 oct) 7o número = 1: un paso sin puerta (arco). Se resta como una puerta; el reporte dice "opening".
+                                                         esPaso: !ventana && x.count >= 7 && (num(x[6]) ?? 0) > 0.5)
                     }
                     if paredes.count >= 3 { mapa[cuarto] = (paredes, senas) }
                     // El piso completo (16 oct): [área, largo, ancho, aproximado].
@@ -178,6 +181,13 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
                 arVC.pisoPorCuarto = pisos
                 arVC.contornoPorCuarto = contornos
                 arVC.marcoPorCuarto = marcos
+            }
+            // (revisión del 16 oct) Los cuartos de cada nivel con paredes ya guardadas (otra sesión): ahí no se dice "falta una pared".
+            // Sin la llave (página vieja, Field Reports) se queda en nil: no se sabe, tampoco se dice.
+            if let ya = call.getObject("cuartosConParedes") {
+                var mapa: [String: [String]] = [:]
+                for (nivel, lista) in ya { mapa[nivel] = (lista as? [Any])?.compactMap { $0 as? String } ?? [] }
+                arVC.cuartosConParedes = mapa
             }
             if let areas = call.getObject("areasPorCuarto") {
                 var mapa: [String: Double] = [:]
@@ -267,8 +277,8 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
         arVC.experiencia = "nueva"
         arVC.maqueta = paso
         arVC.laboratorio = (11...13).contains(paso) || (18...23).contains(paso)
-        // 24-37: medir primero, el material al final (16 oct).
-        arVC.porMovimiento = (24...54).contains(paso)
+        // 24-108: medir primero (16 oct); 55-66 corte con sus puertas y arcos, 67-78 el alto y el material, 79-90 el flujo de 13 pasos, 91-108 las revisiones.
+        arVC.porMovimiento = (24...108).contains(paso)
         arVC.modo = "recorrido"
         arVC.alcance = "nivel"
         arVC.nivelActual = "2nd Floor"

@@ -260,6 +260,11 @@ ok("paredMedida da lo mismo que antes (sur afuera, este adentro, la esquina sin 
    && U.paredMedida(quieto, puntos: [SIMD2(19.7, 2), SIMD2(19.7, 9)], paredes: living) == false
    && U.paredMedida(quieto, puntos: [SIMD2(12, 0.3), SIMD2(19.7, 0.3), SIMD2(19.7, 6)], paredes: living) == nil)
 
+// (16 oct) Un arco (paso sin puerta) no es seña de puerta: ARKit no ve una puerta donde no hay hoja.
+let acArco = U.Acomodo(giro: giroReal, mov: movReal, puntaje: 0, segundo: 0, seguro: true)
+let vistoPuerta = [U.Visto(seg: U.Segmento(a: aCamara(SIMD2(19.9, 7)), b: aCamara(SIMD2(19.9, 9))), clase: .puerta)]
+ok("un arco no cuenta como seña de puerta para ubicarse", U.puntaje(acArco, paredes: cuarto, senas: [U.SenaPlano(p: SIMD2(20, 8), esVentana: false, esPaso: true)], vistos: vistoPuerta, camara: nil, caja: U.caja(cuarto))
+   == U.puntaje(acArco, paredes: cuarto, senas: [], vistos: vistoPuerta, camara: nil, caja: U.caja(cuarto)))
 print("\n  \(pasan) pasan, \(fallan) fallan")
 exit(fallan == 0 ? 0 : 1)
 '''

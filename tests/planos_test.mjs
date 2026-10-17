@@ -102,5 +102,14 @@ const js = fs.readFileSync(new URL('../docs/planos.js', import.meta.url), 'utf8'
 ok('escanea con el escáner del iPhone (RoomScan) y avisa si no hay LiDAR', /Plugins\.RoomScan/.test(js) && /isSupported/.test(js) && /no LiDAR/.test(js));
 // 16-oct: la subida va por subirFila (con reintentos); solo cuenta como guardado si el servidor devolvió la fila con su id.
 ok('confirma que de verdad se guardó antes de decir "saved"', /return=representation/.test(js) && /if\(g\.ok\)\{ const x = \(await g\.json\(\)\)\[0\]; if\(x && x\.id\) return x; \}/.test(js) && /guardadas\.push\(await subirFila\(fila\)\)/.test(js));
+// 16-oct: los PASOS SIN PUERTA (arcos) llegan a la cámara con las puertas: un 7o número 1.
+{ const d0 = JSON.parse(fs.readFileSync(new URL('./fixtures/plano_real.json', import.meta.url), 'utf8')); const lr = (d0.data || d0).rooms.find(x => x.roomName === 'Living Room');
+  const s = PL.senaParaCamara(lr.openings[0], 'openings');
+  ok('el arco de la sala va a la cámara con 7 números (2.29 × 6.63, sin altura del piso, 7o = 1)', s.length === 7 && s[2] === 0 && s[3] === 2.29 && s[4] === -1 && s[5] === 6.63 && s[6] === 1);
+  ok('puertas y ventanas siguen con 6 números', PL.senaParaCamara(lr.doors[0], 'doors').length === 6 && PL.senaParaCamara(lr.doors[0], 'doors')[2] === 0 && PL.senaParaCamara(lr.windows[0], 'windows')[2] === 1);
+  ok('un arco corregido a ventana va como ventana (como el PDF); uno quitado no va', PL.senaParaCamara({ ...lr.openings[0], _kindOverride: 'window' }, 'openings').length === 6
+     && PL.senaParaCamara({ ...lr.openings[0], _kindOverride: 'window' }, 'openings')[2] === 1 && PL.senaParaCamara({ ...lr.openings[0], _removed: true }, 'openings') === null);
+  const srcPl = fs.readFileSync(new URL('../docs/planos.js', import.meta.url), 'utf8');
+  ok('paredesParaCamara manda ventanas, puertas y arcos', srcPl.includes("['windows', 'doors', 'openings'].forEach(k => (room[k] || []).forEach(x => { const s = senaParaCamara(x, k); if(s) forma.senas.push(s); }));")); }
 console.log(`\nplanos: ${pass} ok, ${fail} fallas`);
 if(fail) process.exit(1);

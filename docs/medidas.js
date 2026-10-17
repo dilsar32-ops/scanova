@@ -11,7 +11,7 @@
 //    del trabajo por partida; las notas; y el PDF "Measurements & Demo" (lo arma Documents).
 // Lo que cambia contra Field Reports: aquí el trabajo ya es el proyecto (cliente, dirección y fecha ya están), y los
 // niveles y cuartos son los del proyecto (los mismos de Photos y Dry Logs).
-import { $, authFetch, esAparato, esManager, preguntar, PERFIL } from './app.js?v=2026-10-16-12';
+import { $, authFetch, esAparato, esManager, preguntar, PERFIL } from './app.js?v=2026-10-16-13';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -50,6 +50,10 @@ export function unidad(m){
   if(Object.values(MATERIALES).some(l => l.includes(m))) return 'SF';
   return null;
 }
+// (16-oct, revisión) ¿Esta fila lleva la resta de la cámara (puertas, arcos, la forma del cuarto)? Toda la que es de área: con su
+// segunda medida y que no sea pie lineal ni pieza — también Paneling y lo escrito a mano (calcular ya los cobra largo × ancho), como
+// en la cámara. Antes solo los de la lista (SF): Paneling o "Wainscoting" llegaban sin su resta y el reporte cobraba de más.
+export const conResta = (mat, ancho) => !!num(ancho) && unidad(mat) !== 'LF' && unidad(mat) !== 'EA';
 // Lo que va pegado detrás o debajo, en el mismo lugar: se PREGUNTA y copia el mismo tamaño.
 export const ACOMPANANTE = { 'Baseboard': 'Shoe Molding', 'Trim / Baseboard': 'Shoe Molding', 'Drywall': 'Insulation', 'Plaster': 'Insulation', 'Popcorn / Texture': 'Insulation',
   'Carpet': 'Carpet Pad', 'Vinyl (LVP)': 'Underlayment', 'Laminate': 'Underlayment', 'Shower Tile': 'Cement Board', 'Floor Tile': 'Thinset / Mortar Bed',
@@ -195,16 +199,28 @@ export function filasDeCamara(medidas, base){
       largo: pieza ? Math.max(1, Math.round(largo)) : r2(largo), ancho: ancho ? r2(ancho) : null, orden: base.orden + (k++) };
     // La pared entera (16-oct): las puertas y ventanas que se le restan. Solo en lo de superficie con su alto.
     const menos = num(m.menos);
-    if(menos && ancho && unidad(material) === 'SF'){ fila.menos = r2(menos); fila.menos_que = String(m.menosQue || '').trim().slice(0, 120) || null; }
+    if(menos && conResta(material, ancho)){ fila.menos = r2(menos); fila.menos_que = String(m.menosQue || '').trim().slice(0, 120) || null; }
     out.push(fila);
     const comp = String(m.companion || '').trim();
     if(comp && !esPorPieza(comp)){
       const c = { ...fila, material: comp, orden: base.orden + (k++) };
-      if(unidad(comp) !== 'SF'){ delete c.menos; delete c.menos_que; }
+      if(!conResta(comp, c.ancho)){ delete c.menos; delete c.menos_que; }
       out.push(c);
     }
   });
   return out;
+}
+// (16-oct, revisión) Los cuartos de cada nivel que YA tienen paredes guardadas ({ nivel: [cuarto, …] }). La cámara no recibe esos
+// renglones (ni saben de qué pared del plano son): ahí no dice "falta una pared" de algo que puede estar ya guardado.
+export function cuartosConParedes(filas){
+  const r = {};
+  (filas || []).forEach(f => {
+    if(!f || f.seccion !== 'wall') return;
+    const c = String(f.cuarto || '').trim(); if(!c) return;
+    const nv = String(f.nivel || '').trim(), l = r[nv] || (r[nv] = []);
+    if(!l.some(x => norm(x) === norm(c))) l.push(c);
+  });
+  return r;
 }
 // ---------- en la página ----------
 // Los niveles abiertos o cerrados (se recuerda mientras está abierta la página) y si se está borrando un nivel.
@@ -404,13 +420,13 @@ function pintarEditor(){
          ${ED.seccion === 'wall' && sup ? '<p class="med-nota-chica">Walls are always length × height, in square feet, however tall the cut is.</p>' : ''}`)
       + `<p class="med-res" id="medRes">${res ? '= ' + esc(res) : ''}</p>` : ''}
     ${comp ? `<label class="med-acomp"><input type="checkbox" id="medAcomp"${ED.acomp ? ' checked' : ''}><span>Also add <b>${esc(comp)}</b> with the same size</span></label>` : ''}
-    ${ED.id && num(ED.menos) && sup ? `<label class="med-acomp"><input type="checkbox" id="medMenos"${ED.restar ? ' checked' : ''}><span>Subtract <b>${esc(String(r2(num(ED.menos))))} sq ft</b>${ED.menos_que ? ': ' + esc(ED.menos_que) : ''} (the whole wall, from the floor plan)</span></label>` : ''}
+    ${ED.id && num(ED.menos) && conResta(mat, ED.ancho) ? `<label class="med-acomp"><input type="checkbox" id="medMenos"${ED.restar ? ' checked' : ''}><span>Subtract <b>${esc(String(r2(num(ED.menos))))} sq ft</b>${ED.menos_que ? ': ' + esc(ED.menos_que) : ''} (the whole wall, from the floor plan)</span></label>` : ''}
     <p class="aviso" id="medEdAviso"></p>
     <div class="fila-botones">${ED.id && esManager() ? '<button type="button" class="btn btn-outline btn-rojo" data-med-borrar>Delete</button>' : ''}<button type="button" class="btn btn-outline" data-med-cerrar>Cancel</button><button type="button" class="btn btn-accent" data-med-guardar>Save</button></div>
     ${ED.id ? '' : '<button type="button" class="btn btn-block med-otra" data-med-guardar="otra">Save and add another</button>'}`;
 }
 // Lo que se resta de la medida que se edita (la pared entera), si sigue marcada "Subtract".
-const restaDe = (e) => e && e.id && e.restar && unidad(materialDe(e)) === 'SF' ? num(e.menos) : 0;
+const restaDe = (e) => e && e.id && e.restar && conResta(materialDe(e), e.ancho) ? num(e.menos) : 0;
 function pintarResultado(){
   if(!ED) return; const mat = materialDe(ED), r = calcular(mat, ED.largo, esPorPieza(mat) ? '' : ED.ancho, restaDe(ED)), t = totalTexto(r.sqft, r.linear, r.piezas);
   const el = $('#medRes'); if(el) el.textContent = t ? '= ' + t : '';
@@ -429,7 +445,7 @@ async function guardarEditor(otra){
   const fila = { nivel_id: ed.nivel_id || null, cuarto_id: ed.cuarto_id || null, nivel_nombre: nombreNivel(ed.nivel_id, ed.nivel) || null, cuarto_nombre: nombreCuarto(ed.cuarto_id, ed.cuarto) || null,
     seccion: ed.seccion, material: mat, largo: pieza ? Math.max(1, Math.round(largo)) : r2(largo), ancho: ancho ? r2(ancho) : null };
   // La resta de la pared entera solo se toca si la quitó (o si ya no es de superficie con su alto).
-  if(ed.id && num(ed.menos) && (!ed.restar || unidad(mat) !== 'SF' || !ancho)){ fila.menos = null; fila.menos_que = null; }
+  if(ed.id && num(ed.menos) && (!ed.restar || !conResta(mat, ancho))){ fila.menos = null; fila.menos_que = null; }
   // Todo lo que hace falta DESPUÉS se toma ahora: si cierran el editor mientras guarda, ya no existe.
   const edId = ed.id, sig = otra ? { nivel_id: ed.nivel_id, cuarto_id: ed.cuarto_id, nivel: ed.nivel, cuarto: ed.cuarto, seccion: ed.seccion } : null;
   GUARDANDO = true; botonesEditor(true);
@@ -539,6 +555,8 @@ async function lanzarCamara(alcance, d){
   // Y la forma de cada cuarto, para que la cámara se ubique dentro del plano con el LiDAR (15-oct).
   let planoPorCuarto = {};
   try{ if(AYUDA.formas) planoPorCuarto = AYUDA.formas() || {}; }catch(e){ planoPorCuarto = {}; }
+  // Lo ya guardado en otra sesión, solo con las medidas de ESTE proyecto cargadas bien (si no, no se manda: la cámara no lo dice).
+  const yaGuardadas = CARGADO === tid && !FALLO ? cuartosConParedes(FILAS.map(f => ({ seccion: f.seccion, nivel: nombreNivel(f.nivel_id, f.nivel_nombre), cuarto: nombreCuarto(f.cuarto_id, f.cuarto_nombre) }))) : null;
   let oyente = null;
   try{ if(esManager() && ARMeasure.addListener) oyente = await ARMeasure.addListener('bitacora', l => { subirBitacora(tid, l); }); }catch(e){ oyente = null; }
   try{
@@ -548,7 +566,7 @@ async function lanzarCamara(alcance, d){
       // porMovimiento (16-oct): MEDIR PRIMERO, el material al final (el cuarto lo da el mapa, la parte el teléfono, y la
       // insulación y el underlayment salen de 3 preguntas del nivel). Primero solo el manager; después de su prueba se cambia
       // a true. `trabajo`: esas respuestas se guardan por trabajo y nivel. Un aparato viejo ignora las dos.
-      laboratorio: esManager(), porMovimiento: esManager(), trabajo: tid });
+      laboratorio: esManager(), porMovimiento: esManager(), trabajo: tid, ...(yaGuardadas ? { cuartosConParedes: yaGuardadas } : {}) });
   }catch(e){ avisar('Could not open the measuring camera. ' + msg(e)); return; }
   finally{ try{ if(oyente && oyente.remove) await oyente.remove(); }catch(e){} if(BITACORA_PENDIENTE.length) subirBitacora(tid, null); }
   if(!res || res.cancelled){ if(res && res.error) avisar(res.error); return; }
