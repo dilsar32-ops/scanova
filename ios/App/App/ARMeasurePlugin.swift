@@ -302,8 +302,8 @@ public class ARMeasurePlugin: CAPPlugin, CAPBridgedPlugin {
         arVC.experiencia = "nueva"
         arVC.maqueta = paso
         arVC.laboratorio = (11...13).contains(paso) || (18...23).contains(paso)
-        // 24-108: medir primero (16 oct); 55-66 corte con sus puertas y arcos, 67-78 el alto y el material, 79-90 el flujo de 13 pasos, 91-108 las revisiones.
-        arVC.porMovimiento = (24...108).contains(paso)
+        // 24-110: medir primero (16 oct); 55-66 corte con sus puertas y arcos, 67-78 el alto y el material, 79-90 el flujo de 13 pasos, 91-110 las revisiones.
+        arVC.porMovimiento = (24...110).contains(paso)
         arVC.modo = "recorrido"
         arVC.alcance = "nivel"
         arVC.nivelActual = "2nd Floor"

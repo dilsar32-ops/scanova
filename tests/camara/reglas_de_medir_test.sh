@@ -371,7 +371,7 @@ ok("la ayuda del panel del piso habla de underlayment o padding", 'debajo del ca
 ok("lo contestado con la pregunta vieja no cuenta: la llave del nivel es v2", 'private static let llaveAjuste = "scanova.medirPrimero.ajuste.v2"' in v)
 ok("la maqueta 37 guarda el carpet por las reglas de verdad (resolverPiso)", 'resolverPiso("Carpet")' in bloque(v, 'private func maquetaMedirPrimeroPaso') and 'ReglasDeMedir.alfombra(' not in v[:v.index('struct ReglasDeMedir {')])
 ok("lo contestado del nivel se guarda por trabajo y nivel", 'Self.llaveAjuste + "|" + trabajoId + "|" + nivelActual' in v and 'arVC.trabajoId = call.getString("trabajo")' in plg)
-ok("las maquetas 24-108 no se enciman con las del laboratorio (18-23)", 'arVC.porMovimiento = (24...108).contains(paso)' in plg and '(18...23).contains(paso)' in plg)
+ok("las maquetas 24-110 no se enciman con las del laboratorio (18-23)", 'arVC.porMovimiento = (24...110).contains(paso)' in plg and '(18...23).contains(paso)' in plg)
 # ---- LA VENTANA "¿COMPLETO O PARCIAL?" SALE SOLA (16 oct, su pedido: "que ya no pregunte fijar; mira la pared y le da las
 # opciones, mira arriba techo completo o parcial, abajo piso; al escoger, engancha") ----
 rm = bloque(v, 'fileprivate func revisarMedirPrimero')
@@ -581,7 +581,24 @@ ok("el aviso de vidrio acepta título y explicación ya partidos (y su ícono)",
 ok("el mapita marca a dónde apunta (azul) y lo que falta (rojo punteado)", 'if i == apuntada { ctx.setStrokeColor(Claro.azul.cgColor)' in v and 'ctx.setLineDash(phase: 0, lengths: [5, 4])' in v and 'm.apuntada = section == "wall"' in v)
 mp = bloque(v, 'private func maquetaMedirPrimeroPaso')
 casos = set(int(x) for c in re.findall(r'\n\s*case ([0-9, ]+):', mp) for x in c.split(',') if x.strip())
-ok("las maquetas de los 13 pasos (55-90) y de las revisiones (91-108), cada una con su caso", set(range(55, 109)) <= casos and 'guard (24...108).contains(maqueta), medirPrimero' in v and 'case 24...108:' in v)
+ok("las maquetas de los 13 pasos (55-90) y de las revisiones (91-110), cada una con su caso", set(range(55, 111)) <= casos and 'guard (24...110).contains(maqueta), medirPrimero' in v and 'case 24...110:' in v)
+# ---- "AQUÍ ESTOY" (17 oct): el toque en el mapa es solo pista; vibra suave buscando y fuerte al ubicarse ----
+cuerpo = bloque
+def tramo_cercano(src):
+    u = bloque(src, 'fileprivate func ubicarseEnElPlano')
+    i = u.index('if let actual = n.acomodo, actual.seguro'); j = u.index('} else if !n.firme || sinConfirmar > 6 {', i)
+    return u[i:j]
+ok("el toque en el mapa es solo pista: ubicar no recibe pista", 'pista' not in bloque(v, 'static func ubicar('))
+ok("pistaContradice nunca pone firme/acomodo/seguro", all(x not in cuerpo(v,'func pistaContradice') for x in ['firme =','acomodo =','.seguro =','ultimaConfirmacion =']))
+ok("pistaTocada y pistaVigente tampoco ubican", all(x not in cuerpo(v,'func pistaTocada') + cuerpo(v,'func pistaVigente') for x in ['firme =','acomodo =','.seguro =','ultimaConfirmacion =','ubicadoDesde =']))
+ok("el mapa solo toma toques con aceptaPista (nunca midiendo)", 'aceptaPista, alTocarMapa != nil' in v and '!medidaEnCurso && pathPoints.isEmpty && widthPoints.isEmpty' in v)
+ok("la pista se olvida al cambiar nivel/cuarto, al ubicarse y al rendirse", v.count('olvidarPista()') >= 6)
+ok("3 respuestas seguras fuera del círculo descartan la pista", 'n.pistaDescartadas >= 3, ac.puntaje >= 8' in v)
+ok("la confirmación cercana y 'contradicha' no usan la pista", 'pistaContradice' not in tramo_cercano(v))
+ok("vibra suave buscando y fuerte al ubicarse", 'case .buscando: UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: 0.35)' in v and v.count('vibrar(.ubicado)') >= 2)
+ok("alReubicarse ya no llama .success directo", 'notificationOccurred(.success)' not in cuerpo(v,'func alReubicarse'))
+ok("el tic respeta medida en curso, calor y 20 s", 'lleva < 21.5' in v and 'thermalState' in cuerpo(v,'func ticDeBuscando'))
+ok("Field Reports: sin planoPorCuarto no hay pista ni tic", '!planoPorCuarto.isEmpty' in cuerpo(v,'func pistaTocada') and '!planoPorCuarto.isEmpty' in cuerpo(v,'func ticDeBuscando'))
 # ---- ÁREA B (idea 1 y los arcos) ----
 dc = bloque(v, 'fileprivate func datosDelCorte')
 ok("el corte pasa sus esquinas al plano solo con la ubicación confirmada en cada esquina y sin cortes del rastreo",

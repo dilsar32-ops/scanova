@@ -8104,6 +8104,9 @@ fileprivate final class MinimapaCamara: UIView {
     // REUBICAR (16 oct, su pedido: "una ruedita para reubicar"): tocar "Ubicado" vuelve a buscar la ubicación. Mientras
     // busca, el mapa se apaga un poco y encima gira una rueda fina con la bolita pulsando; al encontrarse vuelve "✓ Ubicado".
     var alTocarEstado: (() -> Void)?
+    var alTocarMapa: ((SIMD2<Double>) -> Void)?
+    var aceptaPista = false                                            // set by the controller each paint
+    var pistaDibujo: SIMD2<Double>? { didSet { if pistaDibujo != oldValue { setNeedsDisplay() } } }
     var ubicando = false { didSet { if ubicando != oldValue { pintarUbicando() } } }
     private let rueda = CAShapeLayer(), pulso = CAShapeLayer()
     private var claveEstado = ""
@@ -8114,7 +8117,7 @@ fileprivate final class MinimapaCamara: UIView {
         backgroundColor = .clear
         // Solo "Ubicado" recibe el toque (ver hitTest): el resto del mapa deja pasar los dedos a la cámara.
         isUserInteractionEnabled = true
-        addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(estadoTocado)))
+        addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(estadoTocado(_:))))
         overrideUserInterfaceStyle = .light
         for v in [vidrio, estadoVidrio] {
             // Las esquinas de Scanova (su corrección del 16 oct: nada casi redondo): el vidrio del mapa como los botones de
@@ -8160,16 +8163,28 @@ fileprivate final class MinimapaCamara: UIView {
         }
         estado.attributedText = s
     }
-    @objc private func estadoTocado() {
-        guard let a = alTocarEstado, !estadoVidrio.isHidden, !ubicando else { return }
+    @objc private func estadoTocado(_ r: UITapGestureRecognizer) {
+        let pt = r.location(in: self)
+        if alTocarEstado != nil, reubicable, !estadoVidrio.isHidden,
+           estadoVidrio.frame.insetBy(dx: -10, dy: -10).contains(pt) {
+            guard let a = alTocarEstado, !ubicando else { return }
+            UIImpactFeedbackGenerator(style: .light).impactOccurred(); a(); return
+        }
+        guard aceptaPista, let f = alTocarMapa, let g = geometria(bounds) else { return }
+        // Exact inverse of p(v) in dibujar: x*esc+ox, y*esc+oy. The map has no rotation or mirror (checked).
+        let plano = SIMD2((Double(pt.x) - g.ox) / g.esc, (Double(pt.y) - g.oy) / g.esc)
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        a()
+        pistaDibujo = plano
+        f(plano)
     }
     // Solo el letrero de abajo (con un margen para el dedo) recibe el toque; todo lo demás pasa a la cámara.
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        guard alTocarEstado != nil, reubicable, !isHidden, alpha > 0.01, !estadoVidrio.isHidden,
-              estadoVidrio.frame.insetBy(dx: -10, dy: -10).contains(point) else { return nil }
-        return self
+        guard !isHidden, alpha > 0.01 else { return nil }
+        if alTocarEstado != nil, reubicable, !estadoVidrio.isHidden,
+           estadoVidrio.frame.insetBy(dx: -10, dy: -10).contains(point) { return self }
+        if aceptaPista, alTocarMapa != nil, let g = geometria(bounds),
+           g.dibujo.insetBy(dx: -6, dy: -6).contains(point) { return self }
+        return nil
     }
     private func pintarUbicando() {
         if ubicando {
@@ -8281,6 +8296,12 @@ fileprivate final class MinimapaCamara: UIView {
         if medida.count >= 2 {
             ctx.setStrokeColor(ARMeasureViewController.tema.lineaLargo.cgColor); ctx.setLineWidth(3)
             ctx.move(to: p(medida[0])); for m in medida.dropFirst() { ctx.addLine(to: p(m)) }; ctx.strokePath()
+        }
+        if let q = pistaDibujo {
+            let c = p(q), r = CGFloat(max(5 * esc, 7))      // 5 ft circle, at least 7 pt
+            ctx.setStrokeColor(Claro.azul.withAlphaComponent(0.85).cgColor); ctx.setLineWidth(1.5)
+            ctx.strokeEllipse(in: CGRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r))
+            ctx.setFillColor(Claro.azul.cgColor); ctx.fillEllipse(in: CGRect(x: c.x - 3, y: c.y - 3, width: 6, height: 6))
         }
         if let t = telefono {
             let q = p(t)
@@ -8458,6 +8479,13 @@ fileprivate final class CamaraNueva {
     var columnaJuntoAlMapa: NSLayoutConstraint?   // la columna de arriba termina antes del mapa (solo con el mapa a la vista)
     var reubicandoDesde: Date?                    // tocó "Reubicar" (o se reubica solo): la rueda gira hasta que vuelve a ser firme
     var acomodoRechazado: UbicadorEnPlano.Acomodo? // la ubicación que se dejó al reubicar (no se acepta igual sin ver algo nuevo)
+    // "I am here" tap: a HINT only. It never sets acomodo, firme, seguro or ultimaConfirmacion.
+    // (named pistaMapa: `pista` is already the hint UILabel)
+    var pistaMapa: (p: SIMD2<Double>, cam: SIMD2<Double>, cuando: Date, nivel: String, marco: Int?, cuarto: String)?
+    var pistaDescartadas = 0          // sure answers in a row outside the circle
+    var buscandoDesde: Date?          // gentle tick while locating
+    var ultimoTic = Date.distantPast
+    var ultimaVibra = Date.distantPast
     // (16 oct) Reubicar: lo que se veía al tocar (la misma ubicación no vale con los mismos planos), la rueda corta al corregirse
     // sola, y lo que la bitácora necesita para leer la próxima prueba.
     var planosAlTocar: Set<UUID> = []
@@ -9279,6 +9307,55 @@ extension ARMeasureViewController {
         anotarMedir("reubicar", ["por": "mano", "conf": Int(Date().timeIntervalSince(n.ultimaConfirmacion).rounded()), "a_medias": medidaEnCurso])
         empezarAReubicar("reubicar-a-mano")
     }
+    // "I AM HERE" (17 oct): a tap on the map where he stands is only a HINT. It never locks a location; it only makes the
+    // camera look right away and stops sure answers far from the tap from counting (the walls still have to agree).
+    fileprivate func pistaTocada(_ p: SIMD2<Double>) {
+        let n = nueva
+        guard medirPrimero, maqueta == 0, !planoPorCuarto.isEmpty, !medidaEnCurso,
+              pathPoints.isEmpty, widthPoints.isEmpty,
+              let t = sceneView.session.currentFrame?.camera.transform else { return }
+        let marco = marcoDe(roomName) ?? n.acomodoMarco ?? marcoPorCuarto.values.min()
+        let planta = marco.map { cuartosDelMarco($0) } ?? []
+        guard !planta.isEmpty, UbicadorEnPlano.dentroDeLaCasa(p, cuartos: planta.map { $0.paredes }) else {
+            n.minimapa.pistaDibujo = nil; n.mapaGrande.pistaDibujo = nil
+            mostrarAvisoNuevo("Toque dentro de un cuarto del plano", segundos: 2.5); return
+        }
+        let cam = SIMD2(Double(t.columns.3.x), Double(t.columns.3.z)) * 3.28084
+        n.pistaMapa = (p, cam, Date(), nivelActual, marco, roomName); n.pistaDescartadas = 0
+        anotarMedir("pista", ["x": (p.x * 10).rounded() / 10, "y": (p.y * 10).rounded() / 10, "fase": n.ubicandose])
+        if let a = n.acomodo, a.seguro, n.reubicandoDesde == nil, !n.ubicandose,
+           simd_length(a.aplicar(cam) - p) > 6 { empezarAReubicar("pista") }   // same rules as the chip
+        n.ultimoUbicar = .distantPast
+        mostrarAvisoNuevo("Apunte a dos paredes para confirmar", segundos: 2.5)
+        pintarMinimapa()
+    }
+    fileprivate func pistaVigente(_ cam: SIMD2<Double>, marco: Int?) -> SIMD2<Double>? {
+        let n = nueva
+        guard let q = n.pistaMapa else { return nil }
+        if q.nivel != nivelActual || q.marco != marco || Self.clave(q.cuarto) != Self.clave(roomName)
+            || Date().timeIntervalSince(q.cuando) > 20 || simd_length(cam - q.cam) > 6 { olvidarPista(); return nil }
+        return q.p
+    }
+    // Filter only: true = "this answer does not count". It never makes an answer sure.
+    fileprivate func pistaContradice(_ ac: UbicadorEnPlano.Acomodo, cam c: SIMD2<Double>, marco: Int?) -> Bool {
+        let n = nueva
+        guard ac.seguro, let p = pistaVigente(c, marco: marco) else { return false }
+        let d = simd_length(ac.aplicar(c) - p)
+        if d <= 5 { n.pistaDescartadas = 0; return false }
+        n.pistaDescartadas += 1
+        if n.pistaDescartadas >= 3, ac.puntaje >= 8, ac.puntaje - ac.segundo >= 4 {   // the walls insist: drop the tap
+            anotarMedir("pista", ["fase": "descartada", "dist": (d * 10).rounded() / 10])
+            olvidarPista()
+            mostrarAvisoNuevo("Me ubiqué por las paredes, no donde tocó", segundos: 3)
+            return false   // this answer now counts again, under the normal rules (its count restarts at 1)
+        }
+        return true
+    }
+    fileprivate func olvidarPista() {
+        let n = nueva
+        n.pistaMapa = nil; n.pistaDescartadas = 0
+        n.minimapa.pistaDibujo = nil; n.mapaGrande.pistaDibujo = nil
+    }
     fileprivate func empezarAReubicar(_ porque: String) {
         let n = nueva
         n.reubicandoDesde = Date()
@@ -9310,7 +9387,7 @@ extension ARMeasureViewController {
             n.avisoReubicar4 = true
             mostrarAvisoNuevo("Apunte despacio a dos paredes que hagan esquina", segundos: 3.5)
         } else if dura > 12 {
-            n.reubicandoDesde = nil
+            n.reubicandoDesde = nil; olvidarPista()
             anotarMedir("reubicar", ["fase": "sin-encontrar", "segundos": 12])
             mostrarAvisoNuevo("No me pude ubicar. Apunte a dos paredes que hagan esquina, despacio.", segundos: 4)
         }
@@ -9327,14 +9404,17 @@ extension ARMeasureViewController {
             mostrarAvisoNuevo("Me reubiqué: vuelva a escoger la pared", segundos: 3)
         }
         if medidaEnCurso { n.rastreoMaloEnMedida = true } else { empezarPared() }
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        vibrar(.ubicado)
+        olvidarPista(); nueva.buscandoDesde = nil
         anotarMedir("reubicado", ["salto_ft": (salto * 10).rounded() / 10, "porque": porque])
     }
 
     // Una vez por segundo: ¿dónde estoy en el plano de este cuarto?
     fileprivate func ubicarseEnElPlano() {
         let n = nueva
+        ticDeBuscando()
         // Otro nivel = otro plano: lo encontrado ya no sirve.
+        if n.acomodoNivel != nivelActual { olvidarPista() }
         if n.acomodoNivel != nivelActual { n.acomodoNivel = nivelActual; n.acomodo = nil; n.acomodoMarco = nil; n.calzas = []; n.puertaPared.soltar(); n.paredVista = nil }
         // OTRO CUARTO DEL MISMO DIBUJO: la ubicación SE QUEDA (su pedido del 15 oct). La sesión del láser es la misma y el
         // plano tiene todos los cuartos del nivel en las mismas coordenadas: lo que se encontró en la sala sirve en la
@@ -9342,7 +9422,7 @@ extension ARMeasureViewController {
         // la página es vieja y no dice el dibujo. Mientras se escoge cuarto (vacío) o en un cuarto que no está en el plano,
         // la ubicación se guarda para cuando regrese a uno que sí.
         if n.acomodoCuarto != roomName, !roomName.isEmpty {
-            n.acomodoCuarto = roomName
+            n.acomodoCuarto = roomName; olvidarPista()
             if n.acomodoMarco == nil { n.acomodo = nil }
             else if let m = marcoDe(roomName), m != n.acomodoMarco { n.acomodo = nil; n.acomodoMarco = nil }
         }
@@ -9424,7 +9504,8 @@ extension ARMeasureViewController {
                 let explica = !n.firme || (resp.map { $0.puntaje >= pAct + 4 } ?? false)
                 // Mientras corre "Reubicar" esto no: lo termina revisarReubicar (y la ubicación rechazada no vuelve por aquí).
                 if let ac = resp, ac.seguro, dudosa, explica, n.reubicandoDesde == nil, Date().timeIntervalSince(n.ultimaReubicada) > 5,
-                   !planta.isEmpty, UbicadorEnPlano.dentroDeLaCasa(ac.aplicar(c), cuartos: planta.map { $0.paredes }) {
+                   !planta.isEmpty, UbicadorEnPlano.dentroDeLaCasa(ac.aplicar(c), cuartos: planta.map { $0.paredes }),
+                   !pistaContradice(ac, cam: c, marco: marco) {
                     if let cand = n.lejanoCandidato, simd_length(cand.aplicar(c) - ac.aplicar(c)) < 1.0,
                        abs(atan2(sin(cand.giro - ac.giro), cos(cand.giro - ac.giro))) < 0.1 { n.lejanoSeguidas += 1 } else { n.lejanoSeguidas = 1 }
                     n.lejanoCandidato = ac
@@ -9466,6 +9547,7 @@ extension ARMeasureViewController {
         if n.ubicandose {
             // La fase de ubicarse: se dice "Ubicado" solo cuando 3 respuestas seguidas (3 segundos) caen en el mismo lugar.
             guard ac.seguro, let c = cam else { n.coincidencias = 0; n.faseFaltaVer = false; return }
+            if pistaContradice(ac, cam: c, marco: marcoNuevo) { n.coincidencias = 0; n.candidato = nil; return }
             if let cand = n.candidato, simd_length(cand.aplicar(c) - ac.aplicar(c)) < 1.0,
                abs(atan2(sin(cand.giro - ac.giro), cos(cand.giro - ac.giro))) < 0.1 { n.coincidencias += 1 } else { n.coincidencias = 1; n.evidFase = (pies, Date()) }
             n.candidato = ac
@@ -9474,6 +9556,7 @@ extension ARMeasureViewController {
             n.faseFaltaVer = n.coincidencias >= 3 && (!crecio || ac.puntaje < 8)
             if n.coincidencias >= 3 && n.ubicadoDesde == nil && crecio && ac.puntaje >= 8 && Date().timeIntervalSince(n.evidFase.desde) >= 1.2 {
                 n.acomodo = ac; n.acomodoMarco = marcoNuevo; n.ubicadoDesde = Date(); n.firme = true; n.ultimaConfirmacion = Date(); n.porqueFirme = "ubicado"
+                olvidarPista(); n.buscandoDesde = nil; vibrar(.ubicado)
                 anotarMedir("ubicado", ["puntaje": ac.puntaje.rounded(), "segundo": ac.segundo.rounded(), "vistos": n.vistosPared,
                                         "descartados": n.descartados, "pies": Int(pies), "cuarto": cuartoDondeEsta() ?? ""])
             }
@@ -9482,12 +9565,14 @@ extension ARMeasureViewController {
         // LO FIRME fuera de la fase (16 oct): 3 respuestas seguras seguidas en el mismo lugar (1 ft, 0.1 rad). Una dudosa lo
         // quita. Solo con lo firme el plano puede decir "pared de adentro".
         if ac.seguro, let c = cam {
+            if pistaContradice(ac, cam: c, marco: marcoNuevo) { n.confirmacionesFuera = 0; n.candidatoFuera = nil; return }
             if let cand = n.candidatoFuera, simd_length(cand.aplicar(c) - ac.aplicar(c)) < 1.0,
                abs(atan2(sin(cand.giro - ac.giro), cos(cand.giro - ac.giro))) < 0.1 { n.confirmacionesFuera += 1 } else { n.confirmacionesFuera = 1; n.evidFuera = (pies, Date()) }
             n.candidatoFuera = ac
             if n.confirmacionesFuera >= 3, UbicadorEnPlano.evidenciaCrecio(desde: n.evidFuera.pies, ahora: pies, margen: ac.puntaje - ac.segundo),
                Date().timeIntervalSince(n.evidFuera.desde) >= 1.2 {
                 if !n.firme { n.porqueFirme = "buscar-3-seguidas" }; n.firme = true; n.ultimaConfirmacion = Date(); n.acomodoRechazado = nil
+                olvidarPista()
             }
         } else {
             if n.firme { n.porqueFirme = "buscar-dudosa" + (n.acomodo?.seguro == true ? "-con-acomodo" : "") }
@@ -9587,6 +9672,14 @@ extension ARMeasureViewController {
         }
         m.ubicando = n.reubicandoDesde != nil || Date() < n.ruedaHasta
         if m.alTocarEstado == nil { m.alTocarEstado = { [weak self] in self?.reubicarAMano() } }
+        let buscandoAhora = n.ubicandose || n.reubicandoDesde != nil || !ubicacionReciente()
+        let puedeTocar = medirPrimero && maqueta == 0 && !planoPorCuarto.isEmpty && !lab.activo
+                       && !medidaEnCurso && pathPoints.isEmpty && widthPoints.isEmpty && buscandoAhora
+        for mm in [n.minimapa, n.mapaGrande] {
+            if mm.alTocarMapa == nil { mm.alTocarMapa = { [weak self] p in self?.pistaTocada(p) } }
+            mm.aceptaPista = puedeTocar
+            mm.pistaDibujo = n.pistaMapa?.p
+        }
         g.estado.text = ""
     }
 
@@ -10657,7 +10750,7 @@ extension ARMeasureViewController {
             roomName = "Living Room"; nueva.cuartoVisto = roomName
             _ = cambiarSeccion("wall"); nueva.seccionConfirmada = true
             guardada("Living Room", "floor", "Laminate", 9.8, 10)
-        case 24...108:
+        case 24...110:
             // MEDIR PRIMERO (16 oct): se arma en maquetaMedirPrimero(), al final.
             break
         default:
@@ -14217,12 +14310,13 @@ extension ARMeasureViewController {
         n.bandaChip.isHidden = true; n.otroAltoBoton.isHidden = true
     }
     // ---- LAS VIBRACIONES ----
-    fileprivate enum Vibra { case esquina, guardado, fallo, cambio, cuarto, aviso }
+    fileprivate enum Vibra { case esquina, guardado, fallo, cambio, cuarto, aviso, buscando, ubicado }
     /// (16 oct) Vibra distinto en cada paso, para medir mirando la pared: ligero por esquina, dos al guardar, uno LARGO si algo no se
     /// pudo; uno fuerte al cambiar sola de pared o parte, dos fuertes al cambiar de cuarto y el de aviso con "falta una pared". Solo en
     /// medir primero y en el teléfono.
     fileprivate func vibrar(_ v: Vibra) {
         guard medirPrimero, maqueta == 0 else { return }
+        if v != .buscando { nueva.ultimaVibra = Date() }
         switch v {
         case .esquina: UIImpactFeedbackGenerator(style: .light).impactOccurred()
         case .cambio: UIImpactFeedbackGenerator(style: .heavy).impactOccurred(intensity: 1.0)   // (17 oct, su prueba) "tres veces más fuerte": el más fuerte de un golpe
@@ -14234,7 +14328,23 @@ extension ARMeasureViewController {
             let g = UIImpactFeedbackGenerator(style: .rigid); g.prepare(); g.impactOccurred()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.14) { g.impactOccurred() }
         case .fallo: vibrarLargo()
+        case .buscando: UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: 0.35)
+        case .ubicado:  UINotificationFeedbackGenerator().notificationOccurred(.success)
         }
+    }
+    /// (17 oct) A very soft tick while it looks for its place: from 1.5 s, every 2.5 s, up to 20 s. Never measuring or hot.
+    fileprivate func ticDeBuscando() {
+        let n = nueva
+        let buscando = !planoPorCuarto.isEmpty && (n.reubicandoDesde != nil || (n.ubicandose && n.ubicadoDesde == nil))
+        guard buscando, !medidaEnCurso, !lab.activo else { n.buscandoDesde = nil; return }
+        let ahora = Date()
+        if n.buscandoDesde == nil { n.buscandoDesde = ahora }
+        let lleva = ahora.timeIntervalSince(n.buscandoDesde!)
+        guard lleva > 1.5, lleva < 21.5,
+              ProcessInfo.processInfo.thermalState.rawValue < ProcessInfo.ThermalState.serious.rawValue,
+              ahora.timeIntervalSince(n.ultimoTic) >= 2.5, ahora.timeIntervalSince(n.ultimaVibra) >= 0.6 else { return }
+        n.ultimoTic = ahora
+        vibrar(.buscando)
     }
     private func vibrarLargo() {
         if CHHapticEngine.capabilitiesForHardware().supportsHaptics {
@@ -14265,7 +14375,7 @@ extension ARMeasureViewController {
     // pared completa y otra que no. 96-100 la tercera: el corte caminado de una pared con baseboard a otra sin él, lo puesto que sigue
     // tras "No era completa", el material que aguanta asomarse a otro cuarto y la franja de un cuarto que el mapa acaba de dejar.
     fileprivate func maquetaMedirPrimero() {
-        guard (24...108).contains(maqueta), medirPrimero else { return }
+        guard (24...110).contains(maqueta), medirPrimero else { return }
         let n = nueva
         func w(_ a: Double, _ b: Double, _ c: Double, _ d: Double, _ e: Bool) -> UbicadorEnPlano.ParedPlano {
             UbicadorEnPlano.ParedPlano(seg: UbicadorEnPlano.Segmento(a: SIMD2(a, b), b: SIMD2(c, d)), exterior: e) }
@@ -14369,6 +14479,27 @@ extension ARMeasureViewController {
         switch paso {
         case 24: n.ajuste = ReglasDeMedir.Ajuste(); abrirAjuste(volver: false)
         case 25: n.ajuste = ReglasDeMedir.Ajuste(paredes: "afuera", techo: "mixto", piso: "mixto"); abrirAjuste(volver: false)
+        case 109, 110:
+            // (17 oct) "AQUÍ ESTOY": 109 = tocó el centro del Living Room en el plano mientras busca (el anillo azul de 5 ft y el
+            // aviso); 110 = las paredes confirmaron: ubicado ahí, sin anillo (se borró al ubicarse).
+            let tocado = SIMD2<Double>(10, 6)
+            n.ubicandose = true; n.ubicadoDesde = nil
+            pathPoints = []; widthPoints = []; pendingStart = nil
+            if paso == 109 {
+                n.acomodo = nil; n.firme = false
+                n.pistaMapa = (tocado, .zero, Date(), nivelActual, 0, roomName)
+                n.mapaGrande.pistaDibujo = tocado; n.minimapa.pistaDibujo = n.mapaGrande.pistaDibujo
+                for mm in [n.minimapa, n.mapaGrande] { mm.telefono = nil; mm.mirando = nil }
+                n.mapaGrande.ubicando = true
+                mostrarAvisoNuevo("Apunte a dos paredes para confirmar", segundos: 30)
+            } else {
+                n.acomodo = UbicadorEnPlano.Acomodo(giro: 0, mov: tocado, puntaje: 20, segundo: 4, seguro: true)
+                n.ubicadoDesde = Date(); n.firme = true; n.ultimaConfirmacion = Date()
+                olvidarPista()
+                n.mapaGrande.ubicando = false
+                telefonoEn(tocado.x, tocado.y)
+            }
+            pintarCamaraNueva()
         default:
             if paso == 30 { n.ajuste.paredes = "mixto" }
             if paso == 32 || paso == 33 { n.ajuste.piso = "mixto" }

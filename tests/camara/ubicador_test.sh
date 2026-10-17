@@ -265,6 +265,86 @@ let acArco = U.Acomodo(giro: giroReal, mov: movReal, puntaje: 0, segundo: 0, seg
 let vistoPuerta = [U.Visto(seg: U.Segmento(a: aCamara(SIMD2(19.9, 7)), b: aCamara(SIMD2(19.9, 9))), clase: .puerta)]
 ok("un arco no cuenta como seña de puerta para ubicarse", U.puntaje(acArco, paredes: cuarto, senas: [U.SenaPlano(p: SIMD2(20, 8), esVentana: false, esPaso: true)], vistos: vistoPuerta, camara: nil, caja: U.caja(cuarto))
    == U.puntaje(acArco, paredes: cuarto, senas: [], vistos: vistoPuerta, camara: nil, caja: U.caja(cuarto)))
+// ---- (17 oct) "AQUÍ ESTOY": el toque en el mapa es SOLO PISTA. Copia pura del filtro de la cámara (pistaContradice): una
+// respuesta segura a más de 5 ft del toque no cuenta; a la 3a seguida con puntaje >= 8 y ventaja >= 4 la pista se tira.
+// ubicar no recibe la pista (no tiene ese parámetro): lo que responde es lo mismo con o sin toque.
+struct FiltroPista {
+    var p: SIMD2<Double>?; var descartadas = 0
+    mutating func contradice(_ ac: U.Acomodo, _ c: SIMD2<Double>) -> Bool {
+        guard ac.seguro, let q = p else { return false }
+        let d = simd_length(ac.aplicar(c) - q)
+        if d <= 5 { descartadas = 0; return false }
+        descartadas += 1
+        if descartadas >= 3, ac.puntaje >= 8, ac.puntaje - ac.segundo >= 4 { p = nil; descartadas = 0; return false }
+        return true
+    }
+}
+// 3 respuestas seguidas en el mismo lugar que el filtro deja contar = ubicado (como la fase de la cámara).
+func fijar(_ resp: [U.Acomodo], _ c: SIMD2<Double>, pista: SIMD2<Double>?) -> SIMD2<Double>? {
+    var f = FiltroPista(p: pista), cand: U.Acomodo? = nil, n = 0
+    for ac in resp {
+        guard ac.seguro else { n = 0; continue }
+        if f.contradice(ac, c) { n = 0; cand = nil; continue }
+        if let k = cand, simd_length(k.aplicar(c) - ac.aplicar(c)) < 1 { n += 1 } else { n = 1 }
+        cand = ac
+        if n >= 3 { return ac.aplicar(c) }
+    }
+    return nil
+}
+do {
+    // 1. El cuarto espejo (rectángulo sin señas), visto desde una esquina: ubicar da lo mismo con o sin toque (identidad).
+    let camEsq = aCamara(SIMD2(3, 3))
+    let vEsq = [visto(2, 0, 14, 0), visto(0, 2, 0, 9)]
+    let a1 = U.ubicar(paredes: cuarto, senas: [], vistos: vEsq, camara: camEsq), a2 = U.ubicar(paredes: cuarto, senas: [], vistos: vEsq, camara: camEsq)
+    ok("pista: ubicar responde igual con o sin toque (no la recibe)", (a1 == nil && a2 == nil) || (a1 != nil && a2 != nil && a1!.seguro == a2!.seguro && simd_length(a1!.aplicar(camEsq) - a2!.aplicar(camEsq)) < 1e-9))
+    var fe = FiltroPista(p: SIMD2(3, 3))
+    let espejo = (0..<3).map { _ in a1.map { fe.contradice($0, camEsq) } ?? false }
+    ok("pista: en el cuarto espejo, el toque bien puesto nunca descarta nada", !espejo.contains(true))
+    // Con la ventana sí se ubica seguro en el lugar de verdad (3, 3).
+    let vV = vEsq + [visto(4.8, 0, 7.2, 0, .ventana)]
+    if let ac = U.ubicar(paredes: cuarto, senas: senas, vistos: vV, camara: camEsq), ac.seguro {
+        var bien = FiltroPista(p: SIMD2(3.5, 3.2))
+        ok("pista: toque correcto: las 3 respuestas cuentan", (0..<3).allSatisfy { _ in !bien.contradice(ac, camEsq) })
+        ok("pista: toque correcto: se ubica igual que sin toque", fijar([ac, ac, ac], camEsq, pista: SIMD2(3.5, 3.2)).map { simd_length($0 - SIMD2(3, 3)) < 0.5 } == true)
+        // 2. Toque equivocado, en la esquina espejo (17, 9).
+        var mal = FiltroPista(p: SIMD2(17, 9))
+        let r1 = mal.contradice(ac, camEsq), r2 = mal.contradice(ac, camEsq), r3 = mal.contradice(ac, camEsq)
+        let insiste = ac.puntaje >= 8 && ac.puntaje - ac.segundo >= 4
+        ok("pista: toque equivocado: la 1a y 2a respuesta no cuentan", r1 && r2)
+        ok("pista: toque equivocado: a la 3a las paredes ganan y la pista se tira (si insisten claro)", insiste ? (!r3 && mal.p == nil) : r3, "puntaje \(ac.puntaje) vs \(ac.segundo)")
+        var nunca = true
+        for k in 0..<12 { if let p = fijar(Array(repeating: ac, count: k), camEsq, pista: SIMD2(17, 9)), simd_length(p - SIMD2(17, 9)) < 5 { nunca = false } }
+        ok("pista: nunca se ubica en el lugar espejo que tocó", nunca)
+        ok("pista: con el toque equivocado tarda más pero se ubica donde dicen las paredes", !insiste || fijar(Array(repeating: ac, count: 6), camEsq, pista: SIMD2(17, 9)).map { simd_length($0 - SIMD2(3, 3)) < 0.5 } == true)
+        // 3. Respuestas dudosas: la pista no cambia nada.
+        var du = FiltroPista(p: SIMD2(17, 9)); du.descartadas = 1
+        var dudosa = ac; dudosa.seguro = false
+        ok("pista: con una respuesta dudosa no hace nada (ni cuenta)", !du.contradice(dudosa, camEsq) && du.descartadas == 1 && du.p != nil)
+    } else { ok("pista: con la ventana se ubica seguro", false) }
+}
+// 4. Planos reales (Harold, Hamilton): un toque al azar a menos de 4 ft de la verdad nunca cambia lo que se acepta.
+var pistaIgual = 0, pistaCasos = 0
+for (_, paredes, ss) in reales {
+    let largas = paredes.filter { $0.seg.largo >= 5 }.sorted { $0.seg.largo > $1.seg.largo }
+    guard let p0 = largas.first, let p1 = largas.first(where: { U.difLinea($0.seg.angulo, p0.seg.angulo) > 1.2 }) else { continue }
+    func pedazo(_ w: U.ParedPlano) -> U.Visto {
+        let a = w.seg.a + (w.seg.b - w.seg.a) * 0.15, b = w.seg.a + (w.seg.b - w.seg.a) * 0.8
+        return U.Visto(seg: U.Segmento(a: aCamara(a), b: aCamara(b)), clase: .pared)
+    }
+    var vs = [pedazo(p0), pedazo(p1)]
+    if let sn = ss.first { let dd = SIMD2(1.0, 0.0); vs.append(U.Visto(seg: U.Segmento(a: aCamara(sn.p - dd), b: aCamara(sn.p + dd)), clase: sn.esVentana ? .ventana : .puerta)) }
+    let pts = paredes.flatMap { [$0.seg.a, $0.seg.b] }
+    let centro = SIMD2(pts.map { $0.x }.reduce(0, +) / Double(pts.count), pts.map { $0.y }.reduce(0, +) / Double(pts.count))
+    guard let ac = U.ubicar(paredes: paredes, senas: ss, vistos: vs, camara: aCamara(centro)) else { continue }
+    for _ in 0..<5 {
+        var t = SIMD2(r(4), r(4)); if simd_length(t) > 4 { t = t / simd_length(t) * 4 }
+        pistaCasos += 1
+        let sin = fijar([ac, ac, ac, ac, ac, ac], aCamara(centro), pista: nil), con = fijar([ac, ac, ac, ac, ac, ac], aCamara(centro), pista: centro + t)
+        if (sin == nil && con == nil) || (sin != nil && con != nil && simd_length(sin! - con!) < 1e-9) { pistaIgual += 1 }
+    }
+}
+print("    pista en planos reales: igual \(pistaIgual) de \(pistaCasos)")
+ok("pista: en planos reales, un toque a menos de 4 ft da la misma ubicación que sin toque (100%)", pistaCasos > 0 && pistaIgual == pistaCasos)
 print("\n  \(pasan) pasan, \(fallan) fallan")
 exit(fallan == 0 ? 0 : 1)
 '''
