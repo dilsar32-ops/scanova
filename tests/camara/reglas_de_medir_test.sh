@@ -608,6 +608,7 @@ ok("cocina, baño y lavandería: el piso se pregunta", 'guard !ReglasDeMedir.cua
 ok("vibra distinto: ligero por esquina, doble al guardar, largo si no se pudo", 'import CoreHaptics' in v and 'fileprivate func vibrar(_ v: Vibra)' in v
    and 'if medirPrimero && nueva.medirActivo { vibrar(.esquina) } else { UIImpactFeedbackGenerator(style: .medium).impactOccurred() }' in bloque(v, '@objc private func addTapped')
    and '.hapticContinuous' in v and 'guard medirPrimero, maqueta == 0 else { return }' in bloque(v, 'fileprivate func vibrar'))
+ok("el cambio solo de pared o parte se siente (su prueba del 17 oct): medio a 0.75, más suave que el de cuarto", 'case .cambio: UIImpactFeedbackGenerator(style: .medium).impactOccurred(intensity: 0.75)' in bloque(v, 'fileprivate func vibrar') and 'case .cuarto: UIImpactFeedbackGenerator(style: .medium).impactOccurred()' in bloque(v, 'fileprivate func vibrar'))
 ok("la banda es de SceneKit, deja el hueco de la puerta y se quita con una pregunta abierta", 'SCNGeometrySource(vertices:' in v and 'mat.isDoubleSided = true' in v
    and 'ReglasDeMedir.tramosSinHuecos(largo: largo, huecos: huecos)' in v
    and 'guard !hayPanel, !lab.activo, let a = altoDeLaBanda(), let piso = pisoConocido() else { quitarBanda(); return }' in bloque(v, 'fileprivate func pintarBanda'))

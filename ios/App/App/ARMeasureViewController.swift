@@ -14099,13 +14099,13 @@ extension ARMeasureViewController {
     // ---- LAS VIBRACIONES ----
     fileprivate enum Vibra { case esquina, guardado, fallo, cambio, cuarto, aviso }
     /// (16 oct) Vibra distinto en cada paso, para medir mirando la pared: ligero por esquina, dos al guardar, uno LARGO si algo no se
-    /// pudo; un toquecito al cambiar sola de pared o parte, uno medio al cambiar de cuarto y el de aviso con "falta una pared". Solo en
+    /// pudo; uno medio suave al cambiar sola de pared o parte, uno medio entero al cambiar de cuarto y el de aviso con "falta una pared". Solo en
     /// medir primero y en el teléfono.
     fileprivate func vibrar(_ v: Vibra) {
         guard medirPrimero, maqueta == 0 else { return }
         switch v {
         case .esquina: UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        case .cambio: UISelectionFeedbackGenerator().selectionChanged()
+        case .cambio: UIImpactFeedbackGenerator(style: .medium).impactOccurred(intensity: 0.75)   // (17 oct, su prueba) "un poco más": el toquecito de selección casi no se sentía
         case .cuarto: UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         case .aviso: UINotificationFeedbackGenerator().notificationOccurred(.warning)
         case .guardado:
