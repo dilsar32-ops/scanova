@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
-<link rel="stylesheet" href="estilo.css?v=2026-10-17-4">
+<link rel="stylesheet" href="estilo.css?v=2026-10-17-5">
 <meta name="description" content="Scanova360: the smarter way to capture, organize, and manage restoration projects. Private workspace, by invitation only.">
 <style>
 /* ===== BIENVENIDA (la imagen aprobada hecha pagina; se ve solo sin sesion) ===== */
@@ -413,6 +413,8 @@ body.en-inicio{ overflow:hidden; }
           <div><h1 class="bienv-t">Welcome, <span id="bienvNombre"></span></h1><p class="bienv-sub">Capture. Plan. Restore. All in one place.</p></div>
           <div class="bienv-fecha" id="bienvFecha"></div>
         </div>
+        <!-- (17-oct) Un escaneo del plano que quedó en este teléfono sin guardar: aquí se dice de qué proyecto (planos.js). -->
+        <div class="ini-planos" id="inicioPlanos" hidden></div>
         <div class="sec-cab"><h2 class="sec-t">Recent Projects</h2><button type="button" class="ver-todo" data-nav="proyectos">View All</button></div>
         <div class="recientes" id="recientes" translate="no"></div>
         <div class="rec-puntos" id="recPuntos" aria-hidden="true"></div>
@@ -761,6 +763,6 @@ body.en-inicio{ overflow:hidden; }
     <div class="visor-pie"><span id="visorPie"></span><button type="button" class="btn btn-outline btn-rojo" id="visorBorrar" hidden><svg class="ic"><use href="#i-archivo"/></svg>Papelera</button></div>
   </div>
 </div>
-<script type="module" src="app.js?v=2026-10-17-4"></script>
+<script type="module" src="app.js?v=2026-10-17-5"></script>
 </body>
 </html>

@@ -1,17 +1,17 @@
 // Scanova · la ficha de un proyecto (diseño de Amilcar, 12 oct 2026): portada, nombre, dirección, etapa, cliente,
 // encargado y fecha; pestañas Rooms · Photos · Dry Logs · Floor Plan · Measurements · Notes · Documents · Activity.
 // Rooms = niveles (Basement, First Floor…) y sus cuartos (Kitchen…). Photos = las fotos por nivel y por cuarto.
-import { $, $$, authFetch, irA, atras, esManager, PERFIL, marcarLimpio, preguntar } from './app.js?v=2026-10-17-4';
-import * as trabajos from './trabajos.js?v=2026-10-17-4';
-import * as fotos from './fotos.js?v=2026-10-17-4';
-import * as panel from './panel.js?v=2026-10-17-4';
-import * as planos from './planos.js?v=2026-10-17-4';
-import * as camara from './camara.js?v=2026-10-17-4';
-import * as detalles from './detalles.js?v=2026-10-17-4';
-import * as drylog from './drylog.js?v=2026-10-17-4';
-import * as documentos from './documentos.js?v=2026-10-17-4';
-import * as medidas from './medidas.js?v=2026-10-17-4';
-import * as pegar from './pegar.js?v=2026-10-17-4';
+import { $, $$, authFetch, irA, atras, esManager, PERFIL, marcarLimpio, preguntar } from './app.js?v=2026-10-17-5';
+import * as trabajos from './trabajos.js?v=2026-10-17-5';
+import * as fotos from './fotos.js?v=2026-10-17-5';
+import * as panel from './panel.js?v=2026-10-17-5';
+import * as planos from './planos.js?v=2026-10-17-5';
+import * as camara from './camara.js?v=2026-10-17-5';
+import * as detalles from './detalles.js?v=2026-10-17-5';
+import * as drylog from './drylog.js?v=2026-10-17-5';
+import * as documentos from './documentos.js?v=2026-10-17-5';
+import * as medidas from './medidas.js?v=2026-10-17-5';
+import * as pegar from './pegar.js?v=2026-10-17-5';
 
 const esc = (v) => trabajos.esc(v);
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -140,6 +140,7 @@ export function fotoCardHtml(f, url, etiqueta, sel){
 
 // ---------- estado ----------
 let T = null, NIVELES = [], CUARTOS = [], TAB = 'fotos', SUBTAB = 'niveles', NIVEL_CUARTOS = '';
+let NIVELES_LISTOS = false;   // (17-oct) ya llegaron los niveles del proyecto (un escaneo recogido los necesita)
 let FILTRO = { nivel:'todos', cuarto:'todos' }, VISTA = 'grid', ORDEN = 'nuevas', VER_POR = 'nivel';
 let MODO_SEL = false; const SEL = new Set(); let URLS = {}; let EDIT_NIVEL = null, EDIT_CUARTO = null;
 export const niveles = () => NIVELES;
@@ -186,7 +187,7 @@ async function cargarCuartos(){
     authFetch('/rest/v1/fotos_cuartos?trabajo_id=eq.' + encodeURIComponent(id) + '&select=*&order=orden.asc,created_at.asc'),
   ]);
   if(!T || T.id !== id) return;
-  NIVELES = ordenarNiveles(rn.ok ? await rn.json() : []); CUARTOS = rc.ok ? await rc.json() : [];
+  NIVELES = ordenarNiveles(rn.ok ? await rn.json() : []); CUARTOS = rc.ok ? await rc.json() : []; NIVELES_LISTOS = rn.ok;
   if(rn.status === 404) aviso('Esta parte todavía no está instalada en el servidor: falta correr sql/fotos-04-niveles.sql.');
   pintarTodo();
 }
@@ -194,13 +195,21 @@ function aviso(txt){ const a = $('#fichaAviso'); if(a) a.textContent = txt || ''
 
 // ---------- abrir la ficha ----------
 export function abrir(t, portada){
-  T = t; NIVELES = []; CUARTOS = []; TAB = 'fotos'; SUBTAB = 'niveles'; NIVEL_CUARTOS = '';
+  T = t; NIVELES = []; CUARTOS = []; TAB = 'fotos'; SUBTAB = 'niveles'; NIVEL_CUARTOS = ''; NIVELES_LISTOS = false;
   FILTRO = { nivel:'todos', cuarto:'todos' }; VER_POR = 'nivel'; MODO_SEL = false; SEL.clear(); URLS = {};
   $('#trabajoFicha').innerHTML = cabeceraHtml(t, portada, esManager()) + tabsHtml(TAB, { fotos: 0 }) +
     TABS.map(([k]) => `<div class="tab-panel" data-panel="${k}"${k === TAB ? '' : ' hidden'}>${k === 'fotos' ? '<div id="fotosPanel"></div><p class="aviso" id="fotosAviso"></p>' : '<div id="panel-' + k + '"></div>'}</div>`).join('') +
     '<p class="aviso" id="fichaAviso"></p>';
   detalles.abrir(t);
-  cargarCuartos();
+  // (17-oct) Si en este teléfono quedó un escaneo del plano de este proyecto sin guardar (la página se recargó con el
+  // escáner abierto), se abre directo en Floor Plan, que lo guarda y lo dice. Solo si sigue en la pestaña de entrada, con
+  // la ficha a la vista (no con la cámara de fotos abierta encima ni en otra pantalla).
+  const quieto = () => T && T.id === t.id && TAB === 'fotos' && NIVELES_LISTOS && !document.body.classList.contains('con-camara') && $('#pTrabajo') && !$('#pTrabajo').hidden;
+  cargarCuartos().then(async () => {
+    if(!quieto()) return;
+    const l = await planos.trabajosConEscaneoSinGuardar();
+    if(quieto() && l.some(x => x.trabajo === String(t.id).toLowerCase())) irTab('plano');
+  }).catch(() => {});
   // Su pedido (13-oct): la pestaña Floor Plan dice de una vez si el proyecto tiene plano, como Photos (38).
   planos.contarPlanos(t.id);
   // Y (16-oct) Dry Logs dice cuántos días tienen lecturas, y Measurements cuántas medidas hay.
@@ -227,7 +236,7 @@ function pintarMedidas(){ if(TAB === 'medidas' && T) medidas.pintar(T, NIVELES, 
 // Documents (14-oct): los reportes del secado (Dry Log y Equipment) con su PDF.
 function pintarDocumentos(){ if(TAB === 'documentos' && T) documentos.pintar(T, NIVELES, CUARTOS); }
 // Floor Plan (su diseño): solo se dibuja cuando la pestaña está abierta (el plano pesa).
-function pintarPlano(){ if(TAB === 'plano' && T) planos.abrir(T, NIVELES, () => abrirFormaNivel(null), CUARTOS); }
+function pintarPlano(){ if(TAB === 'plano' && T) planos.abrir(T, NIVELES, () => abrirFormaNivel(null), CUARTOS, NIVELES_LISTOS); }
 
 // ---------- Rooms ----------
 function miniDe(lista){ const f = ordenarFotos(lista, 'nuevas')[0]; return f ? (URLS[f.id] || '') : ''; }

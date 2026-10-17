@@ -1,11 +1,12 @@
 // Scanova · el panel nuevo (diseño de Amilcar, 12 oct 2026): Home con "Welcome", Recent Projects en tarjetas,
 // la tabla All Projects con filtro, búsqueda y orden; Projects; Gallery; el botón de cámara (Capture) y el menú •••.
 // Lo puro va arriba (se prueba en Node); lo que toca la página va abajo.
-import { $, $$, irA, esManager, PERFIL } from './app.js?v=2026-10-17-4';
-import * as trabajos from './trabajos.js?v=2026-10-17-4';
-import * as fotos from './fotos.js?v=2026-10-17-4';
-import * as camara from './camara.js?v=2026-10-17-4';
-import * as cerca from './cerca.js?v=2026-10-17-4';
+import { $, $$, irA, esManager, PERFIL } from './app.js?v=2026-10-17-5';
+import * as trabajos from './trabajos.js?v=2026-10-17-5';
+import * as fotos from './fotos.js?v=2026-10-17-5';
+import * as camara from './camara.js?v=2026-10-17-5';
+import * as cerca from './cerca.js?v=2026-10-17-5';
+import * as planos from './planos.js?v=2026-10-17-5';
 
 // Se piden al usarse (no al cargar): así no importa en qué orden se cargan los módulos.
 const esc = (v) => trabajos.esc(v);
@@ -142,6 +143,8 @@ export function pintar(){
   tabla('#tablaProyectos', VISTA.proyectos, 0);
   if(!$('#pGaleria').hidden) pintarGaleria();
   cargarPortadas(rec);
+  // (17-oct) Un escaneo del plano que quedó en este teléfono sin guardar: Home dice de qué proyecto, con "Open it".
+  planos.pintarAvisoDeInicio(trabajos.datos().LISTA).catch(() => {});
 }
 
 // ---------- Gallery: las fotos más nuevas de todos los proyectos ----------
@@ -230,6 +233,8 @@ function cerrarCaptura(){ const h = $('#hojaCaptura'); h.hidden = true; h.classL
 
 export function conectar(){
   camara.usarEscogerProyecto(() => abrirCaptura(true));
+  // (17-oct) Floor Plan vuelve a pintar el aviso de Home cuando el aparato deja un escaneo sin guardar (con estos proyectos).
+  planos.usarListaDeInicio(() => trabajos.datos().LISTA);
   const filtro = (selSel, inSel, vista) => {
     $(selSel).addEventListener('change', (e) => { vista.estado = e.target.value; pintar(); });
     $(inSel).addEventListener('input', (e) => { vista.texto = e.target.value; pintar(); });

@@ -1450,6 +1450,7 @@ body.ed-guardando #fvPanel .ed-accs, body.ed-guardando #fvPanel .ed-tiles, body.
 .pl-seg{ display:inline-flex; background:var(--bg2); border-radius:9px; padding:3px; }
 .pl-seg button{ font:inherit; font-size:13px; font-weight:600; border:0; background:none; color:var(--ink-soft); padding:6px 14px; border-radius:7px; cursor:pointer; }
 .pl-seg button.on{ background:var(--accent); color:#fff; }
+.pl-seg button[disabled]{ opacity:.45; cursor:default; }   /* 3D sin plano en el nivel (17-oct) */
 .pl-rej{ display:inline-flex; align-items:center; gap:6px; font:inherit; font-size:13px; font-weight:600; border:0; background:none; color:var(--ink-soft); cursor:pointer; padding:6px 4px; }
 .pl-rej.on{ color:var(--ink); }
 .pl-rej .ic{ width:18px; height:18px; }
@@ -1487,6 +1488,14 @@ body.ed-guardando #fvPanel .ed-accs, body.ed-guardando #fvPanel .ed-tiles, body.
 #panel-plano .pl-pend span{ flex:1; min-width:0; line-height:1.35; }
 #panel-plano .pl-pend small{ color:var(--ink-soft); font-size:12.5px; }
 #panel-plano .pl-pend .btn{ flex:none; min-height:36px; padding:0 12px; }
+/* (17-oct) Home: un escaneo del plano que quedó en el teléfono sin guardar (el mismo estilo de la franja de Floor Plan). */
+.ini-planos{ display:flex; flex-direction:column; gap:8px; margin:0 0 14px; }
+.ini-planos[hidden]{ display:none; }
+.ini-plano{ display:flex; align-items:center; gap:10px; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:var(--card); font-size:14px; color:var(--ink); }
+.ini-plano .ic{ width:20px; height:20px; flex:none; color:var(--accent); }
+.ini-plano span{ flex:1; min-width:0; line-height:1.35; }
+.ini-plano small{ color:var(--ink-soft); font-size:12.5px; }
+.ini-plano .btn{ flex:none; min-height:36px; padding:0 12px; }
 @media (max-width:1180px) and (min-width:900px){ .pl-cuerpo{ grid-template-columns:190px minmax(0,1fr); } .pl-detalles{ grid-column:1 / -1; } }
 @media (max-width:899px){
   .pl-cab, .pl-niveles, .pl-detalles, .pl-visor-cab{ display:none; }

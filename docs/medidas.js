@@ -11,7 +11,7 @@
 //    del trabajo por partida; las notas; y el PDF "Measurements & Demo" (lo arma Documents).
 // Lo que cambia contra Field Reports: aquí el trabajo ya es el proyecto (cliente, dirección y fecha ya están), y los
 // niveles y cuartos son los del proyecto (los mismos de Photos y Dry Logs).
-import { $, authFetch, esAparato, esManager, preguntar, PERFIL } from './app.js?v=2026-10-17-4';
+import { $, authFetch, esAparato, esManager, preguntar, PERFIL } from './app.js?v=2026-10-17-5';
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const IC = (n, cls) => '<svg class="ic' + (cls ? ' ' + cls : '') + '"><use href="#i-' + n + '"/></svg>';
@@ -628,6 +628,7 @@ async function lanzarCamara(alcance, d){
   let oyente = null;
   try{ if(esManager() && ARMeasure.addListener) oyente = await ARMeasure.addListener('bitacora', l => { subirBitacora(tid, l); }); }catch(e){ oyente = null; }
   CAMARA_ABIERTA = true;   // la sesión abierta no se recoge como borrador (un Deshacer después dejaría una fantasma)
+  document.body.classList.add('con-medir');   // (17-oct) con la cámara abierta la app no se recarga sola (app.js, ocupado())
   try{
     res = await ARMeasure.measure({ modo: 'recorrido', alcance, nivel: nivel ? nivel.nombre : '', section: 'floor', materials: secciones.floor, secciones, cuartos, niveles,
       areasPorCuarto: {}, cuartosPorPlanta, areasPorPlanta: {}, crewName: String((PERFIL && PERFIL.full_name) || '').split(' ')[0], roomName: cuarto ? cuarto.nombre : '', roomAreaSqFt: 0, tema: TEMA_CAMARA, experiencia: EXPERIENCIA_CAMARA, paredesPorCuarto, planoPorCuarto,
@@ -638,7 +639,7 @@ async function lanzarCamara(alcance, d){
       // (17-oct) laboratorio: false, sin su botón: él pidió quitarlo (la cámara de 13 pasos ya hace lo que se probaba ahí).
       laboratorio: false, porMovimiento: esManager(), trabajo: tid, borrador: true, ...(yaGuardadas ? { cuartosConParedes: yaGuardadas } : {}), ...(partesGuardadas ? { partesGuardadas } : {}) });
   }catch(e){ avisar('Could not open the measuring camera. ' + msg(e)); return; }
-  finally{ CAMARA_ABIERTA = false; try{ if(oyente && oyente.remove) await oyente.remove(); }catch(e){} if(BITACORA_PENDIENTE.length) subirBitacora(tid, null); }
+  finally{ CAMARA_ABIERTA = false; document.body.classList.remove('con-medir'); try{ if(oyente && oyente.remove) await oyente.remove(); }catch(e){} if(BITACORA_PENDIENTE.length) subirBitacora(tid, null); }
   if(!res || res.cancelled){ if(res && res.error) avisar(res.error); return; }
   const nuevas = filasDeCamara(res.measurements, { nivel: nivel ? nivel.nombre : '', cuarto: cuarto ? cuarto.nombre : '', orden: Date.now() }).map(f => f.id ? f : { ...f, id: nuevoId() });
   if(!nuevas.length){ soltarBorradorNativo(tid, [res.sesion]); return; }

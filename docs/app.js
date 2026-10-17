@@ -1,15 +1,15 @@
 // Scanova · arranque, sesión y navegación. Las pantallas viven en index.html; lo de trabajos en trabajos.js.
-import { SUPABASE_URL, ANON_KEY, APP_BUILD } from './config.js?v=2026-10-17-4';
-import { ESQUEMA_APARATO, urlEntrarGoogle } from './google.js?v=2026-10-17-4';
-import * as trabajos from './trabajos.js?v=2026-10-17-4';
-import * as personas from './personas.js?v=2026-10-17-4';
-import * as fotos from './fotos.js?v=2026-10-17-4';
-import * as panel from './panel.js?v=2026-10-17-4';
-import * as camara from './camara.js?v=2026-10-17-4';
-import * as direccion from './direccion.js?v=2026-10-17-4';
-import * as proyecto from './proyecto.js?v=2026-10-17-4';
-import * as foto from './foto.js?v=2026-10-17-4';
-import * as editor from './editor.js?v=2026-10-17-4';
+import { SUPABASE_URL, ANON_KEY, APP_BUILD } from './config.js?v=2026-10-17-5';
+import { ESQUEMA_APARATO, urlEntrarGoogle } from './google.js?v=2026-10-17-5';
+import * as trabajos from './trabajos.js?v=2026-10-17-5';
+import * as personas from './personas.js?v=2026-10-17-5';
+import * as fotos from './fotos.js?v=2026-10-17-5';
+import * as panel from './panel.js?v=2026-10-17-5';
+import * as camara from './camara.js?v=2026-10-17-5';
+import * as direccion from './direccion.js?v=2026-10-17-5';
+import * as proyecto from './proyecto.js?v=2026-10-17-5';
+import * as foto from './foto.js?v=2026-10-17-5';
+import * as editor from './editor.js?v=2026-10-17-5';
 
 export const $ = (s, r = document) => r.querySelector(s);
 export const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
@@ -110,8 +110,15 @@ export async function authFetch(path, opts = {}){
   const hacer = () => fetch(SUPABASE_URL + path, { ...opts, headers:{ 'Content-Type':'application/json', apikey: ANON_KEY, Authorization:'Bearer ' + (SES ? SES.access_token : ''), ...(opts.headers || {}) } });
   let r = await hacer();
   if(r.status === 401 && await refrescar()) r = await hacer();
+  notarReloj(r);
   return r;
 }
+// (17-oct) La hora del servidor menos la del teléfono (ms), del encabezado Date de cada respuesta (el servidor lo deja leer);
+// null = todavía no se sabe. Un plano que se sube tarde lleva su hora de escaneo en la hora del SERVIDOR: un teléfono con la
+// fecha mal puesta no lo pone delante (ni detrás) de los planos de los demás.
+let DESFASE_RELOJ = null;
+export const desfaseDelReloj = () => DESFASE_RELOJ;
+function notarReloj(r){ try{ const t = Date.parse((r && r.headers && r.headers.get && r.headers.get('date')) || ''); if(isFinite(t)) DESFASE_RELOJ = t - Date.now(); }catch(e){} }
 export async function cargarPerfil(){
   if(!SES || !SES.user_id) return null;
   const r = await authFetch('/rest/v1/profiles?id=eq.' + encodeURIComponent(SES.user_id) + '&select=id,full_name,role,company_id,status&limit=1');
@@ -580,9 +587,10 @@ export function debeRecargar(remota, local, yaIntentada){
   const v = String(remota || '').trim();
   return !!v && /^\d{4}-\d{2}-\d{2}-[\w-]+$/.test(v) && v !== local && v !== yaIntentada;
 }
-function ocupado(){
+// (17-oct) También con el escáner del plano o la cámara de medir abiertos: recargar a medio escaneo perdía lo escaneado.
+export function ocupado(){
   const b = document.body.classList;
-  if(b.contains('con-camara') || b.contains('fv-editando') || b.contains('con-pegar') || fotos.hayFotosSubiendo()) return true;
+  if(b.contains('con-camara') || b.contains('fv-editando') || b.contains('con-pegar') || b.contains('con-escaner') || b.contains('con-medir') || fotos.hayFotosSubiendo()) return true;
   const p = [...document.querySelectorAll('.pantalla')].find(x => !x.hidden);
   if(p && ['pForma', 'pClave', 'pCrear', 'pCodigo', 'pNivel', 'pCuarto'].includes(p.id)) return true;
   const a = document.activeElement; return !!(a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && a.type !== 'button')));

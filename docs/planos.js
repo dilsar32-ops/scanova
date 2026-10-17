@@ -2,8 +2,8 @@
 // (el mismo escáner de Field Reports, que ya viene dentro de la app: plugin RoomScan) y se dibuja con el
 // mismo código de Field Reports (plano.js, copiado por tools/extraer_plano.py). Un escaneo por piso;
 // un escaneo nuevo no borra el anterior (queda de historial), se ve el más reciente.
-import * as plano from './plano.js?v=2026-10-17-4';
-import { authFetch, esAparato, esManager, preguntar } from './app.js?v=2026-10-17-4';
+import * as plano from './plano.js?v=2026-10-17-5';
+import { authFetch, esAparato, esManager, preguntar, desfaseDelReloj } from './app.js?v=2026-10-17-5';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
@@ -181,11 +181,48 @@ export async function nivelesDelPlanoDe(trabajoId){
       lista = r.ok ? await r.json() : [];
     }catch(e){ lista = []; }
   }
-  const pend = leerPendientes().map(x => x && x.fila).filter(f => f && f.trabajo_id === trabajoId && !(lista || []).some(p => p.id === f.id));
-  return nivelesDePlanos(pend.reverse().concat(lista || []));
+  // (17-oct) Por la hora del escaneo, junto con los del servidor: un escaneo viejo recogido después no tapa a uno más nuevo.
+  return nivelesDePlanos(conPendientes(lista || [], trabajoId));
 }
 // El plano que se ve de cada piso: el más reciente (la lista viene ordenada del más nuevo al más viejo).
 export const planoDe = (planos, nivelId) => (planos || []).find(p => (p.nivel_id || SIN_NIVEL) === (nivelId || SIN_NIVEL)) || null;
+// (17-oct) LA HORA DEL ESCANEO. Un plano que se sube al terminar el escaneo no manda hora: la pone el servidor (como antes).
+// Uno que se sube TARDE (recogido porque la respuesta del escáner se perdió, o que esperó señal) lleva la hora en que se
+// escaneó, para que quede en el historial detrás de un plano más nuevo de su nivel en vez de taparlo. Esa hora sale del reloj
+// del teléfono: se pasa a la hora del servidor con el desfase que se midió en las respuestas (app.js, encabezado Date), así un
+// teléfono con la fecha mal puesta no lo adelanta; y nunca después de ahora (del servidor). Sin desfase medido todavía, la del
+// teléfono tal cual; el servidor de todos modos no acepta una del futuro (sql/fotos-17-planos-hora.sql).
+export function horaDelEscaneo(iso, ahora = Date.now(), desfase = desfaseDelReloj()){
+  const t = msDe(iso); if(!t) return null;
+  return new Date(Math.min(t, ahora) + (Number(desfase) || 0)).toISOString();
+}
+// La hora (del teléfono) de la parte i de un escaneo con dos niveles: cada parte 1 ms después de la anterior, como cuando el
+// servidor ponía la suya al subirlas una tras otra. Así dos partes nunca empatan (con el mismo nivel, cuál se veía era al azar).
+export function horaDeParte(iso, i){ const t = msDe(iso); return t ? new Date(t + (i || 0)).toISOString() : null; }
+// La fila como se sube tarde: con la hora del escaneo (`escaneado`; las que apuntó la versión anterior solo traen `guardado`,
+// cuándo se apuntaron). Así el orden del servidor es el mismo que el del teléfono mientras esperaba (conPendientes).
+export function filaConHora(x){
+  if(!x || !x.fila || x.fila.created_at) return x && x.fila;
+  const h = horaDelEscaneo(x.escaneado || x.guardado);
+  return h ? Object.assign({}, x.fila, { created_at: h }) : x.fila;
+}
+// Una hora como número. Postgres manda microsegundos ("…:00.123456+00:00"): se quedan los milisegundos.
+function msDe(s){
+  if(!s) return 0;
+  let t = Date.parse(s); if(isFinite(t)) return t;
+  const m = /^(.*?\.\d{3})\d+(.*)$/.exec(String(s)); t = m ? Date.parse(m[1] + m[2]) : NaN;
+  return isFinite(t) ? t : 0;
+}
+// Del más nuevo al más viejo por su hora (los que no tienen, al final, en el orden en que venían).
+export function ordenarPlanos(lista){
+  return (lista || []).map((p, i) => ({ p, i, t: msDe(p && p.created_at) })).sort((a, b) => (b.t - a.t) || (a.i - b.i)).map(x => x.p);
+}
+// Los planos de un trabajo junto con los que esperan señal en este teléfono (su hora: la misma con que se van a subir).
+function conPendientes(lista, trabajoId){
+  const pend = leerPendientes().filter(x => x && x.fila && x.fila.trabajo_id === trabajoId && !(lista || []).some(p => p.id === x.fila.id))
+    .map(x => Object.assign({ created_at: x.guardado }, filaConHora(x), { _pendiente: true }));
+  return ordenarPlanos(pend.reverse().concat(lista || []));
+}
 // El escaneo sale del iPhone con el ángulo con que se sostuvo el teléfono. Field Reports lo endereza al
 // recibirlo (sus pasos, en el mismo orden): girarlo a escuadra, escuadrar paredes, juntar las paredes que son
 // la misma, cerrar esquinas chicas. Su queja del 13-oct: "los planos salen de lado". Se hace sobre una copia
@@ -278,6 +315,7 @@ async function cargar(){
   }catch(e){ PLANOS = []; CARGADO = 'error'; }
   pintar();
   subirPendientes();
+  recogerEscaneos(id);
 }
 // Cuántos pisos tienen plano, para la pestaña ("Floor Plan (2)"). Cada piso cuenta una vez aunque se haya guardado
 // varias veces; uno sin piso cuenta como uno. Se pinta al abrir el proyecto (consulta chiquita, sin los planos)
@@ -301,6 +339,8 @@ function nivelesConPlanos(){
   if(PLANOS.some(p => !p.nivel_id) || !l.length) l.push({ id: SIN_NIVEL, nombre: NIVELES.length ? 'No level' : 'Floor Plan' });
   return l;
 }
+// El plano de un nivel para el 3D: el del servidor o el que espera señal en este teléfono, el más nuevo.
+function plano3d(nivelId){ return T ? planoDe(conPendientes(PLANOS, T.id), nivelId) : null; }
 function nivelElegido(){
   const l = nivelesConPlanos();
   if(!l.some(n => n.id === NIV_SEL)) NIV_SEL = (l.find(n => planoDe(PLANOS, n.id)) || l[0]).id;
@@ -314,11 +354,13 @@ export function cuartosParaLaCamara(niveles, cuartos, nivelBase){
   (niveles || []).forEach(n => { por[n.nombre] = (por[n.nombre] || []).concat((cuartos || []).filter(c => c.nivel_id === n.id).map(c => String(c.nombre || '').trim()).filter(Boolean)); });
   return { cuartosPorNivel: por, cuartosDelNivel: por[nivelBase] || [] };
 }
-export function abrir(trabajo, niveles, alNivel, cuartos){
+// `nivelesListos` (17-oct): false mientras el proyecto todavía no trae sus niveles (un escaneo recogido espera a que lleguen).
+export function abrir(trabajo, niveles, alNivel, cuartos, nivelesListos){
   CUARTOS_P = cuartos || [];
-  if(!T || T.id !== trabajo.id){ PLANOS = []; NIV_SEL = null; PL_CERRADO = false; ZOOM = 1; VISTA = '2d'; CARGADO = ''; AVISO = ''; }
-  T = trabajo; NIVELES = niveles || []; AL_NIVEL = alNivel || null;
+  if(!T || T.id !== trabajo.id){ PLANOS = []; NIV_SEL = null; PL_CERRADO = false; ZOOM = 1; VISTA = '2d'; CARGADO = ''; AVISO = ''; RECOGER_DESPUES = ''; }
+  T = trabajo; NIVELES = niveles || []; AL_NIVEL = alNivel || null; NIV_LISTOS = nivelesListos !== false;
   if(CARGADO !== T.id && CARGADO !== 'cargando') cargar(); else pintar();
+  if(NIV_LISTOS && RECOGER_DESPUES === T.id && CARGADO !== 'cargando'){ RECOGER_DESPUES = ''; recogerEscaneos(T.id); }
 }
 export function pintar(){
   const caja = $('#panel-plano'); if(!caja || !T) return;
@@ -346,7 +388,9 @@ export function pintar(){
   const det = (k, v) => `<div class="pl-det"><span>${k}</span><b>${v}</b></div>`;
   const detalles = res ? det('Total Area', fmtPies(res.area) + ' sq ft') + det('Rooms', res.cuartos) + det('Exterior Walls', fmtPies(res.murosExt) + ' lf') + det('Ceiling Height', res.techo ? pies(res.techo) : '—') + det('Units', 'ft / in')
     : '<p class="pl-nada">Scan this floor to see its area, rooms and walls.</p>';
-  const herrVista = `<div class="pl-seg"><button type="button" class="${VISTA === '2d' ? 'on' : ''}" data-pl-vista="2d">2D</button><button type="button" class="${VISTA === '3d' ? 'on' : ''}" data-pl-vista="3d">3D</button></div>`;
+  // 3D: solo con un plano en este nivel (también uno que espera señal en este teléfono: recién escaneado en un sótano).
+  const p3 = plano3d(niv.id);
+  const herrVista = `<div class="pl-seg"><button type="button" class="${VISTA === '2d' ? 'on' : ''}" data-pl-vista="2d">2D</button><button type="button" class="${VISTA === '3d' ? 'on' : ''}" data-pl-vista="3d"${p3 ? (p3._pendiente ? ' title="Last scan on this phone (not uploaded yet)"' : '') : ' disabled'}>3D</button></div>`;
   const zoom = `<div class="pl-zoomer"><button type="button" data-pl-zoom="-1" aria-label="Zoom out">${IC('menos')}</button><span>${Math.round(ZOOM * 100)}%</span><button type="button" data-pl-zoom="1" aria-label="Zoom in">${IC('mas')}</button></div>`;
   caja.classList.toggle('pl-cerrado', PL_CERRADO);
   caja.innerHTML = `
@@ -389,7 +433,9 @@ export function pintar(){
 }
 // Su pedido: en la computadora el plano tiene la prioridad pero SIN esconder las opciones (pestañas, cabecera).
 // El cuadro del plano usa lo que queda de pantalla debajo de lo demás y el plano entra completo ahí (se acerca con +).
-export function enfocar(){ medir(); }
+// (17-oct) Al entrar a Floor Plan con los planos ya cargados (el mismo proyecto otra vez, o "Open it" de Home), las copias del
+// escáner se vuelven a mirar: cargar() solo lo hace la primera vez, y una que no se pudo guardar se quedaba sin reintentar.
+export function enfocar(){ medir(); if(T && CARGADO === T.id) recogerEscaneos(T.id); }
 function medir(){
   const l = $('#panel-plano .pl-lienzo'); const m = $('#main');
   // Solo con la pestaña Floor Plan a la vista: escondida (otra pestaña, otra pantalla) no se mide ni se fija nada.
@@ -560,10 +606,12 @@ export async function subirPendientes(aMano){
       if(!x || !x.fila) continue;
       if(x.error && !aMano) continue;
       try{
-        const g = await subirFila(x.fila, aMano ? 3 : 1);
+        // Con la hora en que se escaneó (17-oct): sin ella el servidor le ponía la de la subida y un escaneo de ayer tapaba
+        // al plano que otro subió hoy de ese nivel. Las que apuntó la versión anterior: la hora en que se apuntaron.
+        const g = await subirFila(filaConHora(x), aMano ? 3 : 1);
         quitarPendiente(x.fila.id); subidas++;
         if(T && g.trabajo_id ? g.trabajo_id === T.id : (T && x.fila.trabajo_id === T.id)){
-          if(!PLANOS.some(p => p.id === g.id)) PLANOS = [g].concat(PLANOS);
+          if(!PLANOS.some(p => p.id === g.id)) PLANOS = ordenarPlanos([g].concat(PLANOS));   // por la hora del escaneo (17-oct)
           pintarConteo(pisosConPlano(PLANOS));
         }
       }catch(e){
@@ -577,66 +625,236 @@ export async function subirPendientes(aMano){
   else pintar();
 }
 if(typeof window !== 'undefined'){
-  window.addEventListener('online', () => subirPendientes());
-  document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible') subirPendientes(); });
+  // (17-oct) Y después, las copias que el escáner dejó en el teléfono (una que no cupo en la lista del teléfono se reintenta
+  // sola al volver la señal). Al regresar a la app, un segundo después: el escáner cierra con una animación y su copia se
+  // escribe al final de ella.
+  window.addEventListener('online', () => { subirPendientes().catch(() => {}).then(revisarTelefono); });
+  document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible') subirPendientes().catch(() => {}).then(() => setTimeout(revisarTelefono, 1000)); });
 }
 
 // ---------- escanear ----------
+const rs = () => (typeof window !== 'undefined' && window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.RoomScan) || null;
+const nuevoId = () => (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID()
+  : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); });
+// (17-oct) El id de cada fila sale de la ENTREGA del escaneo: la primera fila es la entrega misma y las demás (un escaneo
+// con dos niveles) se sacan de ella. Si el mismo escaneo llega dos veces (la respuesta del escáner y la copia que dejó en
+// el teléfono) trae los mismos ids: el servidor dice 409 y no se repite nada.
+const ES_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+export function idDeParte(entrega, i){
+  const e = String(entrega || '').toLowerCase();
+  if(!ES_UUID.test(e)) return nuevoId();
+  if(!i) return e;
+  const s = e + ':' + i; let a = 0x811c9dc5, b = 0x9e3779b9;
+  for(let k = 0; k < s.length; k++){ const c = s.charCodeAt(k); a = Math.imul(a ^ c, 16777619) >>> 0; b = Math.imul(b ^ c, 2246822519) >>> 0; }
+  return e.slice(0, 24) + (a.toString(16).padStart(8, '0') + b.toString(16).padStart(8, '0')).slice(0, 12);
+}
+// (17-oct) Con el escáner abierto la app no se recarga sola por una versión nueva (app.js, ocupado()).
+function marcarEscaner(on){ if(typeof document !== 'undefined' && document.body && document.body.classList) document.body.classList.toggle('con-escaner', !!on); }
+// La copia que el escáner dejó en el teléfono se suelta SOLO cuando el plano ya está a salvo. Aparato viejo: no existe.
+function soltarEscaneos(tid, ids){
+  const RS = rs(); ids = (ids || []).filter(Boolean);
+  if(!ids.length || !RS || !RS.soltar) return;
+  try{ const x = RS.soltar({ trabajo: tid, ids }); if(x && x.catch) x.catch(() => {}); }catch(e){}
+}
+// Lo que trajo el escáner, listo para guardar. UN ESCANEO CON DOS NIVELES ("Otro nivel" a medio escaneo) se guarda
+// partido: una fila por nivel, cada una en SU piso del proyecto. Antes se guardaba todo bajo el primero, se dibujaba solo
+// el primero y el área los sumaba.
+function partesDelEscaneo(r, niv){
+  // Los niveles REALES del trabajo viajan a la bandeja de la cámara; el que se escoja ahí es el que manda.
+  if(r.nivelBase){ const m = NIVELES.find(n => n.nombre === r.nivelBase); if(m) niv = m; }
+  // La planta estándar que se escogió en la cámara (sótano, 1st Floor…) le da nombre al nivel en la hoja, igual
+  // que en Field Reports; los niveles con nombre propio ya vienen en inspection.nombresDeNivel.
+  if(r.nivelBase && !r._nivelBase && PLANTAS.includes(r.nivelBase)) r._nivelBase = r.nivelBase;
+  r.job = { client: T.cliente || '', address: T.direccion || '', date: String(r._escaneado || new Date().toISOString()).slice(0, 10) };
+  const niveles = plano.floorplanLevels(prepararPlano(r));
+  const nombres = (r.inspection && r.inspection.nombresDeNivel) || {};
+  const partes = (niveles.length > 1 ? niveles : [null]).map(L => {
+    const d = prepararPlano(L == null ? r : Object.assign({}, r, { _nivel: L }));   // se guarda ya derecho
+    const nombre = L == null ? '' : String(nombres[String(L)] || (L === niveles[0] ? (r.nivelBase || '') : ''));
+    const n = L == null || L === niveles[0] ? (NIVELES.find(x => x.nombre === nombre) || niv) : (NIVELES.find(x => x.nombre === nombre) || null);
+    return { d, n, res: resumenPlano(d) };
+  }).filter(x => x.res.cuartos);
+  // La fila no lleva hora: la del escaneo (el aparato la pone en _escaneado) solo se manda si se sube tarde (filaConHora).
+  const filas = partes.map((x, i) => ({ id: idDeParte(r._entrega, i), trabajo_id: T.id, nivel_id: x.n && x.n.id !== SIN_NIVEL ? x.n.id : null, data: x.d, area_sqft: x.res.area, cuartos: x.res.cuartos, muros_ext_ft: x.res.murosExt, techo_ft: x.res.techo || null }));
+  return { niv, partes, filas };
+}
+// (17-oct) El nivel de un escaneo recogido: el que estaba en pantalla al empezar a escanear (el aparato lo guardó en
+// _nivelPedido), como si la respuesta hubiera llegado. Si ese nivel ya no existe: 'No level'.
+function nivelPedidoDe(e){
+  return NIVELES.find(n => n.id === e._nivelPedido) || { id: SIN_NIVEL, nombre: NIVELES.length ? 'No level' : 'Floor Plan' };
+}
+// GUARDAR UN ESCANEO, en dos pasos. 1) El teléfono (al instante, sin red): las filas a la lista del teléfono; si cupieron,
+// la copia del escáner se suelta ya (el plano está a salvo). 2) El servidor. Si la lista no cupo, la copia del escáner se
+// suelta solo cuando el servidor lo confirmó.
+function apuntarEscaneo(r, prep){
+  const { partes, filas } = prep, ids = new Set(filas.map(f => f.id));
+  // La misma entrega no se apunta dos veces.
+  const pend = leerPendientes().filter(x => !(x && x.fila && ids.has(x.fila.id)));
+  // Cada parte con la hora en que se escaneó (la suya, 1 ms después de la anterior): con esa se sube si espera señal.
+  const ahora = Date.now();
+  filas.forEach((f, i) => pend.push({ fila: f, nivel: partes[i].n ? partes[i].n.nombre : 'No level', guardado: new Date(ahora + i).toISOString(), escaneado: horaDeParte(r._escaneado, i) }));
+  const enTelefono = escribirPendientes(pend);
+  if(enTelefono) soltarEscaneos(filas[0].trabajo_id, [r._entrega]);
+  return enTelefono;
+}
+// `recuperado` = vino de la copia del escáner (la respuesta se perdió): un solo intento, la lista del teléfono sigue sola.
+async function subirEscaneo(r, prep, recuperado, enTelefono){
+  const { niv, partes, filas } = prep, tid = filas[0].trabajo_id, ids = new Set(filas.map(f => f.id));
+  const antes = recuperado ? 'Recovered a floor plan scan that was not saved. ' : '';
+  const intentos = recuperado && enTelefono ? 1 : 3, guardadas = [];
+  let sinSenal = 0;
+  for(const [i, fila] of filas.entries()){
+    // Recogido: con la hora en que se escaneó. Recién escaneado: sin hora, la pone el servidor (un reloj mal puesto no decide).
+    const f = recuperado ? filaConHora({ fila, escaneado: horaDeParte(r._escaneado, i) }) : fila;
+    try{ guardadas.push(await subirFila(f, intentos)); quitarPendiente(fila.id); }
+    catch(e){
+      if(enTelefono && esErrorDeRed(e)){ sinSenal++; continue; }
+      // Otro error (no la señal): el escaneo se QUEDA en el teléfono con su razón; "Upload now" lo vuelve a intentar.
+      if(enTelefono){ const l = leerPendientes(); const y = l.find(z => z.fila && z.fila.id === fila.id); if(y){ y.error = String(e && e.message || e); escribirPendientes(l); } }
+      throw e;
+    }
+  }
+  if(!enTelefono) soltarEscaneos(tid, [r._entrega]);   // la lista del teléfono no cupo: se suelta ya confirmado por el servidor
+  if(!T || T.id !== tid) return;
+  if(guardadas.length) PLANOS = ordenarPlanos(guardadas.concat(PLANOS.filter(p => !ids.has(p.id))));
+  pintarConteo(pisosConPlano(PLANOS));
+  // Más viejo que el plano que ya tiene su nivel (recogido días después, o el reloj de otro teléfono): queda de historial, el
+  // nivel en pantalla no cambia y no se dice que es el plano de ese nivel.
+  const n0 = partes[0].n || niv, actual = planoDe(conPendientes(PLANOS, tid), n0.id);
+  if(actual && !ids.has(actual.id)){
+    avisar((recuperado ? 'Recovered an earlier scan of ' + n0.nombre + ' that was not saved. It is kept as history; ' : 'The scan of ' + n0.nombre + ' is saved as history: ')
+      + 'the newer plan of ' + n0.nombre + ' stays.' + (sinSenal ? ' It is saved on this phone and uploads by itself when there is signal.' : ''), true);
+    return;
+  }
+  NIV_SEL = n0.id;
+  if(sinSenal){
+    avisar(antes + (sinSenal === filas.length ? 'No signal here. ' : 'Part of the scan could not upload (no signal). ')
+      + 'The floor plan is saved on this phone and uploads by itself when there is signal. You do not need to scan again.', true);
+    return;
+  }
+  const res = partes[0].res;
+  avisar(antes + (partes.length > 1
+    ? 'Floor plans saved: ' + partes.map(x => (x.n ? x.n.nombre : 'No level') + ' (' + fmtPies(x.res.area) + ' sq ft)').join(', ') + '.'
+    : 'Floor plan saved for ' + niv.nombre + ' (' + fmtPies(res.area) + ' sq ft, ' + res.cuartos + ' rooms).'), true);
+}
+// Guarda el escaneo que acaba de llegar del escáner: primero el teléfono, después el servidor.
+async function guardarEscaneo(r, prep){
+  if(!prep.partes.length){ soltarEscaneos(T.id, [r._entrega]); avisar('The scan came back without any room. Nothing was saved - try again walking slowly along the walls.'); return; }
+  const enTelefono = apuntarEscaneo(r, prep);
+  await subirEscaneo(r, prep, false, enTelefono);
+}
+// (17-oct) LO QUE EL ESCÁNER GUARDÓ Y LA PÁGINA NUNCA RECIBIÓ: con el escáner abierto iOS mató el motor web, la página se
+// recargó y el escaneo se perdió sin aviso (su escaneo 2 del 17-oct). Ahora el escáner deja cada escaneo en el teléfono
+// antes de responder, y aquí se guarda como cualquier escaneo. Lo que ya está en Floor Plan o en la lista del teléfono
+// solo se suelta. Solo el paso del teléfono se espera (al instante); la subida sigue sola, sin detener Scan New Plan ni
+// Delete plan. `propio` = lo llama escanear() (ya tiene OCUPADO). Una a la vez: la que llega espera a la que va. Devuelve
+// cuántos escaneos se recogieron. Aparato viejo (sin pendientes): nada.
+let RECOGIENDO = null, NIV_LISTOS = true, RECOGER_DESPUES = ''; const NO_SE_PUDO = new Set(), EN_CAMINO = new Set();
+function recogerEscaneos(tid, propio){
+  if(RECOGIENDO) return RECOGIENDO.then(() => recogerEscaneos(tid, propio));
+  RECOGIENDO = recoger(tid, propio).catch(e => { console.warn('recoger escaneos', e); return 0; }).finally(() => { RECOGIENDO = null; });
+  return RECOGIENDO;
+}
+async function recoger(tid, propio){
+  const RS = rs();
+  if(!RS || !RS.pendientes || !T || T.id !== tid || CARGADO === 'falta-sql' || (!propio && OCUPADO)) return 0;
+  // Sin los niveles del proyecto todavía (recién abierto, o no llegaron) se espera a que lleguen: si no, caería en 'No level'.
+  // También desde Scan New Plan: la copia se queda en el teléfono y se guarda cuando abrir() trae los niveles.
+  if(!NIV_LISTOS){ RECOGER_DESPUES = tid; return 0; }
+  let r; try{ r = await RS.pendientes({ trabajo: tid }); }catch(e){ return 0; }
+  const lista = ((r && r.escaneos) || []).filter(e => e && typeof e === 'object' && ES_UUID.test(String(e._entrega || '').toLowerCase()) && !NO_SE_PUDO.has(e._entrega) && !EN_CAMINO.has(e._entrega));
+  if(!lista.length || !T || T.id !== tid) return 0;
+  let n = 0;
+  for(const e of lista){
+    if(!T || T.id !== tid) break;
+    let prep;
+    try{ prep = partesDelEscaneo(e, nivelPedidoDe(e)); }
+    catch(err){ NO_SE_PUDO.add(e._entrega); console.warn('escaneo sin entregar', err); continue; }
+    const ya = new Set((CARGADO === tid ? PLANOS : []).map(p => p.id).concat(leerPendientes().map(x => x && x.fila && x.fila.id)));
+    if(prep.filas.every(f => ya.has(f.id))){ soltarEscaneos(tid, [e._entrega]); continue; }   // ya estaba a salvo (o no trae ningún cuarto)
+    n++;
+    const enTelefono = apuntarEscaneo(e, prep);
+    avisar('Recovered a floor plan scan that was not saved. Saving it…', true);
+    EN_CAMINO.add(e._entrega);
+    subirEscaneo(e, prep, true, enTelefono).catch(err => {
+      const enLista = leerPendientes().some(x => x && x.fila && prep.filas.some(f => f.id === x.fila.id));
+      if(T && T.id === tid) avisar('Recovered a floor plan scan that was not saved, but it could not be uploaded. ' + String(err && err.message || err) + (enLista ? ' It stays saved on this phone.'
+        : esErrorDeRed(err) ? ' It stays on this phone and is saved by itself when there is signal.' : ' It stays on this phone: open Floor Plan again to retry.'));
+    }).finally(() => EN_CAMINO.delete(e._entrega));
+  }
+  return n;
+}
+// (17-oct) Los proyectos con un escaneo que el escáner dejó en este teléfono y ninguna página guardó (de cualquier proyecto):
+// [{ trabajo, n, desde }]. Para el aviso de Home y para abrir ese proyecto directo en Floor Plan. Aparato viejo: [].
+export async function trabajosConEscaneoSinGuardar(){
+  const RS = rs(); if(!RS || !RS.pendientes) return [];
+  try{ const r = await RS.pendientes({}); return ((r && r.trabajos) || []).filter(x => x && x.trabajo && Number(x.n) > 0).map(x => ({ trabajo: String(x.trabajo).toLowerCase(), n: Number(x.n), desde: x.desde || '' })); }
+  catch(e){ return []; }
+}
+// (17-oct) VOLVER A MIRAR las copias del escáner: cuando el aparato avisa que dejó una (una página recargada con el escáner
+// abierto no recibe la respuesta de scan(), pero sí este aviso), al volver la señal y al regresar a la app. Las del último
+// proyecto abierto en Floor Plan se guardan; Home dice cuáles quedan. Con un escaneo en curso en esta página, nada: su
+// respuesta llega por scan().
+let LISTA_INICIO = null;
+export function usarListaDeInicio(f){ LISTA_INICIO = f; }
+async function revisarTelefono(){
+  if(OCUPADO) return;
+  try{
+    if(T && CARGADO === T.id) await recogerEscaneos(T.id);
+    if(LISTA_INICIO) await pintarAvisoDeInicio(LISTA_INICIO());
+  }catch(e){}
+}
+// El aviso de Home: uno por proyecto (solo los de la lista de esta cuenta), con "Open it". Se quita solo cuando ya se guardó.
+let SEQ_INICIO = 0;
+export async function pintarAvisoDeInicio(proyectos){
+  const caja = typeof document !== 'undefined' && document.getElementById ? document.getElementById('inicioPlanos') : null; if(!caja) return;
+  const seq = ++SEQ_INICIO, l = await trabajosConEscaneoSinGuardar();
+  if(seq !== SEQ_INICIO) return;
+  const filas = l.map(x => ({ x, t: (proyectos || []).find(p => p && String(p.id).toLowerCase() === x.trabajo) })).filter(y => y.t);
+  caja.hidden = !filas.length;
+  caja.innerHTML = filas.map(({ x, t }) => `<div class="ini-plano">${IC('escanear')}<span><b>${x.n === 1 ? 'A floor plan scan' : x.n + ' floor plan scans'} of ${esc(t.cliente || t.direccion || 'a project')} ${x.n === 1 ? 'was' : 'were'} not saved yet.</b><br><small>${x.n === 1 ? 'It is' : 'They are'} safe on this phone. Open the project to save ${x.n === 1 ? 'it' : 'them'}.</small></span><button type="button" class="btn btn-outline" data-abrir="${esc(t.id)}">Open it</button></div>`).join('');
+}
 async function escanear(){
   if(OCUPADO) return;
-  const RS = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.RoomScan;
+  const RS = rs();
   if(!RS){ avisar('Scanning works in the Scanova360 app on an iPhone Pro (it needs the LiDAR camera). On the computer you can view and export the plans.'); return; }
   try{ const s = await RS.isSupported(); if(s && s.value === false){ avisar('This iPhone has no LiDAR camera, so it cannot scan a floor plan. It works on the iPhone Pro models (12 Pro and newer).'); return; } }catch(e){}
-  let niv = nivelElegido(); OCUPADO = true; avisar('');
+  const niv = nivelElegido(), tid = T.id; OCUPADO = true; avisar('');
+  let copia = false;
   try{
-    // Los niveles REALES del trabajo viajan a la bandeja de la cámara; el que se escoja ahí es el que manda.
+    // Lo que el escáner dejó en el teléfono sin entregar se apunta primero (solo el paso del teléfono: la subida sigue sola).
+    await recogerEscaneos(tid, true);
+    if(!T || T.id !== tid) return;
+    const entrega = nuevoId();
     const base = niv && niv.id !== SIN_NIVEL ? niv.nombre : '';
     // Los cuartos ya creados del proyecto: la cámara los enseña primero y empareja lo dicho con ellos.
-    const r = await RS.scan(Object.assign({ nivelBase: base, niveles: NIVELES.map(n => n.nombre) }, cuartosParaLaCamara(NIVELES, CUARTOS_P, base)));
-    if(!r || r.cancelled){ OCUPADO = false; if(r && r.error) avisar(r.error); return; }
-    if(r.nivelBase){ const m = NIVELES.find(n => n.nombre === r.nivelBase); if(m) niv = m; }
-    // La planta estándar que se escogió en la cámara (sótano, 1st Floor…) le da nombre al nivel en la hoja, igual
-    // que en Field Reports; los niveles con nombre propio ya vienen en inspection.nombresDeNivel.
-    if(r.nivelBase && !r._nivelBase && PLANTAS.includes(r.nivelBase)) r._nivelBase = r.nivelBase;
-    r.job = { client: T.cliente || '', address: T.direccion || '', date: new Date().toISOString().slice(0, 10) };
-    // UN ESCANEO CON DOS NIVELES ("Otro nivel" a medio escaneo) se guarda partido: una fila por nivel, cada una en
-    // SU piso del proyecto. Antes se guardaba todo bajo el primero, se dibujaba solo el primero y el área los sumaba.
-    const niveles = plano.floorplanLevels(prepararPlano(r));
-    const nombres = (r.inspection && r.inspection.nombresDeNivel) || {};
-    const partes = (niveles.length > 1 ? niveles : [null]).map(L => {
-      const d = prepararPlano(L == null ? r : Object.assign({}, r, { _nivel: L }));   // se guarda ya derecho
-      const nombre = L == null ? '' : String(nombres[String(L)] || (L === niveles[0] ? (r.nivelBase || '') : ''));
-      const n = L == null || L === niveles[0] ? (NIVELES.find(x => x.nombre === nombre) || niv) : (NIVELES.find(x => x.nombre === nombre) || null);
-      return { d, n, res: resumenPlano(d) };
-    }).filter(x => x.res.cuartos);
-    if(!partes.length){ OCUPADO = false; avisar('The scan came back without any room. Nothing was saved - try again walking slowly along the walls.'); return; }
-    const guardadas = [];
-    const filas = partes.map(x => ({ id: crypto.randomUUID(), trabajo_id: T.id, nivel_id: x.n && x.n.id !== SIN_NIVEL ? x.n.id : null, data: x.d, area_sqft: x.res.area, cuartos: x.res.cuartos, muros_ext_ft: x.res.murosExt, techo_ft: x.res.techo || null }));
-    // PRIMERO al teléfono: si no hay señal (un sótano), el escaneo no se pierde.
-    const pend = leerPendientes();
-    filas.forEach((f, i) => pend.push({ fila: f, nivel: partes[i].n ? partes[i].n.nombre : 'No level', guardado: new Date().toISOString() }));
-    const enTelefono = escribirPendientes(pend);
-    let sinSenal = 0;
-    for(const fila of filas){
-      try{ guardadas.push(await subirFila(fila)); quitarPendiente(fila.id); }
-      catch(e){
-        if(enTelefono && esErrorDeRed(e)){ sinSenal++; continue; }
-        // Otro error (no la señal): el escaneo se QUEDA en el teléfono con su razón; "Upload now" lo vuelve a intentar.
-        if(enTelefono){ const l = leerPendientes(); const y = l.find(z => z.fila && z.fila.id === fila.id); if(y){ y.error = String(e && e.message || e); escribirPendientes(l); } }
-        throw e;
-      }
-    }
-    PLANOS = guardadas.slice().reverse().concat(PLANOS); NIV_SEL = (partes[0].n || niv).id; OCUPADO = false; pintarConteo(pisosConPlano(PLANOS));
-    if(sinSenal){
-      avisar((sinSenal === filas.length ? 'No signal here. ' : 'Part of the scan could not upload (no signal). ')
-        + 'The floor plan is saved on this phone and uploads by itself when there is signal. You do not need to scan again.', true);
+    // `trabajo` + `entrega` + `nivelId` (17-oct): el escáner deja el escaneo en el teléfono antes de responder (aparato viejo: lo ignora).
+    let r;
+    marcarEscaner(true);
+    try{ r = await RS.scan(Object.assign({ nivelBase: base, niveles: NIVELES.map(n => n.nombre) }, cuartosParaLaCamara(NIVELES, CUARTOS_P, base), { trabajo: tid, entrega, nivelId: niv && niv.id !== SIN_NIVEL ? niv.id : '' })); }
+    finally{ marcarEscaner(false); }
+    // Cancelado sin error: se dice (antes no salía nada y parecía guardado).
+    if(!r || r.cancelled){ avisar(r && r.error ? r.error : 'Scan cancelled. No floor plan was saved.'); return; }
+    // Llegó vacía o dañada (un aparato que sí deja la copia siempre manda su entrega): la copia del teléfono manda.
+    if(!r._entrega && RS.pendientes && !(Array.isArray(r.rooms) && r.rooms.length)){
+      // Sin los niveles del proyecto todavía, la copia espera en el teléfono (recoger no la toca): no es "sin cuartos".
+      if(!NIV_LISTOS){ RECOGER_DESPUES = tid; avisar('The scan is safe on this phone. It is saved as soon as the levels of this project load (open the project again if this stays).', true); return; }
+      if(!(await recogerEscaneos(tid, true))) avisar('The scan came back without any room. Nothing was saved - try again walking slowly along the walls.');
       return;
     }
-    const res = partes[0].res;
-    avisar(partes.length > 1
-      ? 'Floor plans saved: ' + partes.map(x => (x.n ? x.n.nombre : 'No level') + ' (' + fmtPies(x.res.area) + ' sq ft)').join(', ') + '.'
-      : 'Floor plan saved for ' + niv.nombre + ' (' + fmtPies(res.area) + ' sq ft, ' + res.cuartos + ' rooms).', true);
-  }catch(e){ OCUPADO = false; avisar('Could not save the floor plan. ' + String(e && e.message || e) + (T && leerPendientes().some(x => x.fila && x.fila.trabajo_id === T.id) ? ' The scan stays saved on this phone.' : '')); }
+    const delAparato = !!r._entrega;
+    if(!r._entrega) r._entrega = entrega;   // aparato viejo: no la devuelve
+    const prep = partesDelEscaneo(r, niv);
+    copia = delAparato && !!RS.pendientes;   // el aparato dejó su copia: se suelta solo cuando el plano está a salvo
+    await guardarEscaneo(r, prep);
+  }catch(e){
+    const enLista = T && leerPendientes().some(x => x.fila && x.fila.trabajo_id === T.id);
+    // La lista del teléfono no cupo y la subida falló: la copia del escáner sigue en el teléfono (Floor Plan la reintenta).
+    const quedaCopia = copia && !enLista;
+    avisar('Could not save the floor plan. ' + String(e && e.message || e) + (enLista ? ' The scan stays saved on this phone.'
+      : quedaCopia ? (esErrorDeRed(e) ? ' The scan stays on this phone and is saved by itself when there is signal. You do not need to scan again.' : ' The scan stays on this phone: open Floor Plan again to retry.') : ''));
+  }
+  finally{ OCUPADO = false; }
 }
 
 // ---------- exportar (PNG del plano, como la foto: hoja de compartir en el teléfono) ----------
@@ -704,6 +922,9 @@ function grande(){
 function cerrarGrande(){ const c = $('#plGrande'); if(c){ c.hidden = true; c.innerHTML = ''; } document.body.classList.remove('con-visor'); }
 
 export function conectar(){
+  // (17-oct) El aparato avisa cada vez que deja un escaneo en el teléfono (RoomPlanPlugin, "escaneoEnTelefono").
+  const RS = rs();
+  if(RS && RS.addListener){ try{ const x = RS.addListener('escaneoEnTelefono', () => { revisarTelefono(); }); if(x && x.catch) x.catch(() => {}); }catch(e){} }
   document.addEventListener('click', async (e) => {
     const q = (s) => e.target.closest(s); let el;
     if(q('[data-pl-grande-x]')){ cerrarGrande(); return; }
@@ -718,8 +939,12 @@ export function conectar(){
       pintar(); if(!PL_CERRADO){ const m = $('#main'); if(m) m.scrollTop = 0; } return; }
     if((el = q('[data-pl-vista]'))){
       if(el.dataset.plVista === '3d'){
-        const RS = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.RoomScan;
-        if(RS && RS.viewModel){ try{ const r = await RS.viewModel(); if(r && r.error) avisar('3D view: ' + r.error + ' The 3D model is available right after a scan on this iPhone.'); }catch(err){ avisar('Could not open the 3D view.'); } }
+        // (17-oct) Solo con un plano guardado en este nivel, y solo el escaneo de ESE plano: antes salía en AR el último
+        // escaneo del teléfono aunque nunca se hubiera guardado, y parecía que sí estaba guardado. Cuenta también el que
+        // espera señal en este teléfono (es el más nuevo de su nivel).
+        const p = plano3d(nivelElegido().id); if(!p) return;
+        const RS = rs();
+        if(RS && RS.viewModel){ try{ const r = await RS.viewModel({ entrega: (p.data && p.data._entrega) || '-' }); if(r && r.error) avisar('3D view: ' + r.error + ' The 3D model opens only on the iPhone that made the scan, for its last scan, until the app is closed.'); }catch(err){ avisar('Could not open the 3D view.'); } }
         else avisar('The 3D view opens in the Scanova360 app on the iPhone, right after scanning a floor.');
         return;
       }

@@ -101,7 +101,7 @@ ok('SQL: tabla con candado, sin borrar filas, anon fuera, ASCII puro', /create t
 const js = fs.readFileSync(new URL('../docs/planos.js', import.meta.url), 'utf8');
 ok('escanea con el escáner del iPhone (RoomScan) y avisa si no hay LiDAR', /Plugins\.RoomScan/.test(js) && /isSupported/.test(js) && /no LiDAR/.test(js));
 // 16-oct: la subida va por subirFila (con reintentos); solo cuenta como guardado si el servidor devolvió la fila con su id.
-ok('confirma que de verdad se guardó antes de decir "saved"', /return=representation/.test(js) && /if\(g\.ok\)\{ const x = \(await g\.json\(\)\)\[0\]; if\(x && x\.id\) return x; \}/.test(js) && /guardadas\.push\(await subirFila\(fila\)\)/.test(js));
+ok('confirma que de verdad se guardó antes de decir "saved"', /return=representation/.test(js) && /if\(g\.ok\)\{ const x = \(await g\.json\(\)\)\[0\]; if\(x && x\.id\) return x; \}/.test(js) && /guardadas\.push\(await subirFila\(f, intentos\)\)/.test(js));
 // 16-oct: los PASOS SIN PUERTA (arcos) llegan a la cámara con las puertas: un 7o número 1.
 { const d0 = JSON.parse(fs.readFileSync(new URL('./fixtures/plano_real.json', import.meta.url), 'utf8')); const lr = (d0.data || d0).rooms.find(x => x.roomName === 'Living Room');
   const s = PL.senaParaCamara(lr.openings[0], 'openings');
